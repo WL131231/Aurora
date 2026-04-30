@@ -38,8 +38,9 @@
 | `01-bollinger.jpg` | Bollinger Bands |
 | `02-rsi-divergence.jpg` | RSI Divergence |
 | `03-ema.jpg` | EMA |
-| `04-harmonic.jpg` | Harmonic Patterns |
-| `05-ichimoku.jpg` | Ichimoku Cloud |
+| `04-ma-cross.jpg` | MA Cross |
+| `05-harmonic.jpg` | Harmonic Patterns |
+| `06-ichimoku.jpg` | Ichimoku Cloud |
 
 ### 권장 사양
 - 비율: 4:3 (예: 1200×900)

@@ -42,9 +42,11 @@
 - 공통: `__init__.py`, `config.py`, `main.py`, `pyproject.toml`, `tests/`
 
 ## 거래소 / 페어
-- **1순위 거래소**: Bybit (먼저 동작 확인 후 OKX, Binance 확장)
+- **거래소**: **보류** — 장수가 수수료율 높은 거래소와 별도 컨택 중
+  - 정책: ccxt 통합으로 어떤 거래소든 연결 가능한 구조 (어댑터 한 줄 추가로 확장)
+  - 후보: Bybit / OKX / Binance / 컨택 중인 거래소
 - **1순위 페어**: BTCUSDT, ETHUSDT (둘 다)
-- 추후 확장: OKX, Binance, 알트 페어
+- 추후 확장: 알트 페어
 - 레버리지: 사용자 설정, 10x ~ 50x
 
 ## 협업 규칙

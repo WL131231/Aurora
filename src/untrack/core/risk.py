@@ -6,16 +6,15 @@ Tako 차용:
     - 5가지 트레일링: Moving Target, Moving 2-Target, Breakeven,
       Percent Below Triggers, Percent Below Highest
 
-담당: 팀원 A
+담당: 장수
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Literal
 
-import pandas as pd
+# Note: pandas / Literal 등은 추후 ATR 계산·구체 구현 시 다시 import.
 
 
 class TpSlMode(str, Enum):
@@ -70,18 +69,53 @@ class RiskPlan:
     trailing_mode: TrailingMode
 
 
-def min_sl_pct_by_leverage(leverage: int) -> float:
-    """레버리지별 최소 SL 거리 — 청산 위험 방지.
+def sl_pct_for_leverage(leverage: int) -> float:
+    """레버리지별 SL 거리 (가격 변동 %).
+
+    공식:
+        SL(L) = max(3.0, 0.08 × L)
+
+    근거:
+        - 0.08 × L : 풀시드 진입 시 수수료가 시드를 갉아먹는 정도 기반.
+                     레버리지 높을수록 수수료 부담 큼 → 더 큰 가격 변동 필요.
+        - 3.0% 하한: 작은 레버리지에선 0.8%(=10x×0.08) 같은 SL이 시장 노이즈에
+                     자주 발동(whipsaw) → 최소 3% 보장.
 
     예시:
-        10x → 7%
-        20x → 5%
-        50x → 3%
+        10x → 3.00% (하한 활성)
+        25x → 3.00% (하한 활성)
+        38x → 3.04% (공식 활성)
+        50x → 4.00% (공식 활성, 장수 기준점)
 
-    이 값보다 좁은 SL은 청산선에 근접해 위험.
+    Note: 출발값이고 테스트 결과 따라 조정 가능.
     """
-    # TODO(A): 사용자 룰 확정 후 구현
-    raise NotImplementedError
+    return max(3.0, 0.08 * leverage)
+
+
+def tp_pct_range_for_leverage(leverage: int) -> tuple[float, float]:
+    """레버리지별 TP 범위 (가격 변동 %).
+
+    공식:
+        TP(L) = SL(L) + 2.0 ~ 3.0
+
+    SL 위 +2~3% 영역이 수수료 메꾸고 진짜 순수익이 나는 구간.
+    사용자가 이 범위 내에서 선택 (디폴트 mid = SL + 2.5%).
+
+    Returns:
+        (tp_min, tp_max) 튜플.
+
+    예시:
+        10x → (5.00%, 6.00%)
+        50x → (6.00%, 7.00%)
+    """
+    sl = sl_pct_for_leverage(leverage)
+    return (sl + 2.0, sl + 3.0)
+
+
+# === Deprecated alias (이전 이름) ===
+def min_sl_pct_by_leverage(leverage: int) -> float:
+    """Deprecated: sl_pct_for_leverage 를 사용할 것."""
+    return sl_pct_for_leverage(leverage)
 
 
 def calc_position_size(

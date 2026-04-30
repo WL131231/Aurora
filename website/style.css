@@ -174,13 +174,13 @@ body {
    ===================================================== */
 .bg-image {
     position: absolute;
-    inset: 0;                          /* 컨테이너 정확히 채움 (오버사이즈 X) */
+    inset: 0;                                /* 컨테이너 정확히 채움 */
     background-image: url("assets/aurora-bg.jpg");
     background-size: cover;
-    background-position: center;
+    background-position: center 70%;          /* 아래쪽 (물·바위) 더 보이게 */
     background-repeat: no-repeat;
     opacity: 0;
-    animation: ken-burns 30s ease-in-out infinite;
+    animation: ken-burns 40s ease-in-out infinite;
     /* 부모 .aurora-stage 의 overflow:hidden 으로 ken-burns 가 살짝 넘쳐도 자연스럽게 클립 */
 }
 
@@ -197,11 +197,11 @@ body {
     opacity: 0.4;
 }
 
-/* ken-burns: 미세한 zoom + pan 으로 살아있는 느낌. 과도한 크롭 방지 위해 스케일 작게. */
+/* ken-burns: 매우 미세한 zoom + pan (살아있는 느낌). 크롭 최소화 위해 스케일 작게. */
 @keyframes ken-burns {
-    0%, 100% { transform: scale(1.02) translate(0, 0); }
-    33%      { transform: scale(1.05) translate(-1%, 0.5%); }
-    66%      { transform: scale(1.04) translate(1%, -0.5%); }
+    0%, 100% { transform: scale(1.0)  translate(0, 0); }
+    33%      { transform: scale(1.03) translate(-0.5%, 0.3%); }
+    66%      { transform: scale(1.02) translate(0.5%, -0.3%); }
 }
 
 /* ===== 하단 구름 블롭 (오로라 사진 분위기 살리기) ===== */

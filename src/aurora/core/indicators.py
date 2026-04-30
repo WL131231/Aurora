@@ -261,13 +261,38 @@ def rsi_divergence(
 
 
 def bollinger_bands(close: pd.Series, period: int = 20, std: float = 2.0) -> pd.DataFrame:
-    """볼린저 밴드.
+    """볼린저 밴드 (Bollinger Bands).
+
+    공식:
+        middle = SMA(close, period)
+        sigma  = 표준편차(close, period, ddof=0 = 모집단 분산)
+        upper  = middle + std × sigma
+        lower  = middle - std × sigma
+
+    초기 ``period - 1`` 봉은 NaN.
+
+    Args:
+        close: 종가 시리즈.
+        period: 이동평균 기간 (기본 20).
+        std: 표준편차 배수 (기본 2.0).
 
     Returns:
-        DataFrame with columns: ['upper', 'middle', 'lower']
+        DataFrame with columns: ['upper', 'middle', 'lower'].
+
+    Raises:
+        ValueError: period < 1, std ≤ 0 일 때.
     """
-    # TODO(장수)
-    raise NotImplementedError
+    if period < 1:
+        raise ValueError(f"period 는 1 이상이어야 함 (받은 값: {period})")
+    if std <= 0:
+        raise ValueError(f"std 는 양수여야 함 (받은 값: {std})")
+
+    middle = close.rolling(window=period, min_periods=period).mean()
+    sigma = close.rolling(window=period, min_periods=period).std(ddof=0)
+    upper = middle + std * sigma
+    lower = middle - std * sigma
+
+    return pd.DataFrame({"upper": upper, "middle": middle, "lower": lower})
 
 
 def ma_cross(close: pd.Series, fast: int, slow: int) -> pd.Series:

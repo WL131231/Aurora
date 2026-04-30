@@ -10,7 +10,7 @@ from enum import StrEnum
 
 import pandas as pd
 
-from aurora.core.indicators import ema, rsi, rsi_divergence
+from aurora.core.indicators import bollinger_bands, ema, rsi, rsi_divergence
 
 # ============================================================
 # 공통 dataclass / enum
@@ -49,6 +49,14 @@ class StrategyConfig:
     rsi_period: int = 14
     rsi_div_lb_left: int = 5
     rsi_div_lb_right: int = 5
+
+    # Bollinger Bands (Selectable — 1H 고정)
+    bollinger_period: int = 20
+    bollinger_std: float = 2.0
+    bollinger_proximity_pct: float = 0.005
+    """가장자리 라인에서 안쪽 ``proximity_pct`` 이내 = 진입 zone (예: 0.005 = 0.5%)."""
+    bollinger_squeeze_threshold: float = 0.015
+    """폭(upper-lower) / middle 이 이 값 이하면 squeeze 상태로 진입 보류 (기본 0.015 = 1.5%)."""
 
 
 # ============================================================
@@ -180,7 +188,124 @@ def detect_rsi_divergence(
 
 
 # ============================================================
-# Selectable 지표 (사용자 on/off)
+# Selectable: Bollinger Bands (1H 고정, 횡보장 특화)
+# ============================================================
+
+
+def detect_bollinger_touch(
+    df_1h: pd.DataFrame,
+    config: StrategyConfig,
+) -> list[EntrySignal]:
+    """볼린저 밴드 4-tier 진입 룰 (1H 고정, 양방향 진입+청산 정책).
+
+    우선순위 순:
+        1. **Squeeze 보류**: 폭 / middle ≤ ``squeeze_threshold`` (밴드 좁음, 추세 대기) → []
+        2. **Reversal 진입** (강도 1.5): 직전 봉 종가가 BB 밖 + 현재 봉 종가 안쪽
+           → 위로 찢어졌다 회귀 = SHORT / 아래로 찢어졌다 회귀 = LONG
+        3. **찢어짐 보류**: 현재 봉 종가가 BB 밖 (위 또는 아래) → []
+        4. **Proximity 터치 진입** (강도 1.0): 봉의 high/low 가 가장자리 zone 진입
+           → high ≥ ``upper × (1 - proximity)`` + close 안쪽 = SHORT
+           → low  ≤ ``lower × (1 + proximity)`` + close 안쪽 = LONG
+
+    "양방향 진입+청산": BB 신호 = 진입 신호 + 반대 포지션 청산 신호.
+    구체 동작은 ``signal.compose_entry`` / ``compose_exit`` 가 처리.
+
+    Args:
+        df_1h: 1H OHLC DataFrame (close/high/low 컬럼).
+        config: 전략 설정 (bollinger_period/std/proximity_pct/squeeze_threshold).
+
+    Returns:
+        ``EntrySignal`` 리스트 (마지막 봉 기준).
+    """
+    if df_1h is None or df_1h.empty:
+        return []
+    required = {"close", "high", "low"}
+    if not required.issubset(df_1h.columns):
+        return []
+
+    bb = bollinger_bands(df_1h["close"], period=config.bollinger_period, std=config.bollinger_std)
+    if len(bb) < 2:
+        return []
+
+    last_close = float(df_1h["close"].iloc[-1])
+    last_high = float(df_1h["high"].iloc[-1])
+    last_low = float(df_1h["low"].iloc[-1])
+    last_upper = bb["upper"].iloc[-1]
+    last_lower = bb["lower"].iloc[-1]
+    last_middle = bb["middle"].iloc[-1]
+
+    if pd.isna(last_upper) or pd.isna(last_lower) or pd.isna(last_middle):
+        return []
+
+    last_upper_f = float(last_upper)
+    last_lower_f = float(last_lower)
+    last_middle_f = float(last_middle)
+
+    # ─── 1. Squeeze 보류 ──────────────────────────────────
+    if last_middle_f > 0:
+        narrowness = (last_upper_f - last_lower_f) / last_middle_f
+        if narrowness <= config.bollinger_squeeze_threshold:
+            return []
+
+    # ─── 2. Reversal 진입 (직전 봉 outside → 현재 봉 inside) ───
+    prev_close = float(df_1h["close"].iloc[-2])
+    prev_upper = bb["upper"].iloc[-2]
+    prev_lower = bb["lower"].iloc[-2]
+
+    if not pd.isna(prev_upper) and not pd.isna(prev_lower):
+        prev_upper_f = float(prev_upper)
+        prev_lower_f = float(prev_lower)
+        # 위로 찢어졌다 회귀
+        if prev_close > prev_upper_f and last_close <= last_upper_f:
+            return [EntrySignal(
+                direction=Direction.SHORT,
+                timeframe="1H",
+                source="bollinger_reversal_upper",
+                strength=1.5,
+                note=f"BB 상단 찢어짐 회귀 (prev={prev_close:.4f}>{prev_upper_f:.4f}, "
+                     f"last={last_close:.4f}≤{last_upper_f:.4f})",
+            )]
+        # 아래로 찢어졌다 회귀
+        if prev_close < prev_lower_f and last_close >= last_lower_f:
+            return [EntrySignal(
+                direction=Direction.LONG,
+                timeframe="1H",
+                source="bollinger_reversal_lower",
+                strength=1.5,
+                note=f"BB 하단 찢어짐 회귀 (prev={prev_close:.4f}<{prev_lower_f:.4f}, "
+                     f"last={last_close:.4f}≥{last_lower_f:.4f})",
+            )]
+
+    # ─── 3. 찢어짐 보류 (현재 봉 종가가 BB 밖) ────────────
+    if last_close > last_upper_f or last_close < last_lower_f:
+        return []
+
+    # ─── 4. Proximity 터치 진입 (가장자리 안쪽 zone) ──────
+    upper_zone_start = last_upper_f * (1.0 - config.bollinger_proximity_pct)
+    lower_zone_end = last_lower_f * (1.0 + config.bollinger_proximity_pct)
+
+    signals: list[EntrySignal] = []
+    if last_high >= upper_zone_start:
+        signals.append(EntrySignal(
+            direction=Direction.SHORT,
+            timeframe="1H",
+            source="bollinger_upper",
+            strength=1.0,
+            note=f"BB 상단 zone 진입 (high={last_high:.4f}, zone_start={upper_zone_start:.4f})",
+        ))
+    if last_low <= lower_zone_end:
+        signals.append(EntrySignal(
+            direction=Direction.LONG,
+            timeframe="1H",
+            source="bollinger_lower",
+            strength=1.0,
+            note=f"BB 하단 zone 진입 (low={last_low:.4f}, zone_end={lower_zone_end:.4f})",
+        ))
+    return signals
+
+
+# ============================================================
+# Selectable 지표 라우터 (사용자 on/off)
 # ============================================================
 
 
@@ -188,6 +313,24 @@ def evaluate_selectable(
     df_by_tf: dict[str, pd.DataFrame],
     config: StrategyConfig,
 ) -> list[EntrySignal]:
-    """사용자가 켠 Selectable 지표만 평가해서 신호 리스트 반환."""
-    # TODO(장수): config 플래그 보고 각 지표 평가 (BB, MA Cross, Harmonic, Ichimoku)
-    return []
+    """사용자가 켠 Selectable 지표만 평가해서 신호 리스트 반환.
+
+    각 지표는 자기 고정 TF 의 데이터만 참조 (BB/Harmonic/Ichimoku 등은 1H~4H).
+
+    Args:
+        df_by_tf: TF 별 DataFrame 딕셔너리.
+        config: 어떤 Selectable 지표를 켤지 결정.
+
+    Returns:
+        활성화된 지표들의 ``EntrySignal`` 합본 리스트.
+    """
+    signals: list[EntrySignal] = []
+
+    if config.use_bollinger:
+        df_1h = df_by_tf.get("1H")
+        if df_1h is not None:
+            signals.extend(detect_bollinger_touch(df_1h, config))
+
+    # TODO(장수): MA Cross, Harmonic, Ichimoku 추가 (별도 PR)
+
+    return signals

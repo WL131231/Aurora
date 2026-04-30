@@ -25,48 +25,48 @@ body {
     background: #06060a;
 }
 
-/* 오로라 빛 띠 (4 layer) */
+/* 오로라 빛 띠 (4 layer) — 더 선명하게 */
 .aurora-band {
     position: absolute;
     border-radius: 50%;
-    filter: blur(80px);
-    opacity: 0.6;
+    filter: blur(70px);
+    opacity: 0.9;
     mix-blend-mode: screen;
 }
 
 .band-1 {
-    width: 70vw;
-    height: 70vh;
-    top: -20vh;
-    left: 10vw;
-    background: radial-gradient(circle, rgba(168, 85, 247, 0.6), transparent 70%);
+    width: 75vw;
+    height: 75vh;
+    top: -25vh;
+    left: 5vw;
+    background: radial-gradient(circle, rgba(168, 85, 247, 0.95), transparent 65%);
     animation: drift 18s ease-in-out infinite alternate;
 }
 
 .band-2 {
-    width: 60vw;
-    height: 60vh;
-    top: 10vh;
-    right: -10vw;
-    background: radial-gradient(circle, rgba(99, 102, 241, 0.55), transparent 70%);
+    width: 65vw;
+    height: 65vh;
+    top: 5vh;
+    right: -15vw;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.85), transparent 65%);
     animation: drift 22s ease-in-out infinite alternate-reverse;
 }
 
 .band-3 {
-    width: 50vw;
-    height: 50vh;
-    bottom: -10vh;
-    left: 20vw;
-    background: radial-gradient(circle, rgba(34, 211, 238, 0.4), transparent 70%);
+    width: 55vw;
+    height: 55vh;
+    bottom: -15vh;
+    left: 15vw;
+    background: radial-gradient(circle, rgba(34, 211, 238, 0.7), transparent 65%);
     animation: drift 25s ease-in-out infinite alternate;
 }
 
 .band-4 {
-    width: 40vw;
-    height: 40vh;
-    top: 30vh;
-    left: 40vw;
-    background: radial-gradient(circle, rgba(236, 72, 153, 0.3), transparent 70%);
+    width: 45vw;
+    height: 45vh;
+    top: 25vh;
+    left: 35vw;
+    background: radial-gradient(circle, rgba(236, 72, 153, 0.55), transparent 65%);
     animation: drift 20s ease-in-out infinite alternate-reverse;
 }
 
@@ -106,6 +106,129 @@ body {
     inset: 0;
     background: radial-gradient(ellipse at center, transparent 30%, #06060a 100%);
     pointer-events: none;
+}
+
+/* ===== 동심원 링 (SPACE SPECIES 풍) ===== */
+.rings {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 80vmin;
+    height: 80vmin;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.ring {
+    position: absolute;
+    border-radius: 50%;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    border-style: solid;
+}
+
+.ring-1 {
+    width: 100%;
+    height: 100%;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.07);
+}
+
+.ring-2 {
+    width: 68%;
+    height: 68%;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.06);
+}
+
+.ring-3 {
+    width: 38%;
+    height: 38%;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.05);
+}
+
+.ring-cross {
+    position: absolute;
+    color: rgba(255, 255, 255, 0.45);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 14px;
+    font-weight: 200;
+    line-height: 1;
+    user-select: none;
+}
+
+.ring-cross.top {
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.ring-cross.bottom {
+    bottom: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.ring-cross.center {
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/* ===== NUMBER 인디케이터 (좌측) ===== */
+.number-indicator {
+    position: absolute;
+    left: clamp(2rem, 5vw, 6rem);
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 12;
+    pointer-events: none;
+    user-select: none;
+}
+
+.number-indicator .label {
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 0.75rem;
+    display: block;
+}
+
+.number-indicator .numbers {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.number-indicator .big {
+    font-family: var(--font-display);
+    font-size: 3.5rem;
+    font-weight: 300;
+    line-height: 1;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.number-indicator .small {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 300;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.number-indicator .underline {
+    margin-top: 0.75rem;
+    width: 3rem;
+    height: 1px;
+    background: linear-gradient(to right, rgba(255, 255, 255, 0.5), transparent);
+}
+
+@media (max-width: 1024px) {
+    .number-indicator {
+        display: none;
+    }
 }
 
 /* ===== 로고 마크 (홀로그램 글로우) ===== */

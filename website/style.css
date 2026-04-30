@@ -1,0 +1,603 @@
+/* ============================================================
+   Aurora 랜딩 — 커스텀 스타일
+   Tailwind 로 처리 못하는 그라디언트·애니메이션·필터 효과만 작성.
+   ============================================================ */
+
+/* ===== 폰트 ===== */
+:root {
+    --font-display: "Space Grotesk", "Pretendard Variable", system-ui, sans-serif;
+    --font-sans: "Pretendard Variable", "Space Grotesk", system-ui, sans-serif;
+    /* 워드마크: 사용자 PC에 설치된 Monica Allcaps Stencil 우선,
+       없으면 Bodoni Moda → Playfair → Times 순 fallback */
+    --font-wordmark: "Monica Allcaps Stencil", "Bodoni Moda", "Playfair Display", "Times New Roman", serif;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+/* ===== Aurora 배경 무대 ===== */
+.aurora-stage {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background: #06060a;
+}
+
+/* 오로라 빛 띠 (4 layer) — 더 선명하게 */
+.aurora-band {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(70px);
+    opacity: 0.9;
+    mix-blend-mode: screen;
+}
+
+.band-1 {
+    width: 75vw;
+    height: 75vh;
+    top: -25vh;
+    left: 5vw;
+    background: radial-gradient(circle, rgba(168, 85, 247, 0.95), transparent 65%);
+    animation: drift 18s ease-in-out infinite alternate;
+}
+
+.band-2 {
+    width: 65vw;
+    height: 65vh;
+    top: 5vh;
+    right: -15vw;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.85), transparent 65%);
+    animation: drift 22s ease-in-out infinite alternate-reverse;
+}
+
+.band-3 {
+    width: 55vw;
+    height: 55vh;
+    bottom: -15vh;
+    left: 15vw;
+    background: radial-gradient(circle, rgba(34, 211, 238, 0.7), transparent 65%);
+    animation: drift 25s ease-in-out infinite alternate;
+}
+
+.band-4 {
+    width: 45vw;
+    height: 45vh;
+    top: 25vh;
+    left: 35vw;
+    background: radial-gradient(circle, rgba(236, 72, 153, 0.55), transparent 65%);
+    animation: drift 20s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes drift {
+    0%   { transform: translate(0, 0) scale(1)   rotate(0deg); }
+    25%  { transform: translate(40px, -30px) scale(1.1) rotate(15deg); }
+    50%  { transform: translate(-30px, 40px) scale(0.95) rotate(-10deg); }
+    75%  { transform: translate(50px, 20px) scale(1.05) rotate(20deg); }
+    100% { transform: translate(-20px, -40px) scale(1) rotate(-5deg); }
+}
+
+/* ===== 별 파티클 (JS 로 생성, 여기선 컨테이너만) ===== */
+.stars {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+}
+
+.star {
+    position: absolute;
+    width: 2px;
+    height: 2px;
+    background: white;
+    border-radius: 50%;
+    opacity: 0;
+    animation: twinkle 4s ease-in-out infinite;
+}
+
+@keyframes twinkle {
+    0%, 100% { opacity: 0;   transform: scale(0.6); }
+    50%      { opacity: 0.8; transform: scale(1.0); }
+}
+
+/* ===== 비네팅 (테두리 어둡게) ===== */
+.vignette {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, transparent 30%, #06060a 100%);
+    pointer-events: none;
+}
+
+/* ===== NUMBER 인디케이터 (좌측) ===== */
+.number-indicator {
+    position: absolute;
+    left: clamp(2rem, 5vw, 6rem);
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 12;
+    pointer-events: none;
+    user-select: none;
+}
+
+.number-indicator .label {
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 0.75rem;
+    display: block;
+}
+
+.number-indicator .numbers {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.number-indicator .big {
+    font-family: var(--font-display);
+    font-size: 3.5rem;
+    font-weight: 300;
+    line-height: 1;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.number-indicator .small {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 300;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.number-indicator .underline {
+    margin-top: 0.75rem;
+    width: 3rem;
+    height: 1px;
+    background: linear-gradient(to right, rgba(255, 255, 255, 0.5), transparent);
+}
+
+@media (max-width: 1024px) {
+    .number-indicator {
+        display: none;
+    }
+}
+
+/* ===== 사진 배경 (선택적) ============================
+   assets/aurora-bg.jpg 파일이 있으면 자동 적용.
+   없으면 background-image 가 깨져도 그냥 투명 → CSS 오로라 띠가 보임.
+   ===================================================== */
+.bg-image {
+    position: absolute;
+    inset: 0;
+    background-image: url("assets/aurora-bg.jpg");
+    /* contain: 사진을 원본 비율 그대로 보여줌 (업스케일 최소 → 픽셀화 줄임) */
+    background-size: contain;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-color: transparent;            /* 가장자리 빈 곳은 CSS 오로라 띠가 채움 */
+    opacity: 0;
+    animation: ken-burns 40s ease-in-out infinite;
+}
+
+/* 이미지가 있을 때 자동 보이게 — 사진 자체가 메인 배경이 됨 */
+.bg-image.has-image {
+    opacity: 0.9;
+}
+
+/* 이미지 있으면 CSS 띠/구름 적당히 살림 (가장자리 letterbox 영역 자연스럽게 채움) */
+.bg-image.has-image ~ .aurora-band {
+    opacity: 0.5;
+}
+.bg-image.has-image ~ .cloud-blob {
+    opacity: 0.6;
+}
+
+/* ken-burns: contain 모드에선 zoom 거의 불필요 (이미지 자체가 화면에 fit).
+   미세한 호흡감만. */
+@keyframes ken-burns {
+    0%, 100% { transform: scale(1.0)  translate(0, 0); }
+    50%      { transform: scale(1.02) translate(0, 0); }
+}
+
+/* ===== 하단 구름 블롭 (오로라 사진 분위기 살리기) ===== */
+.cloud-blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(90px);
+    mix-blend-mode: screen;
+    pointer-events: none;
+}
+
+.blob-1 {
+    bottom: -10vh;
+    left: 0;
+    width: 60vw;
+    height: 35vh;
+    background: radial-gradient(ellipse, rgba(217, 70, 239, 0.4), transparent 70%);
+    animation: cloud-drift 30s ease-in-out infinite alternate;
+}
+
+.blob-2 {
+    bottom: -15vh;
+    right: 0;
+    width: 50vw;
+    height: 30vh;
+    background: radial-gradient(ellipse, rgba(99, 102, 241, 0.35), transparent 70%);
+    animation: cloud-drift 25s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes cloud-drift {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(80px); }
+}
+
+/* ===== 추가 빛 띠 5, 6 (오로라 사진처럼 더 풍부하게) ===== */
+.band-5 {
+    width: 80vw;
+    height: 30vh;
+    top: 5vh;
+    left: 10vw;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(217, 70, 239, 0.35) 30%,
+        rgba(168, 85, 247, 0.4) 50%,
+        rgba(99, 102, 241, 0.3) 70%,
+        transparent 100%
+    );
+    border-radius: 50%;
+    filter: blur(60px);
+    opacity: 0.8;
+    mix-blend-mode: screen;
+    animation: ribbon-flow 14s ease-in-out infinite alternate;
+}
+
+.band-6 {
+    width: 70vw;
+    height: 25vh;
+    top: 25vh;
+    left: 15vw;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(34, 211, 238, 0.3) 30%,
+        rgba(20, 184, 166, 0.4) 50%,
+        rgba(168, 85, 247, 0.3) 70%,
+        transparent 100%
+    );
+    border-radius: 50%;
+    filter: blur(70px);
+    opacity: 0.7;
+    mix-blend-mode: screen;
+    animation: ribbon-flow 18s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes ribbon-flow {
+    0%   { transform: translateX(0)     scaleY(1)   skewX(0deg); }
+    50%  { transform: translateX(-3%)   scaleY(1.1) skewX(-2deg); }
+    100% { transform: translateX(3%)    scaleY(0.9) skewX(2deg); }
+}
+
+/* ===== 로고 마크 (홀로그램 글로우) ===== */
+.logo-mark {
+    filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.6));
+}
+
+/* ===== Hero 거대 타이포 (Bodoni Moda — Monica Abstract 풍 고대비 세리프) ===== */
+.hero-title {
+    font-family: var(--font-wordmark);
+    font-weight: 500;
+    font-size: clamp(4rem, 18vw, 14rem);
+    line-height: 1;
+    letter-spacing: -0.02em;
+    margin: 0;
+    position: relative;
+    /* font-variation-settings 로 optical size 활용 (대형 디스플레이) */
+    font-variation-settings: "opsz" 96;
+}
+
+.hero-title-text {
+    /* 검정 → 하양 → 검정 그라디언트 애니메이션 */
+    background: linear-gradient(
+        135deg,
+        #000000 0%,
+        #ffffff 30%,
+        #ffffff 70%,
+        #000000 100%
+    );
+    background-size: 300% 300%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    animation: gradient-shift 8s ease-in-out infinite;
+    text-shadow: 0 0 60px rgba(255, 255, 255, 0.25);
+    display: inline-block;
+}
+
+@keyframes gradient-shift {
+    0%, 100% { background-position: 0% 50%; }
+    50%      { background-position: 100% 50%; }
+}
+
+/* 태그라인 — 사진 배경 위에서도 가독성 보장 */
+.tagline {
+    text-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.7),
+        0 0 24px rgba(0, 0, 0, 0.5);
+}
+
+/* hero 타이틀 외곽 글로우 */
+.hero-title::after {
+    content: "AURORA";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.18);
+    filter: blur(40px);
+    z-index: -1;
+    pointer-events: none;
+    font-family: var(--font-wordmark);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    font-variation-settings: "opsz" 96;
+}
+
+/* ============================================================
+   INDICATORS 섹션
+   ============================================================ */
+
+#indicators {
+    background: linear-gradient(
+        180deg,
+        rgba(6, 6, 10, 0.6) 0%,
+        #06060a 30%,
+        #06060a 100%
+    );
+}
+
+/* 섹션 타이틀 */
+.indicators-title {
+    font-family: var(--font-wordmark);
+    font-weight: 500;
+    background: linear-gradient(
+        135deg,
+        #ffffff 0%,
+        #d8b4fe 40%,
+        #a855f7 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+}
+
+/* 각 지표 행 (사진 LEFT | 설명 RIGHT) */
+.indicator-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5rem;
+    align-items: center;
+    padding: 4rem 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.indicator-row:first-of-type {
+    border-top: none;
+}
+
+@media (max-width: 768px) {
+    .indicator-row {
+        grid-template-columns: 1fr;
+        gap: 2rem;
+        padding: 2.5rem 0;
+    }
+}
+
+/* ===== 사진 프레임 (고급화) ===== */
+.indicator-photo {
+    position: relative;
+}
+
+.photo-frame {
+    position: relative;
+    aspect-ratio: 4 / 3;
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background:
+        radial-gradient(ellipse at 30% 20%, rgba(168, 85, 247, 0.18), transparent 60%),
+        radial-gradient(ellipse at 70% 80%, rgba(34, 211, 238, 0.15), transparent 60%),
+        linear-gradient(135deg, #0d0d18, #060610);
+    backdrop-filter: blur(20px);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.06) inset,
+        0 30px 60px -20px rgba(0, 0, 0, 0.6),
+        0 0 50px -10px rgba(168, 85, 247, 0.15);
+    transition: transform 0.4s ease, box-shadow 0.4s ease;
+}
+
+.photo-frame:hover {
+    transform: translateY(-4px);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.08) inset,
+        0 40px 70px -20px rgba(0, 0, 0, 0.7),
+        0 0 80px -10px rgba(168, 85, 247, 0.3);
+}
+
+.photo-frame::before {
+    /* 미세한 그라디언트 보더 강조 */
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 16px;
+    padding: 1px;
+    background: linear-gradient(
+        135deg,
+        rgba(168, 85, 247, 0.4),
+        transparent 30%,
+        transparent 70%,
+        rgba(34, 211, 238, 0.3)
+    );
+    -webkit-mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.photo-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* 이미지 없을 때 fallback */
+.photo-fallback {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    color: rgba(255, 255, 255, 0.35);
+    user-select: none;
+}
+
+.photo-fallback .fb-icon {
+    font-size: 4rem;
+    opacity: 0.5;
+    background: linear-gradient(135deg, #a855f7, #22d3ee);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+}
+
+.photo-fallback .fb-name {
+    font-family: var(--font-wordmark);
+    font-size: 1.5rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+/* 사진 메타 (번호 · 태그) */
+.photo-meta {
+    margin-top: 1rem;
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.photo-number {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 300;
+    color: rgba(255, 255, 255, 0.85);
+    letter-spacing: 0.05em;
+}
+
+.photo-tag {
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    color: rgba(255, 255, 255, 0.35);
+    padding: 4px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+}
+
+/* ===== 설명 영역 ===== */
+.indicator-desc {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.indicator-name {
+    font-family: var(--font-wordmark);
+    font-weight: 500;
+    font-size: clamp(1.75rem, 3vw, 2.5rem);
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    color: #fafafa;
+    margin: 0;
+}
+
+.indicator-sub {
+    font-size: 0.875rem;
+    color: rgba(255, 255, 255, 0.4);
+    letter-spacing: 0.02em;
+    margin-bottom: 0.5rem;
+}
+
+.indicator-points {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.indicator-points li {
+    position: relative;
+    padding-left: 1.5rem;
+    font-size: 0.95rem;
+    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.6;
+}
+
+.indicator-points li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.7rem;
+    width: 0.75rem;
+    height: 1px;
+    background: linear-gradient(to right, rgba(168, 85, 247, 0.8), transparent);
+}
+
+.indicator-points li.point-pending {
+    color: rgba(255, 255, 255, 0.4);
+    font-style: italic;
+}
+
+.indicator-points li.point-pending::before {
+    background: linear-gradient(to right, rgba(255, 200, 100, 0.6), transparent);
+}
+
+/* ============================================================
+   반응형 미세조정
+   ============================================================ */
+@media (max-width: 768px) {
+    .aurora-band {
+        filter: blur(60px);
+    }
+}
+
+/* ===== 스크롤바 (다크) ===== */
+::-webkit-scrollbar {
+    width: 6px;
+}
+::-webkit-scrollbar-track {
+    background: #06060a;
+}
+::-webkit-scrollbar-thumb {
+    background: #1f1f2a;
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #2a2a3a;
+}

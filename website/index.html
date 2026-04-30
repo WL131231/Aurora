@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aurora — Next-Generation Algorithmic Trading</title>
+    <meta name="description" content="Aurora는 멀티 거래소·고배율·고빈도 자동매매 봇입니다. EMA · RSI Divergence · Bollinger Bands · MA Cross · Harmonic 통합." />
+
+    <!-- OG (Future deployment: aurora_project.com) -->
+    <meta property="og:title" content="Aurora — Algorithmic Trading" />
+    <meta property="og:description" content="다음 세대 자동매매를 정의하다" />
+    <meta property="og:url" content="https://aurora_project.com" />
+    <meta property="og:type" content="website" />
+
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Fonts: Bodoni Moda (Aurora 워드마크) + Space Grotesk (라벨/영문) + Pretendard (한글) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,500;0,6..96,700;0,6..96,800&family=Space+Grotesk:wght@300;400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body class="font-sans bg-[#06060a] text-white overflow-x-hidden">
+
+    <!-- ===== Aurora 배경 ===== -->
+    <div class="aurora-stage">
+        <!-- 사용자 사진 배경 (선택적) — assets/aurora-bg.jpg 추가 시 자동 적용 -->
+        <div class="bg-image"></div>
+
+        <div class="aurora-band band-1"></div>
+        <div class="aurora-band band-2"></div>
+        <div class="aurora-band band-3"></div>
+        <div class="aurora-band band-4"></div>
+        <div class="aurora-band band-5"></div>
+        <div class="aurora-band band-6"></div>
+
+        <!-- 하단 구름 블롭 -->
+        <div class="cloud-blob blob-1"></div>
+        <div class="cloud-blob blob-2"></div>
+
+        <div id="stars" class="stars"></div>
+        <div class="vignette"></div>
+    </div>
+
+    <!-- ===== NUMBER 인디케이터 (좌측) ===== -->
+    <div class="number-indicator">
+        <span class="label">NUMBER</span>
+        <div class="numbers">
+            <span class="big">05</span>
+            <span class="small">30</span>
+        </div>
+        <div class="underline"></div>
+    </div>
+
+    <!-- ===== 상단 nav ===== -->
+    <nav class="relative z-20 flex items-center justify-between px-8 lg:px-16 py-6">
+        <div class="flex items-center gap-3">
+            <!-- 로고 마크: 다이아몬드 with gradient -->
+            <div class="logo-mark">
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                    <defs>
+                        <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#a855f7" />
+                            <stop offset="50%" stop-color="#6366f1" />
+                            <stop offset="100%" stop-color="#22d3ee" />
+                        </linearGradient>
+                    </defs>
+                    <path d="M14 2 L26 14 L14 26 L2 14 Z" stroke="url(#logoGrad)" stroke-width="1.5" fill="none" />
+                    <path d="M14 8 L20 14 L14 20 L8 14 Z" fill="url(#logoGrad)" opacity="0.6" />
+                </svg>
+            </div>
+            <span class="text-sm tracking-[0.25em] font-light">AURORA</span>
+        </div>
+
+        <ul class="hidden md:flex items-center gap-10 text-[11px] tracking-[0.2em] text-zinc-400">
+            <li><a href="#features" class="hover:text-white transition">FEATURES</a></li>
+            <li><a href="#indicators" class="hover:text-white transition">INDICATORS</a></li>
+        </ul>
+
+        <div class="flex items-center gap-4 text-[11px] tracking-[0.2em] text-zinc-400">
+            <span class="hidden md:inline">EN · KR</span>
+        </div>
+    </nav>
+
+    <!-- ===== Hero ===== -->
+    <main class="relative z-10 min-h-[calc(100vh-100px)] flex flex-col items-center justify-center px-8 text-center">
+
+        <!-- 상단 미니 라벨 -->
+        <div class="mb-8 flex items-center gap-2 text-[10px] tracking-[0.3em] text-zinc-500">
+            <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            v0.1.0 · ALGORITHMIC TRADING ENGINE
+        </div>
+
+        <!-- 거대 타이포 -->
+        <h1 class="hero-title">
+            <span class="hero-title-text">AURORA</span>
+        </h1>
+
+        <!-- 태그라인 -->
+        <p class="tagline mt-8 max-w-2xl text-base md:text-lg text-zinc-100 font-light leading-relaxed">
+            다음 세대 AI Trading의 정의
+            <br />
+            <span class="text-zinc-300 text-sm">
+                Defining the Next-Generation AI Trading
+            </span>
+        </p>
+
+        <!-- 부가 정보 카드 (3개, 가운데 정렬) -->
+        <div class="mt-16 grid grid-cols-1 md:grid-cols-3 gap-px bg-zinc-800/40 rounded-2xl overflow-hidden backdrop-blur-sm border border-zinc-800/50">
+            <div class="bg-[#0a0a14]/60 px-8 py-7 text-center">
+                <div class="text-xs tracking-[0.3em] text-zinc-500 mb-2">INDICATORS</div>
+                <div class="text-3xl font-light">6</div>
+                <div class="text-xs text-zinc-500 mt-2">EMA · RSI · BB · MA · Harmonic · Ichimoku</div>
+            </div>
+            <div class="bg-[#0a0a14]/60 px-8 py-7 text-center">
+                <div class="text-xs tracking-[0.3em] text-zinc-500 mb-2">TIMEFRAMES</div>
+                <div class="text-3xl font-light">8</div>
+                <div class="text-xs text-zinc-500 mt-2">15m → 1W weighted composition</div>
+            </div>
+            <div class="bg-[#0a0a14]/60 px-8 py-7 text-center">
+                <div class="text-xs tracking-[0.3em] text-zinc-500 mb-2">LEVERAGE</div>
+                <div class="text-3xl font-light tracking-tight">10<span class="text-zinc-500 text-2xl">×</span><span class="text-zinc-600 mx-1">~</span>50<span class="text-zinc-500 text-2xl">×</span></div>
+                <div class="text-xs text-zinc-500 mt-2">user-configurable</div>
+            </div>
+        </div>
+
+        <!-- 하단 스크롤 인디케이터 -->
+        <div class="mt-16 flex flex-col items-center gap-2 text-[10px] tracking-[0.4em] text-zinc-600">
+            <span>SCROLL</span>
+            <div class="w-px h-12 bg-gradient-to-b from-zinc-700 to-transparent"></div>
+        </div>
+    </main>
+
+    <!-- ===== INDICATORS 섹션 ===== -->
+    <section id="indicators" class="relative z-10 py-32 px-8 lg:px-16">
+        <div class="max-w-7xl mx-auto">
+
+            <!-- 섹션 헤더 -->
+            <div class="text-center mb-24">
+                <div class="inline-flex items-center gap-3 mb-6 text-[10px] tracking-[0.4em] text-zinc-500">
+                    <span class="w-8 h-px bg-zinc-700"></span>
+                    INDICATORS
+                    <span class="w-8 h-px bg-zinc-700"></span>
+                </div>
+                <h2 class="text-4xl md:text-5xl font-light leading-tight">
+                    <span class="indicators-title">6 Core Signals</span>
+                </h2>
+                <p class="mt-6 text-zinc-500 text-sm md:text-base font-light max-w-xl mx-auto">
+                    각 지표는 멀티 타임프레임에서 독립적으로 신호를 산출합니다.
+                    <br />
+                    HTF 가중치 기반 점수 합산으로 최종 진입을 결정합니다.
+                </p>
+            </div>
+
+            <!-- ── 01 Bollinger Bands ── -->
+            <article class="indicator-row">
+                <div class="indicator-photo">
+                    <div class="photo-frame">
+                        <img src="assets/indicators/01-bollinger.jpg" alt="Bollinger Bands" class="photo-img" onerror="this.style.display='none'" />
+                        <div class="photo-fallback">
+                            <div class="fb-icon">⊜</div>
+                            <div class="fb-name">Bollinger Bands</div>
+                        </div>
+                    </div>
+                    <div class="photo-meta">
+                        <span class="photo-number">01</span>
+                        <span class="photo-tag">SELECTABLE · 1H</span>
+                    </div>
+                </div>
+                <div class="indicator-desc">
+                    <h3 class="indicator-name">Bollinger Bands</h3>
+                    <div class="indicator-sub">범위 거래 회귀 매매</div>
+                    <ul class="indicator-points">
+                        <li>4-tier 진입 룰 (Squeeze · Reversal · 찢어짐 · Proximity)</li>
+                        <li>밴드 좁아진 구간(squeeze) 자동 보류</li>
+                        <li>찢어짐 후 회귀 시 강도 1.5 강화 신호</li>
+                        <li>가장자리 안쪽 0.5% Proximity zone 터치 진입</li>
+                        <li>양방향 진입+청산: 상단 → 숏 / 하단 → 롱</li>
+                    </ul>
+                </div>
+            </article>
+
+            <!-- ── 02 RSI Divergence ── -->
+            <article class="indicator-row">
+                <div class="indicator-photo">
+                    <div class="photo-frame">
+                        <img src="assets/indicators/02-rsi-divergence.jpg" alt="RSI Divergence" class="photo-img" onerror="this.style.display='none'" />
+                        <div class="photo-fallback">
+                            <div class="fb-icon">⤢</div>
+                            <div class="fb-name">RSI Divergence</div>
+                        </div>
+                    </div>
+                    <div class="photo-meta">
+                        <span class="photo-number">02</span>
+                        <span class="photo-tag">FIXED · 1H</span>
+                    </div>
+                </div>
+                <div class="indicator-desc">
+                    <h3 class="indicator-name">RSI Divergence</h3>
+                    <div class="indicator-sub">모멘텀 반전 신호</div>
+                    <ul class="indicator-points">
+                        <li>4 종류 검출: Regular / Hidden × Bullish / Bearish</li>
+                        <li>TradingView Pine Script 표준 (피벗 기반)</li>
+                        <li>RSI 수치 자체는 입력값 — 다이버전스만 진입 신호</li>
+                        <li>강세 다이버전스 → 롱 / 약세 → 숏</li>
+                        <li>Hidden Divergence → 추세 지속 추가 진입</li>
+                    </ul>
+                </div>
+            </article>
+
+            <!-- ── 03 EMA Touch ── -->
+            <article class="indicator-row">
+                <div class="indicator-photo">
+                    <div class="photo-frame">
+                        <img src="assets/indicators/03-ema.jpg" alt="EMA" class="photo-img" onerror="this.style.display='none'" />
+                        <div class="photo-fallback">
+                            <div class="fb-icon">∿</div>
+                            <div class="fb-name">EMA</div>
+                        </div>
+                    </div>
+                    <div class="photo-meta">
+                        <span class="photo-number">03</span>
+                        <span class="photo-tag">FIXED · 8 TF</span>
+                    </div>
+                </div>
+                <div class="indicator-desc">
+                    <h3 class="indicator-name">Exponential Moving Average</h3>
+                    <div class="indicator-sub">멀티 TF 지지/저항 터치</div>
+                    <ul class="indicator-points">
+                        <li>표준 추세 라인 · Aurora 노하우 기반 커스텀 파라미터</li>
+                        <li>8 타임프레임 동시 분석 (15m → 1W)</li>
+                        <li>가격이 EMA ±0.3% 이내 터치 시 신호</li>
+                        <li>위에서 지지 → 롱 / 아래서 저항 → 숏</li>
+                        <li>HTF 자동 가중치: 1W (25점) → 15m (1점)</li>
+                    </ul>
+                </div>
+            </article>
+
+            <!-- ── 04 MA Cross ── -->
+            <article class="indicator-row">
+                <div class="indicator-photo">
+                    <div class="photo-frame">
+                        <img src="assets/indicators/04-ma-cross.jpg" alt="MA Cross" class="photo-img" onerror="this.style.display='none'" />
+                        <div class="photo-fallback">
+                            <div class="fb-icon">↗↘</div>
+                            <div class="fb-name">MA Cross</div>
+                        </div>
+                    </div>
+                    <div class="photo-meta">
+                        <span class="photo-number">04</span>
+                        <span class="photo-tag">SELECTABLE · 1H / 2H / 4H</span>
+                    </div>
+                </div>
+                <div class="indicator-desc">
+                    <h3 class="indicator-name">Moving Average Cross</h3>
+                    <div class="indicator-sub">골든 · 데드 크로스 추세 신호</div>
+                    <ul class="indicator-points">
+                        <li>SMA 50 / SMA 200 — 표준 골크 / 데크 셋업</li>
+                        <li>Golden Cross → 롱 (상승 추세 시작)</li>
+                        <li>Dead Cross → 숏 (하락 추세 시작)</li>
+                        <li>마지막 봉에서 막 발생한 cross 만 신호 (이미 cross 후 X)</li>
+                        <li>HTF 가중치 자동 (1H=2 / 2H=3 / 4H=5)</li>
+                    </ul>
+                </div>
+            </article>
+
+            <!-- ── 05 Harmonic ── -->
+            <article class="indicator-row">
+                <div class="indicator-photo">
+                    <div class="photo-frame">
+                        <img src="assets/indicators/05-harmonic.jpg" alt="Harmonic" class="photo-img" onerror="this.style.display='none'" />
+                        <div class="photo-fallback">
+                            <div class="fb-icon">▲▽</div>
+                            <div class="fb-name">Harmonic</div>
+                        </div>
+                    </div>
+                    <div class="photo-meta">
+                        <span class="photo-number">05</span>
+                        <span class="photo-tag">SELECTABLE · 15m / 1H</span>
+                    </div>
+                </div>
+                <div class="indicator-desc">
+                    <h3 class="indicator-name">Harmonic Patterns</h3>
+                    <div class="indicator-sub">피보나치 정밀 패턴</div>
+                    <ul class="indicator-points">
+                        <li>Bat / Butterfly / Gartley 패턴 검출</li>
+                        <li>ZigZag 피벗 + 피보나치 비율 검증</li>
+                        <li>TP/SL 가격 = 패턴 자체 비율로 자동 산출</li>
+                        <li>다른 지표 대비 진입가·익절가 정밀</li>
+                        <li class="point-pending">구현 예정 — 백테스트로 패턴 정확도 검증</li>
+                    </ul>
+                </div>
+            </article>
+
+            <!-- ── 06 Ichimoku Cloud ── -->
+            <article class="indicator-row">
+                <div class="indicator-photo">
+                    <div class="photo-frame">
+                        <img src="assets/indicators/06-ichimoku.jpg" alt="Ichimoku Cloud" class="photo-img" onerror="this.style.display='none'" />
+                        <div class="photo-fallback">
+                            <div class="fb-icon">☁</div>
+                            <div class="fb-name">Ichimoku</div>
+                        </div>
+                    </div>
+                    <div class="photo-meta">
+                        <span class="photo-number">06</span>
+                        <span class="photo-tag">SELECTABLE · 1H / 2H / 4H</span>
+                    </div>
+                </div>
+                <div class="indicator-desc">
+                    <h3 class="indicator-name">Ichimoku Kumo</h3>
+                    <div class="indicator-sub">일목균형표 다중 시간 분석</div>
+                    <ul class="indicator-points">
+                        <li>Span A · Span B · Tenkan · Kijun 인지</li>
+                        <li>구름대 두께 = 지지/저항 강도 (두꺼움 → 강함)</li>
+                        <li>Span 터치 시 진입, 이탈 시 청산</li>
+                        <li>HTF 가중치 자동 (1H=2 / 2H=3 / 4H=5)</li>
+                        <li class="point-pending">구현 예정 — 두께 정량화 + 통합 트리거</li>
+                    </ul>
+                </div>
+            </article>
+
+        </div>
+    </section>
+
+    <!-- ===== Footer ===== -->
+    <footer class="relative z-10 px-8 lg:px-16 py-8 mt-12 flex flex-col md:flex-row items-center justify-between gap-4 text-[10px] tracking-[0.2em] text-zinc-600 border-t border-zinc-900">
+        <div>© 2026 AURORA · PROPRIETARY</div>
+        <div class="flex items-center gap-6">
+            <span>BUILT WITH PYTHON · FASTAPI · CCXT</span>
+            <span class="text-zinc-700">aurora_project.com</span>
+        </div>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

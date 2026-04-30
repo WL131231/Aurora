@@ -1,8 +1,7 @@
 # UnTrack 런타임 의존성
 ccxt>=4.4.0
-pandas>=2.2.0
+pandas>=2.2.0,<3.0
 numpy>=1.26.0
-pandas-ta>=0.3.14b0
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 pywebview>=5.0
@@ -12,3 +11,6 @@ pydantic>=2.0
 pydantic-settings>=2.0
 websockets>=12.0
 httpx>=0.27.0
+
+# pandas-ta 는 PyPI에서 Python 3.11 호환 버전이 사라진 상태.
+# 지표는 core/indicators.py 에서 pandas/numpy 로 직접 구현 (필요 시 후속 추가).

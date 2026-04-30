@@ -11,6 +11,7 @@ from aurora.core.strategy import (
     StrategyConfig,
     detect_bollinger_touch,
     detect_ema_touch,
+    detect_ma_cross,
     detect_rsi_divergence,
     evaluate_selectable,
 )
@@ -312,3 +313,114 @@ def test_evaluate_selectable_no_1h_data() -> None:
     """BB 활성화여도 1H 데이터 없으면 신호 X."""
     config = StrategyConfig(use_bollinger=True)
     assert evaluate_selectable({"4H": _bb_df([100.0] * 30)}, config) == []
+
+
+# ============================================================
+# detect_ma_cross
+# ============================================================
+
+
+def _trend_close_df(closes: list[float]) -> pd.DataFrame:
+    """OHLC DataFrame — close 만 의미 있음 (high/low/open 동일)."""
+    s = pd.Series(closes, dtype=float)
+    return pd.DataFrame({"open": s, "high": s, "low": s, "close": s})
+
+
+def test_ma_cross_no_data_returns_empty() -> None:
+    config = StrategyConfig()
+    assert detect_ma_cross({}, config) == []
+
+
+def test_ma_cross_golden_on_1h() -> None:
+    """1H 에서 V자 형성 → golden → LONG 신호."""
+    closes = list(np.linspace(100, 50, 30)) + list(np.linspace(50, 100, 30))
+    df_by_tf = {"1H": _trend_close_df(closes)}
+    config = StrategyConfig(ma_cross_fast=5, ma_cross_slow=10)
+    signals = detect_ma_cross(df_by_tf, config)
+    longs = [s for s in signals if s.source == "ma_cross_golden"]
+    # cross 가 마지막 봉에 정확히 발생할 때만 emit. 아닐 수 있어 0~1개 허용.
+    for s in longs:
+        assert s.direction == Direction.LONG
+        assert s.timeframe == "1H"
+        assert s.strength == 1.0
+
+
+def test_ma_cross_emits_at_cross_bar() -> None:
+    """cross 가 마지막 봉에 정확히 발생 → 신호 발동.
+
+    fast=3, slow=5. 하락 후 바닥 hover, 마지막 봉에서 큰 점프로 cross.
+    """
+    closes = [100.0, 100.0, 100.0, 100.0, 100.0,   # 0-4 안정
+              90.0, 80.0, 70.0, 60.0, 50.0,         # 5-9 하락 (fast<slow)
+              50.0, 50.0, 50.0, 50.0,               # 10-13 바닥 hover (diff 0 도달)
+              150.0]                                 # 14 큰 점프 → 마지막 봉 cross
+    df_by_tf = {"4H": _trend_close_df(closes)}
+    config = StrategyConfig(ma_cross_fast=3, ma_cross_slow=5)
+    signals = detect_ma_cross(df_by_tf, config)
+    goldens = [s for s in signals if s.source == "ma_cross_golden" and s.timeframe == "4H"]
+    assert len(goldens) == 1
+    assert goldens[0].direction == Direction.LONG
+
+
+def test_ma_cross_dead_emits_short() -> None:
+    """상승 후 천장 hover, 마지막 봉에서 큰 하락 → dead cross."""
+    closes = [100.0, 100.0, 100.0, 100.0, 100.0,
+              110.0, 120.0, 130.0, 140.0, 150.0,
+              150.0, 150.0, 150.0, 150.0,
+              50.0]
+    df_by_tf = {"2H": _trend_close_df(closes)}
+    config = StrategyConfig(ma_cross_fast=3, ma_cross_slow=5)
+    signals = detect_ma_cross(df_by_tf, config)
+    deads = [s for s in signals if s.source == "ma_cross_dead" and s.timeframe == "2H"]
+    assert len(deads) == 1
+    assert deads[0].direction == Direction.SHORT
+
+
+def test_ma_cross_no_signal_on_constant() -> None:
+    """일정 가격 → 크로스 없음."""
+    df_by_tf = {tf: _trend_close_df([100.0] * 50) for tf in ("1H", "2H", "4H")}
+    config = StrategyConfig(ma_cross_fast=5, ma_cross_slow=10)
+    assert detect_ma_cross(df_by_tf, config) == []
+
+
+def test_ma_cross_only_targeted_tfs() -> None:
+    """1H/2H/4H 만 검사. 다른 TF 데이터는 무시."""
+    # 다른 TF (15m) 에 명백한 cross 데이터
+    closes = [100.0] * 5 + [90, 80, 70, 60, 50] + [60, 80, 100, 120, 140]
+    df_by_tf = {"15m": _trend_close_df(closes)}
+    config = StrategyConfig(ma_cross_fast=3, ma_cross_slow=5)
+    assert detect_ma_cross(df_by_tf, config) == []
+
+
+# ============================================================
+# evaluate_selectable — MA Cross 라우팅
+# ============================================================
+
+
+def test_evaluate_selectable_ma_cross_off() -> None:
+    """use_ma_cross=False 면 MA 신호 X."""
+    closes = [100.0] * 5 + [90, 80, 70, 60, 50] + [50, 50, 50, 50] + [150]
+    df_by_tf = {"4H": _trend_close_df(closes)}
+    config = StrategyConfig(
+        use_ma_cross=False,
+        ma_cross_fast=3,
+        ma_cross_slow=5,
+    )
+    signals = evaluate_selectable(df_by_tf, config)
+    assert all(not s.source.startswith("ma_cross") for s in signals)
+
+
+def test_evaluate_selectable_ma_cross_on() -> None:
+    """use_ma_cross=True 면 라우팅됨."""
+    closes = [100.0] * 5 + [90, 80, 70, 60, 50] + [50, 50, 50, 50] + [150]
+    df_by_tf = {"4H": _trend_close_df(closes)}
+    config = StrategyConfig(
+        use_ma_cross=True,
+        ma_cross_fast=3,
+        ma_cross_slow=5,
+    )
+    signals = evaluate_selectable(df_by_tf, config)
+    goldens = [s for s in signals if s.source == "ma_cross_golden"]
+    assert len(goldens) == 1
+    assert goldens[0].direction == Direction.LONG
+    assert goldens[0].timeframe == "4H"

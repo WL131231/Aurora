@@ -295,14 +295,49 @@ def bollinger_bands(close: pd.Series, period: int = 20, std: float = 2.0) -> pd.
     return pd.DataFrame({"upper": upper, "middle": middle, "lower": lower})
 
 
-def ma_cross(close: pd.Series, fast: int, slow: int) -> pd.Series:
-    """MA 골든/데드 크로스 감지.
+def ma_cross(close: pd.Series, fast: int = 50, slow: int = 200) -> pd.Series:
+    """이평선(SMA) 골든/데드 크로스 감지.
+
+    각 봉 기준:
+        - **golden**: 직전 봉 fast ≤ slow + 현재 봉 fast > slow (방금 위로 돌파)
+        - **dead**:   직전 봉 fast ≥ slow + 현재 봉 fast < slow (방금 아래로 돌파)
+        - 그 외: None
+
+    초기 ``slow`` 봉은 NaN (slow MA 계산 불가) → None.
+
+    Args:
+        close: 종가 시리즈.
+        fast: 빠른 MA 기간 (기본 50).
+        slow: 느린 MA 기간 (기본 200).
 
     Returns:
-        시리즈 — 'golden', 'dead', 또는 None per bar.
+        문자열 시리즈 (입력 인덱스 유지) — 'golden' / 'dead' / None.
+
+    Raises:
+        ValueError: fast < 1, slow < 1, 또는 fast ≥ slow 일 때.
     """
-    # TODO(장수)
-    raise NotImplementedError
+    if fast < 1 or slow < 1:
+        raise ValueError(f"fast/slow 는 1 이상 (받은 값: fast={fast}, slow={slow})")
+    if fast >= slow:
+        raise ValueError(f"fast 는 slow 보다 작아야 함 (fast={fast}, slow={slow})")
+
+    fast_ma = close.rolling(window=fast, min_periods=fast).mean()
+    slow_ma = close.rolling(window=slow, min_periods=slow).mean()
+
+    diff = fast_ma - slow_ma
+    diff_prev = diff.shift(1)
+
+    n = len(close)
+    result: pd.Series = pd.Series([None] * n, index=close.index, dtype=object)
+
+    # NaN safe: 둘 다 valid 일 때만 비교
+    valid = diff.notna() & diff_prev.notna()
+    golden = valid & (diff_prev <= 0) & (diff > 0)
+    dead = valid & (diff_prev >= 0) & (diff < 0)
+
+    result[golden] = "golden"
+    result[dead] = "dead"
+    return result
 
 
 def harmonic_pattern(ohlc: pd.DataFrame) -> pd.Series:

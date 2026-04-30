@@ -301,13 +301,13 @@ body {
 }
 
 .hero-title-text {
+    /* 검정 → 하양 → 검정 그라디언트 애니메이션 */
     background: linear-gradient(
         135deg,
-        #ffffff 0%,
-        #d8b4fe 25%,
-        #a855f7 50%,
-        #6366f1 75%,
-        #22d3ee 100%
+        #000000 0%,
+        #ffffff 30%,
+        #ffffff 70%,
+        #000000 100%
     );
     background-size: 300% 300%;
     -webkit-background-clip: text;
@@ -315,7 +315,7 @@ body {
     -webkit-text-fill-color: transparent;
     color: transparent;
     animation: gradient-shift 8s ease-in-out infinite;
-    text-shadow: 0 0 60px rgba(168, 85, 247, 0.3);
+    text-shadow: 0 0 60px rgba(255, 255, 255, 0.25);
     display: inline-block;
 }
 
@@ -332,7 +332,7 @@ body {
     left: 0;
     right: 0;
     text-align: center;
-    color: rgba(168, 85, 247, 0.15);
+    color: rgba(255, 255, 255, 0.18);
     filter: blur(40px);
     z-index: -1;
     pointer-events: none;

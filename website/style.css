@@ -7,6 +7,7 @@
 :root {
     --font-display: "Space Grotesk", "Pretendard Variable", system-ui, sans-serif;
     --font-sans: "Pretendard Variable", "Space Grotesk", system-ui, sans-serif;
+    --font-wordmark: "Bodoni Moda", "Playfair Display", "Times New Roman", serif;
 }
 
 body {
@@ -108,8 +109,8 @@ body {
     pointer-events: none;
 }
 
-/* ===== Coming Soon 인디케이터 (좌측) ===== */
-.coming-soon-indicator {
+/* ===== NUMBER 인디케이터 (좌측) ===== */
+.number-indicator {
     position: absolute;
     left: clamp(2rem, 5vw, 6rem);
     top: 50%;
@@ -119,47 +120,44 @@ body {
     user-select: none;
 }
 
-.coming-soon-indicator .status-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #22d3ee;
-    box-shadow: 0 0 12px rgba(34, 211, 238, 0.8);
-    margin-bottom: 1rem;
-    animation: pulse 2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50%      { opacity: 0.6; transform: scale(1.2); }
-}
-
-.coming-soon-indicator .label {
-    display: block;
+.number-indicator .label {
     font-size: 11px;
     letter-spacing: 0.3em;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.4);
     margin-bottom: 0.75rem;
+    display: block;
 }
 
-.coming-soon-indicator .kr-text {
+.number-indicator .numbers {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.number-indicator .big {
     font-family: var(--font-display);
-    font-size: 2.5rem;
+    font-size: 3.5rem;
     font-weight: 300;
     line-height: 1;
-    color: rgba(255, 255, 255, 0.92);
-    margin-bottom: 0.75rem;
+    color: rgba(255, 255, 255, 0.95);
 }
 
-.coming-soon-indicator .underline {
+.number-indicator .small {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 300;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.number-indicator .underline {
+    margin-top: 0.75rem;
     width: 3rem;
     height: 1px;
     background: linear-gradient(to right, rgba(255, 255, 255, 0.5), transparent);
 }
 
 @media (max-width: 1024px) {
-    .coming-soon-indicator {
+    .number-indicator {
         display: none;
     }
 }
@@ -180,10 +178,17 @@ body {
     animation: ken-burns 30s ease-in-out infinite;
 }
 
-/* 이미지가 있을 때 자동 보이게 — 이 클래스는 JS 또는 inline 으로 토글 */
+/* 이미지가 있을 때 자동 보이게 — 사진 자체가 메인 배경이 됨 */
 .bg-image.has-image {
-    opacity: 0.55;
-    mix-blend-mode: screen;
+    opacity: 0.85;
+}
+
+/* 이미지 있으면 CSS 띠/구름 톤 다운 (사진과 충돌 방지) */
+.bg-image.has-image ~ .aurora-band {
+    opacity: 0.3;
+}
+.bg-image.has-image ~ .cloud-blob {
+    opacity: 0.5;
 }
 
 @keyframes ken-burns {
@@ -274,15 +279,17 @@ body {
     filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.6));
 }
 
-/* ===== Hero 거대 타이포 ===== */
+/* ===== Hero 거대 타이포 (Bodoni Moda — Monica Abstract 풍 고대비 세리프) ===== */
 .hero-title {
-    font-family: var(--font-display);
-    font-weight: 300;
+    font-family: var(--font-wordmark);
+    font-weight: 500;
     font-size: clamp(4rem, 18vw, 14rem);
     line-height: 1;
-    letter-spacing: -0.04em;
+    letter-spacing: -0.02em;
     margin: 0;
     position: relative;
+    /* font-variation-settings 로 optical size 활용 (대형 디스플레이) */
+    font-variation-settings: "opsz" 96;
 }
 
 .hero-title-text {
@@ -321,8 +328,10 @@ body {
     filter: blur(40px);
     z-index: -1;
     pointer-events: none;
-    font-weight: 300;
-    letter-spacing: -0.04em;
+    font-family: var(--font-wordmark);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    font-variation-settings: "opsz" 96;
 }
 
 /* ===== 반응형 미세조정 ===== */

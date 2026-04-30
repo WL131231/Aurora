@@ -11,7 +11,7 @@ from typing import Literal
 
 import pandas as pd
 
-from untrack.exchange.base import ExchangeClient, Order, Position
+from aurora.exchange.base import ExchangeClient, Order, Position
 
 
 class CcxtClient(ExchangeClient):

@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from untrack.config import settings
+from aurora.config import settings
 
 
 class TelegramBot:

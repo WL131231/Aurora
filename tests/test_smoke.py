@@ -4,12 +4,12 @@ from __future__ import annotations
 
 
 def test_package_import() -> None:
-    import untrack
+    import aurora
 
-    assert untrack.__version__ == "0.1.0"
+    assert aurora.__version__ == "0.1.0"
 
 
 def test_config_loads() -> None:
-    from untrack.config import settings
+    from aurora.config import settings
 
     assert settings.run_mode in ("paper", "demo", "live")

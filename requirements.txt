@@ -1,4 +1,4 @@
-# UnTrack 런타임 의존성
+# Aurora 런타임 의존성
 ccxt>=4.4.0
 pandas>=2.2.0,<3.0
 numpy>=1.26.0

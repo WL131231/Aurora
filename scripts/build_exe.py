@@ -1,4 +1,4 @@
-"""PyInstaller 빌드 스크립트 — UnTrack을 단일 .exe로 패키징.
+"""PyInstaller 빌드 스크립트 — Aurora을 단일 .exe로 패키징.
 
 사용법:
     python scripts/build_exe.py
@@ -7,8 +7,8 @@
     pip install pyinstaller
 
 산출물:
-    dist/UnTrack.exe
-    dist/UnTrack/  (모든 의존 파일)
+    dist/Aurora.exe
+    dist/Aurora/  (모든 의존 파일)
 
 담당: 팀원 D
 """
@@ -24,12 +24,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 def main() -> int:
     """PyInstaller 호출."""
-    entry = PROJECT_ROOT / "src" / "untrack" / "main.py"
+    entry = PROJECT_ROOT / "src" / "aurora" / "main.py"
     ui_dir = PROJECT_ROOT / "ui"
 
     cmd = [
         sys.executable, "-m", "PyInstaller",
-        "--name", "UnTrack",
+        "--name", "Aurora",
         "--windowed",
         "--add-data", f"{ui_dir};ui",
         "--paths", str(PROJECT_ROOT / "src"),

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from untrack.backtest.engine import TradeRecord
+from aurora.backtest.engine import TradeRecord
 
 
 @dataclass(slots=True)

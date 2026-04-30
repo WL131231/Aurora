@@ -1,8 +1,8 @@
 [project]
-name = "untrack"
+name = "aurora"
 version = "0.1.0"
 description = "고빈도 룰 기반 자동매매 봇 — 멀티 거래소 / 멀티 페어 / 고배율"
-authors = [{name = "UnTrack Team"}]
+authors = [{name = "Aurora Team"}]
 requires-python = ">=3.11"
 readme = "README.md"
 

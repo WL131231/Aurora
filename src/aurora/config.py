@@ -1,7 +1,7 @@
 """전역 설정 — 환경변수와 기본값을 한 곳에서 관리.
 
 .env 파일 또는 환경변수에서 값을 읽어 Pydantic으로 검증한다.
-모든 모듈은 `from untrack.config import settings` 형태로 접근.
+모든 모듈은 `from aurora.config import settings` 형태로 접근.
 """
 
 from __future__ import annotations

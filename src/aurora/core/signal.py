@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from untrack.core.strategy import Direction, EntrySignal
+from aurora.core.strategy import Direction, EntrySignal
 
 
 @dataclass(slots=True)

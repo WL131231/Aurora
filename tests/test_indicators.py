@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from untrack.core.indicators import (
+from aurora.core.indicators import (
     ema,
     pivot_high,
     pivot_low,

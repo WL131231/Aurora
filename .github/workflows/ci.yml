@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 # 동일 PR/브랜치에 새 push 들어오면 이전 실행 자동 취소 (자원 절약)
 concurrency:

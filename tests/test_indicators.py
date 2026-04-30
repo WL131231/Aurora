@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from aurora.core.indicators import (
+    bollinger_bands,
     ema,
     pivot_high,
     pivot_low,
@@ -206,3 +207,64 @@ def test_rsi_divergence_invalid_range_raises() -> None:
     s = pd.Series([1.0] * 50)
     with pytest.raises(ValueError):
         rsi_divergence(s, s, s, range_lower=10, range_upper=5)
+
+
+# ============================================================
+# Bollinger Bands
+# ============================================================
+
+
+def test_bb_columns_and_length() -> None:
+    close = pd.Series([float(x) for x in range(50)])
+    bb = bollinger_bands(close, period=20)
+    assert list(bb.columns) == ["upper", "middle", "lower"]
+    assert len(bb) == len(close)
+
+
+def test_bb_initial_nan_until_period() -> None:
+    """period=20 이면 첫 19 봉은 NaN, 20번째부터 값."""
+    close = pd.Series([100.0] * 50)
+    bb = bollinger_bands(close, period=20)
+    assert bb.iloc[:19].isna().all().all()
+    assert not bb.iloc[19:].isna().any().any()
+
+
+def test_bb_constant_series_zero_width() -> None:
+    """일정 가격 → sigma=0 → upper=middle=lower."""
+    close = pd.Series([100.0] * 50)
+    bb = bollinger_bands(close, period=20)
+    last = bb.iloc[-1]
+    assert last["upper"] == pytest.approx(100.0)
+    assert last["middle"] == pytest.approx(100.0)
+    assert last["lower"] == pytest.approx(100.0)
+
+
+def test_bb_upper_above_middle_above_lower() -> None:
+    """변동성 시 upper > middle > lower."""
+    rng = np.random.RandomState(0)
+    close = pd.Series(rng.randn(100).cumsum() + 100)
+    bb = bollinger_bands(close, period=20)
+    valid = bb.dropna()
+    assert (valid["upper"] > valid["middle"]).all()
+    assert (valid["middle"] > valid["lower"]).all()
+
+
+def test_bb_std_multiplier_widens_band() -> None:
+    """std 배수 클수록 밴드 폭 비례 증가."""
+    rng = np.random.RandomState(0)
+    close = pd.Series(rng.randn(100).cumsum() + 100)
+    bb1 = bollinger_bands(close, period=20, std=1.0)
+    bb3 = bollinger_bands(close, period=20, std=3.0)
+    width1 = (bb1["upper"] - bb1["lower"]).iloc[-1]
+    width3 = (bb3["upper"] - bb3["lower"]).iloc[-1]
+    assert width3 == pytest.approx(width1 * 3.0)
+
+
+def test_bb_invalid_period_raises() -> None:
+    with pytest.raises(ValueError):
+        bollinger_bands(pd.Series([1.0, 2.0]), period=0)
+
+
+def test_bb_invalid_std_raises() -> None:
+    with pytest.raises(ValueError):
+        bollinger_bands(pd.Series([1.0, 2.0]), std=0)

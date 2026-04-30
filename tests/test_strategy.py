@@ -9,8 +9,10 @@ from aurora.core.strategy import (
     Direction,
     EntrySignal,
     StrategyConfig,
+    detect_bollinger_touch,
     detect_ema_touch,
     detect_rsi_divergence,
+    evaluate_selectable,
 )
 
 
@@ -119,3 +121,98 @@ def test_rsi_divergence_runs_on_random_data() -> None:
     for s in result:
         assert isinstance(s, EntrySignal)
         assert s.timeframe == "1H"
+
+
+# ============================================================
+# detect_bollinger_touch
+# ============================================================
+
+
+def _bb_df(closes: list[float]) -> pd.DataFrame:
+    s = pd.Series(closes, dtype=float)
+    return pd.DataFrame({"open": s, "high": s, "low": s, "close": s})
+
+
+def test_bb_touch_no_signal_when_inside_band() -> None:
+    """가격이 밴드 안쪽이면 신호 X."""
+    rng = np.random.RandomState(0)
+    closes = list(rng.randn(50).cumsum() * 0.1 + 100)  # 100 근처에서 약하게 흔들림
+    closes[-1] = 100.0  # 마지막을 정확히 평균값으로
+    df = _bb_df(closes)
+    config = StrategyConfig()
+    assert detect_bollinger_touch(df, config) == []
+
+
+def test_bb_touch_short_at_upper() -> None:
+    """종가가 상단 이상 → 숏 신호.
+
+    expansion 임계값 높여서 확장 필터 효과 제거 → 터치 룰만 검증.
+    """
+    rng = np.random.RandomState(0)
+    closes = list(rng.randn(40) * 1.0 + 100)  # 정상 변동성
+    # 마지막 close 를 상단 약간 위로 배치 (직전 값 + 5)
+    closes.append(float(closes[-1]) + 5.0)
+    df = _bb_df(closes)
+    config = StrategyConfig(bollinger_expansion_threshold=100.0)
+    signals = detect_bollinger_touch(df, config)
+    assert any(s.direction == Direction.SHORT and s.source == "bollinger_upper" for s in signals)
+
+
+def test_bb_touch_long_at_lower() -> None:
+    """종가가 하단 이하 → 롱 신호 (확장 필터 효과 제거)."""
+    rng = np.random.RandomState(7)
+    closes = list(rng.randn(40) * 1.0 + 100)
+    closes.append(float(closes[-1]) - 5.0)
+    df = _bb_df(closes)
+    config = StrategyConfig(bollinger_expansion_threshold=100.0)
+    signals = detect_bollinger_touch(df, config)
+    assert any(s.direction == Direction.LONG and s.source == "bollinger_lower" for s in signals)
+
+
+def test_bb_touch_holds_on_extreme_expansion() -> None:
+    """폭 확장 임계값을 매우 낮게 설정해 보류 동작 강제."""
+    rng = np.random.RandomState(1)
+    closes = list(rng.randn(40) * 1.0 + 100)
+    closes.append(float(closes[-1]) + 5.0)  # 점프
+    df = _bb_df(closes)
+    # 매우 낮은 임계값 → 사소한 확장도 보류
+    config = StrategyConfig(bollinger_expansion_threshold=1.01)
+    signals = detect_bollinger_touch(df, config)
+    assert signals == []
+
+
+def test_bb_touch_empty_df() -> None:
+    config = StrategyConfig()
+    assert detect_bollinger_touch(pd.DataFrame(), config) == []
+
+
+# ============================================================
+# evaluate_selectable
+# ============================================================
+
+
+def test_evaluate_selectable_off_returns_empty() -> None:
+    """모든 Selectable off → 빈 리스트."""
+    closes = [100.0] * 30 + [99.0]  # BB 신호 가능한 데이터
+    df_by_tf = {"1H": _bb_df(closes)}
+    config = StrategyConfig(use_bollinger=False)
+    assert evaluate_selectable(df_by_tf, config) == []
+
+
+def test_evaluate_selectable_bollinger_on() -> None:
+    """use_bollinger=True 면 BB 신호 라우팅됨."""
+    rng = np.random.RandomState(7)
+    closes = list(rng.randn(40) * 1.0 + 100)
+    closes.append(float(closes[-1]) - 5.0)  # 하단 터치
+    df_by_tf = {"1H": _bb_df(closes)}
+    config = StrategyConfig(use_bollinger=True, bollinger_expansion_threshold=100.0)
+    signals = evaluate_selectable(df_by_tf, config)
+    longs = [s for s in signals if s.direction == Direction.LONG]
+    assert len(longs) >= 1
+    assert all(s.source.startswith("bollinger_") for s in longs)
+
+
+def test_evaluate_selectable_no_1h_data() -> None:
+    """BB 활성화여도 1H 데이터 없으면 신호 X."""
+    config = StrategyConfig(use_bollinger=True)
+    assert evaluate_selectable({"4H": _bb_df([100.0] * 30)}, config) == []

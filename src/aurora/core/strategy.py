@@ -10,7 +10,7 @@ from enum import StrEnum
 
 import pandas as pd
 
-from aurora.core.indicators import ema, rsi, rsi_divergence
+from aurora.core.indicators import bollinger_bands, ema, rsi, rsi_divergence
 
 # ============================================================
 # 공통 dataclass / enum
@@ -49,6 +49,12 @@ class StrategyConfig:
     rsi_period: int = 14
     rsi_div_lb_left: int = 5
     rsi_div_lb_right: int = 5
+
+    # Bollinger Bands (Selectable — 1H 고정)
+    bollinger_period: int = 20
+    bollinger_std: float = 2.0
+    bollinger_expansion_threshold: float = 1.5
+    """밴드 폭(upper-lower)이 최근 평균 대비 이 배수 이상이면 '찢어짐'으로 판단해 진입 보류."""
 
 
 # ============================================================
@@ -180,7 +186,74 @@ def detect_rsi_divergence(
 
 
 # ============================================================
-# Selectable 지표 (사용자 on/off)
+# Selectable: Bollinger Bands (1H 고정, 횡보장 특화)
+# ============================================================
+
+
+def detect_bollinger_touch(
+    df_1h: pd.DataFrame,
+    config: StrategyConfig,
+) -> list[EntrySignal]:
+    """볼린저 밴드 상하단 터치 진입 (양방향 진입+청산 정책).
+
+    룰:
+        - 종가 ≥ upper → ``"short"`` (상단 터치, 횡보 회귀 매도)
+        - 종가 ≤ lower → ``"long"``  (하단 터치, 횡보 회귀 매수)
+        - 밴드 '찢어짐' (현재 폭 > 최근 평균 × ``bollinger_expansion_threshold``)
+          → 신호 보류 (추세 전환 가능성, 다른 지표 연계 필요)
+
+    "양방향 진입+청산": BB 신호는 진입 신호이자 동시에 반대 포지션 청산 신호.
+    예) 상단 터치 = 롱 보유 중이면 청산 + 새 숏 진입.
+    이 동작은 ``signal.compose_entry``/``compose_exit`` 가 처리.
+
+    Args:
+        df_1h: 1H OHLC DataFrame (close 컬럼 필요).
+        config: 전략 설정 (bollinger_period, bollinger_std, expansion_threshold).
+
+    Returns:
+        ``EntrySignal`` 리스트 (마지막 봉 기준, 보통 0~1 개).
+    """
+    if df_1h is None or df_1h.empty or "close" not in df_1h.columns:
+        return []
+
+    bb = bollinger_bands(df_1h["close"], period=config.bollinger_period, std=config.bollinger_std)
+    last_close = float(df_1h["close"].iloc[-1])
+    last_upper = bb["upper"].iloc[-1]
+    last_lower = bb["lower"].iloc[-1]
+
+    if pd.isna(last_upper) or pd.isna(last_lower):
+        return []
+
+    # 찢어짐(밴드 확장) 검사: 최근 폭의 단기 평균 대비 비율
+    width = bb["upper"] - bb["lower"]
+    width_avg = width.rolling(window=config.bollinger_period, min_periods=1).mean()
+    last_width = float(width.iloc[-1])
+    last_width_avg = float(width_avg.iloc[-1])
+    if last_width_avg > 0 and last_width / last_width_avg >= config.bollinger_expansion_threshold:
+        return []  # 추세 전환 가능성, 진입 보류
+
+    # 터치 판단
+    if last_close >= float(last_upper):
+        return [EntrySignal(
+            direction=Direction.SHORT,
+            timeframe="1H",
+            source="bollinger_upper",
+            strength=1.0,
+            note=f"BB 상단 터치 (close={last_close:.4f}, upper={float(last_upper):.4f})",
+        )]
+    if last_close <= float(last_lower):
+        return [EntrySignal(
+            direction=Direction.LONG,
+            timeframe="1H",
+            source="bollinger_lower",
+            strength=1.0,
+            note=f"BB 하단 터치 (close={last_close:.4f}, lower={float(last_lower):.4f})",
+        )]
+    return []
+
+
+# ============================================================
+# Selectable 지표 라우터 (사용자 on/off)
 # ============================================================
 
 
@@ -188,6 +261,24 @@ def evaluate_selectable(
     df_by_tf: dict[str, pd.DataFrame],
     config: StrategyConfig,
 ) -> list[EntrySignal]:
-    """사용자가 켠 Selectable 지표만 평가해서 신호 리스트 반환."""
-    # TODO(장수): config 플래그 보고 각 지표 평가 (BB, MA Cross, Harmonic, Ichimoku)
-    return []
+    """사용자가 켠 Selectable 지표만 평가해서 신호 리스트 반환.
+
+    각 지표는 자기 고정 TF 의 데이터만 참조 (BB/Harmonic/Ichimoku 등은 1H~4H).
+
+    Args:
+        df_by_tf: TF 별 DataFrame 딕셔너리.
+        config: 어떤 Selectable 지표를 켤지 결정.
+
+    Returns:
+        활성화된 지표들의 ``EntrySignal`` 합본 리스트.
+    """
+    signals: list[EntrySignal] = []
+
+    if config.use_bollinger:
+        df_1h = df_by_tf.get("1H")
+        if df_1h is not None:
+            signals.extend(detect_bollinger_touch(df_1h, config))
+
+    # TODO(장수): MA Cross, Harmonic, Ichimoku 추가 (별도 PR)
+
+    return signals

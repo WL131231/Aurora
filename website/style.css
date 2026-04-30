@@ -324,6 +324,13 @@ body {
     50%      { background-position: 100% 50%; }
 }
 
+/* 태그라인 — 사진 배경 위에서도 가독성 보장 */
+.tagline {
+    text-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.7),
+        0 0 24px rgba(0, 0, 0, 0.5);
+}
+
 /* hero 타이틀 외곽 글로우 */
 .hero-title::after {
     content: "AURORA";

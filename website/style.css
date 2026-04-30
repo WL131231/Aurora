@@ -326,7 +326,7 @@ body {
 
 /* hero 타이틀 외곽 글로우 */
 .hero-title::after {
-    content: "Aurora";
+    content: "AURORA";
     position: absolute;
     top: 0;
     left: 0;

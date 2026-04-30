@@ -178,6 +178,11 @@ def rsi_divergence(
 
     Raises:
         ValueError: 길이 불일치, 또는 파라미터 잘못된 값일 때.
+
+    Example:
+        >>> r = rsi(df["close"], period=14)
+        >>> div = rsi_divergence(df["low"], df["high"], r)
+        >>> df.loc[div == "regular_bull"]   # 강세 반전 시점만
     """
     if not (len(low) == len(high) == len(rsi_series)):
         raise ValueError(

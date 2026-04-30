@@ -10,7 +10,7 @@ from enum import StrEnum
 
 import pandas as pd
 
-from aurora.core.indicators import bollinger_bands, ema, rsi, rsi_divergence
+from aurora.core.indicators import bollinger_bands, ema, ma_cross, rsi, rsi_divergence
 
 # ============================================================
 # 공통 dataclass / enum
@@ -57,6 +57,11 @@ class StrategyConfig:
     """가장자리 라인에서 안쪽 ``proximity_pct`` 이내 = 진입 zone (예: 0.005 = 0.5%)."""
     bollinger_squeeze_threshold: float = 0.015
     """폭(upper-lower) / middle 이 이 값 이하면 squeeze 상태로 진입 보류 (기본 0.015 = 1.5%)."""
+
+    # MA Cross (Selectable — 1H/2H/4H 멀티 TF, HTF 가중치 자동 적용)
+    ma_cross_fast: int = 50
+    ma_cross_slow: int = 200
+    """SMA 기간. 골크/데크 표준은 50/200."""
 
 
 # ============================================================
@@ -305,6 +310,61 @@ def detect_bollinger_touch(
 
 
 # ============================================================
+# Selectable: MA Cross (1H/2H/4H, HTF 가중치 자동 적용)
+# ============================================================
+
+MA_CROSS_TIMEFRAMES: tuple[str, ...] = ("1H", "2H", "4H")
+
+
+def detect_ma_cross(
+    df_by_tf: dict[str, pd.DataFrame],
+    config: StrategyConfig,
+) -> list[EntrySignal]:
+    """이평선 골든/데드 크로스 진입 (멀티 TF).
+
+    각 TF 의 마지막 봉에서 막 발생한 cross 만 신호:
+        - golden → LONG  (빠른 MA가 느린 MA 위로 돌파)
+        - dead   → SHORT (빠른 MA가 느린 MA 아래로 돌파)
+
+    HTF 가중치 (1H=2, 2H=3, 4H=5) 는 ``signal.compose_entry`` 가 자동 적용.
+
+    Args:
+        df_by_tf: TF 별 OHLC DataFrame.
+        config: 전략 설정 (ma_cross_fast, ma_cross_slow).
+
+    Returns:
+        ``EntrySignal`` 리스트 (TF 별로 0~1 개).
+    """
+    signals: list[EntrySignal] = []
+
+    for tf in MA_CROSS_TIMEFRAMES:
+        df = df_by_tf.get(tf)
+        if df is None or df.empty or "close" not in df.columns:
+            continue
+
+        cross = ma_cross(df["close"], fast=config.ma_cross_fast, slow=config.ma_cross_slow)
+        last = cross.iloc[-1]
+        if last == "golden":
+            signals.append(EntrySignal(
+                direction=Direction.LONG,
+                timeframe=tf,
+                source="ma_cross_golden",
+                strength=1.0,
+                note=f"SMA{config.ma_cross_fast}/{config.ma_cross_slow} 골든크로스 ({tf})",
+            ))
+        elif last == "dead":
+            signals.append(EntrySignal(
+                direction=Direction.SHORT,
+                timeframe=tf,
+                source="ma_cross_dead",
+                strength=1.0,
+                note=f"SMA{config.ma_cross_fast}/{config.ma_cross_slow} 데드크로스 ({tf})",
+            ))
+
+    return signals
+
+
+# ============================================================
 # Selectable 지표 라우터 (사용자 on/off)
 # ============================================================
 
@@ -315,7 +375,7 @@ def evaluate_selectable(
 ) -> list[EntrySignal]:
     """사용자가 켠 Selectable 지표만 평가해서 신호 리스트 반환.
 
-    각 지표는 자기 고정 TF 의 데이터만 참조 (BB/Harmonic/Ichimoku 등은 1H~4H).
+    각 지표는 자기 고정 TF 의 데이터만 참조.
 
     Args:
         df_by_tf: TF 별 DataFrame 딕셔너리.
@@ -331,6 +391,9 @@ def evaluate_selectable(
         if df_1h is not None:
             signals.extend(detect_bollinger_touch(df_1h, config))
 
-    # TODO(장수): MA Cross, Harmonic, Ichimoku 추가 (별도 PR)
+    if config.use_ma_cross:
+        signals.extend(detect_ma_cross(df_by_tf, config))
+
+    # TODO(장수): Harmonic, Ichimoku 추가 (별도 PR)
 
     return signals

@@ -9,6 +9,7 @@ import pytest
 from aurora.core.indicators import (
     bollinger_bands,
     ema,
+    ma_cross,
     pivot_high,
     pivot_low,
     rsi,
@@ -268,3 +269,69 @@ def test_bb_invalid_period_raises() -> None:
 def test_bb_invalid_std_raises() -> None:
     with pytest.raises(ValueError):
         bollinger_bands(pd.Series([1.0, 2.0]), std=0)
+
+
+# ============================================================
+# MA Cross (Golden / Dead)
+# ============================================================
+
+
+def test_ma_cross_length_and_dtype() -> None:
+    """결과 길이는 입력과 동일, dtype object."""
+    rng = np.random.RandomState(0)
+    close = pd.Series(rng.randn(50).cumsum() + 100)
+    result = ma_cross(close, fast=5, slow=10)
+    assert len(result) == len(close)
+    assert result.dtype == object
+
+
+def test_ma_cross_constant_no_cross() -> None:
+    """일정 가격이면 fast == slow → 크로스 없음."""
+    close = pd.Series([100.0] * 100)
+    result = ma_cross(close, fast=5, slow=20)
+    assert result.dropna().empty
+
+
+def test_ma_cross_detects_golden() -> None:
+    """V자 (하락 → 상승) 데이터에서 golden cross 발생."""
+    closes = list(np.linspace(100, 50, 30)) + list(np.linspace(50, 100, 30))
+    result = ma_cross(pd.Series(closes), fast=5, slow=10)
+    assert "golden" in result.values
+
+
+def test_ma_cross_detects_dead() -> None:
+    """역 V자 (상승 → 하락) 데이터에서 dead cross 발생."""
+    closes = list(np.linspace(50, 100, 30)) + list(np.linspace(100, 50, 30))
+    result = ma_cross(pd.Series(closes), fast=5, slow=10)
+    assert "dead" in result.values
+
+
+def test_ma_cross_initial_bars_none() -> None:
+    """초기 slow 봉은 NaN → None."""
+    rng = np.random.RandomState(0)
+    close = pd.Series(rng.randn(50).cumsum() + 100)
+    result = ma_cross(close, fast=5, slow=20)
+    # 처음 20봉 (slow까지) 은 None
+    assert result.iloc[:19].isna().all()
+
+
+def test_ma_cross_only_valid_labels() -> None:
+    """결과 라벨은 'golden' / 'dead' / None 만."""
+    rng = np.random.RandomState(7)
+    close = pd.Series(rng.randn(200).cumsum() + 100)
+    result = ma_cross(close, fast=10, slow=30)
+    valid = result.dropna().unique()
+    assert all(label in ("golden", "dead") for label in valid)
+
+
+def test_ma_cross_invalid_period_raises() -> None:
+    with pytest.raises(ValueError):
+        ma_cross(pd.Series([1.0] * 50), fast=0, slow=10)
+
+
+def test_ma_cross_fast_ge_slow_raises() -> None:
+    """fast ≥ slow 면 무효."""
+    with pytest.raises(ValueError):
+        ma_cross(pd.Series([1.0] * 50), fast=10, slow=10)
+    with pytest.raises(ValueError):
+        ma_cross(pd.Series([1.0] * 50), fast=20, slow=10)

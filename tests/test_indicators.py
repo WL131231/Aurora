@@ -126,11 +126,15 @@ def test_rsi_divergence_only_valid_labels() -> None:
 
 
 def test_rsi_divergence_detects_bullish_pattern() -> None:
-    """급락 → 반등 → 더 낮지만 완만한 하락 → bullish 검출 기대."""
+    """급락 → 반등 → 더 낮지만 완만한 하락 → bullish 검출 기대.
+
+    데이터 길이 > lookback 이어야 검출 가능 (range(lookback, len) 루프).
+    35봉 / lookback=30 → bars 30~34 검사.
+    """
     close = pd.Series(
-        list(np.linspace(100.0, 60.0, 10))   # 급락 (RSI 깊이 떨어짐)
-        + list(np.linspace(60.0, 85.0, 8))    # 반등
-        + list(np.linspace(85.0, 55.0, 12)),  # 완만한 하락 (새 저점, RSI 덜 떨어짐)
+        list(np.linspace(100.0, 55.0, 10))   # 급락 10봉 (100→55), RSI 깊이 떨어짐
+        + list(np.linspace(60.0, 75.0, 5))    # 반등 5봉
+        + list(np.linspace(73.0, 45.0, 20)),  # 완만한 하락 20봉 (73→45), 새 저점
     )
     r = rsi(close, period=14)
     result = rsi_divergence(close, r, lookback=30)

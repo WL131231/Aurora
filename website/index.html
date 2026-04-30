@@ -27,31 +27,29 @@
 
     <!-- ===== Aurora 배경 ===== -->
     <div class="aurora-stage">
+        <!-- 사용자 사진 배경 (선택적) — assets/aurora-bg.jpg 추가 시 자동 적용 -->
+        <div class="bg-image"></div>
+
         <div class="aurora-band band-1"></div>
         <div class="aurora-band band-2"></div>
         <div class="aurora-band band-3"></div>
         <div class="aurora-band band-4"></div>
+        <div class="aurora-band band-5"></div>
+        <div class="aurora-band band-6"></div>
+
+        <!-- 하단 구름 블롭 -->
+        <div class="cloud-blob blob-1"></div>
+        <div class="cloud-blob blob-2"></div>
+
         <div id="stars" class="stars"></div>
         <div class="vignette"></div>
-
-        <!-- 동심원 링 (SPACE SPECIES 풍) -->
-        <div class="rings">
-            <div class="ring ring-1"></div>
-            <div class="ring ring-2"></div>
-            <div class="ring ring-3"></div>
-            <span class="ring-cross top">+</span>
-            <span class="ring-cross bottom">+</span>
-            <span class="ring-cross center">+</span>
-        </div>
     </div>
 
-    <!-- ===== NUMBER 인디케이터 (좌측) ===== -->
-    <div class="number-indicator">
-        <span class="label">NUMBER</span>
-        <div class="numbers">
-            <span class="big">05</span>
-            <span class="small">30</span>
-        </div>
+    <!-- ===== Coming Soon 인디케이터 (좌측) ===== -->
+    <div class="coming-soon-indicator">
+        <span class="status-dot"></span>
+        <span class="label">COMING SOON</span>
+        <div class="kr-text">곧 출시</div>
         <div class="underline"></div>
     </div>
 
@@ -78,14 +76,10 @@
         <ul class="hidden md:flex items-center gap-10 text-[11px] tracking-[0.2em] text-zinc-400">
             <li><a href="#" class="hover:text-white transition">FEATURES</a></li>
             <li><a href="#" class="hover:text-white transition">INDICATORS</a></li>
-            <li><a href="#" class="hover:text-white transition">DOCS</a></li>
         </ul>
 
         <div class="flex items-center gap-4 text-[11px] tracking-[0.2em] text-zinc-400">
             <span class="hidden md:inline">EN · KR</span>
-            <button class="px-4 py-2 rounded-full border border-zinc-700 hover:border-white transition">
-                LAUNCH ↗
-            </button>
         </div>
     </nav>
 

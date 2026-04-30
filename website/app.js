@@ -1,7 +1,18 @@
-/* Aurora 랜딩 — 별 파티클 생성 + 작은 인터랙션 */
+/* Aurora 랜딩 — 별 파티클 생성 + 작은 인터랙션 + 배경 사진 자동 감지 */
 
 (function () {
     "use strict";
+
+    // ===== 배경 사진 자동 감지 (assets/aurora-bg.jpg 있으면 표시) =====
+    const bgImage = document.querySelector(".bg-image");
+    if (bgImage) {
+        const testImg = new Image();
+        testImg.onload = () => bgImage.classList.add("has-image");
+        testImg.onerror = () => {
+            /* 파일 없음: CSS 오로라 띠 fallback */
+        };
+        testImg.src = "assets/aurora-bg.jpg";
+    }
 
     // ===== 별 파티클 동적 생성 =====
     const STAR_COUNT = 80;

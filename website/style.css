@@ -108,78 +108,8 @@ body {
     pointer-events: none;
 }
 
-/* ===== 동심원 링 (SPACE SPECIES 풍) ===== */
-.rings {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 80vmin;
-    height: 80vmin;
-    pointer-events: none;
-    z-index: 1;
-}
-
-.ring {
-    position: absolute;
-    border-radius: 50%;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    border-style: solid;
-}
-
-.ring-1 {
-    width: 100%;
-    height: 100%;
-    border-width: 1px;
-    border-color: rgba(255, 255, 255, 0.07);
-}
-
-.ring-2 {
-    width: 68%;
-    height: 68%;
-    border-width: 1px;
-    border-color: rgba(255, 255, 255, 0.06);
-}
-
-.ring-3 {
-    width: 38%;
-    height: 38%;
-    border-width: 1px;
-    border-color: rgba(255, 255, 255, 0.05);
-}
-
-.ring-cross {
-    position: absolute;
-    color: rgba(255, 255, 255, 0.45);
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-size: 14px;
-    font-weight: 200;
-    line-height: 1;
-    user-select: none;
-}
-
-.ring-cross.top {
-    top: -8px;
-    left: 50%;
-    transform: translateX(-50%);
-}
-
-.ring-cross.bottom {
-    bottom: -8px;
-    left: 50%;
-    transform: translateX(-50%);
-}
-
-.ring-cross.center {
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-}
-
-/* ===== NUMBER 인디케이터 (좌측) ===== */
-.number-indicator {
+/* ===== Coming Soon 인디케이터 (좌측) ===== */
+.coming-soon-indicator {
     position: absolute;
     left: clamp(2rem, 5vw, 6rem);
     top: 50%;
@@ -189,46 +119,154 @@ body {
     user-select: none;
 }
 
-.number-indicator .label {
+.coming-soon-indicator .status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22d3ee;
+    box-shadow: 0 0 12px rgba(34, 211, 238, 0.8);
+    margin-bottom: 1rem;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.6; transform: scale(1.2); }
+}
+
+.coming-soon-indicator .label {
+    display: block;
     font-size: 11px;
     letter-spacing: 0.3em;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.55);
     margin-bottom: 0.75rem;
-    display: block;
 }
 
-.number-indicator .numbers {
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-}
-
-.number-indicator .big {
+.coming-soon-indicator .kr-text {
     font-family: var(--font-display);
-    font-size: 3.5rem;
+    font-size: 2.5rem;
     font-weight: 300;
     line-height: 1;
-    color: rgba(255, 255, 255, 0.95);
+    color: rgba(255, 255, 255, 0.92);
+    margin-bottom: 0.75rem;
 }
 
-.number-indicator .small {
-    font-family: var(--font-display);
-    font-size: 1.25rem;
-    font-weight: 300;
-    color: rgba(255, 255, 255, 0.4);
-}
-
-.number-indicator .underline {
-    margin-top: 0.75rem;
+.coming-soon-indicator .underline {
     width: 3rem;
     height: 1px;
     background: linear-gradient(to right, rgba(255, 255, 255, 0.5), transparent);
 }
 
 @media (max-width: 1024px) {
-    .number-indicator {
+    .coming-soon-indicator {
         display: none;
     }
+}
+
+/* ===== 사진 배경 (선택적) ============================
+   assets/aurora-bg.jpg 파일이 있으면 자동 적용.
+   없으면 background-image 가 깨져도 그냥 투명 → CSS 오로라 띠가 보임.
+   ===================================================== */
+.bg-image {
+    position: absolute;
+    inset: -5%;
+    background-image: url("assets/aurora-bg.jpg");
+    background-size: cover;
+    background-position: center;
+    opacity: 0;
+    /* 이미지 로드 성공 시 보이게 하려면 onload 처리 또는 fallback CSS */
+    /* 기본은 0 — 이미지 추가 후 opacity 0.6 정도로 조정 */
+    animation: ken-burns 30s ease-in-out infinite;
+}
+
+/* 이미지가 있을 때 자동 보이게 — 이 클래스는 JS 또는 inline 으로 토글 */
+.bg-image.has-image {
+    opacity: 0.55;
+    mix-blend-mode: screen;
+}
+
+@keyframes ken-burns {
+    0%, 100% { transform: scale(1) translate(0, 0); }
+    33%      { transform: scale(1.08) translate(-1.5%, 1.5%); }
+    66%      { transform: scale(1.05) translate(2%, -1%); }
+}
+
+/* ===== 하단 구름 블롭 (오로라 사진 분위기 살리기) ===== */
+.cloud-blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(90px);
+    mix-blend-mode: screen;
+    pointer-events: none;
+}
+
+.blob-1 {
+    bottom: -10vh;
+    left: 0;
+    width: 60vw;
+    height: 35vh;
+    background: radial-gradient(ellipse, rgba(217, 70, 239, 0.4), transparent 70%);
+    animation: cloud-drift 30s ease-in-out infinite alternate;
+}
+
+.blob-2 {
+    bottom: -15vh;
+    right: 0;
+    width: 50vw;
+    height: 30vh;
+    background: radial-gradient(ellipse, rgba(99, 102, 241, 0.35), transparent 70%);
+    animation: cloud-drift 25s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes cloud-drift {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(80px); }
+}
+
+/* ===== 추가 빛 띠 5, 6 (오로라 사진처럼 더 풍부하게) ===== */
+.band-5 {
+    width: 80vw;
+    height: 30vh;
+    top: 5vh;
+    left: 10vw;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(217, 70, 239, 0.35) 30%,
+        rgba(168, 85, 247, 0.4) 50%,
+        rgba(99, 102, 241, 0.3) 70%,
+        transparent 100%
+    );
+    border-radius: 50%;
+    filter: blur(60px);
+    opacity: 0.8;
+    mix-blend-mode: screen;
+    animation: ribbon-flow 14s ease-in-out infinite alternate;
+}
+
+.band-6 {
+    width: 70vw;
+    height: 25vh;
+    top: 25vh;
+    left: 15vw;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(34, 211, 238, 0.3) 30%,
+        rgba(20, 184, 166, 0.4) 50%,
+        rgba(168, 85, 247, 0.3) 70%,
+        transparent 100%
+    );
+    border-radius: 50%;
+    filter: blur(70px);
+    opacity: 0.7;
+    mix-blend-mode: screen;
+    animation: ribbon-flow 18s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes ribbon-flow {
+    0%   { transform: translateX(0)     scaleY(1)   skewX(0deg); }
+    50%  { transform: translateX(-3%)   scaleY(1.1) skewX(-2deg); }
+    100% { transform: translateX(3%)    scaleY(0.9) skewX(2deg); }
 }
 
 /* ===== 로고 마크 (홀로그램 글로우) ===== */

@@ -1,0 +1,187 @@
+/* ============================================================
+   Aurora 랜딩 — 커스텀 스타일
+   Tailwind 로 처리 못하는 그라디언트·애니메이션·필터 효과만 작성.
+   ============================================================ */
+
+/* ===== 폰트 ===== */
+:root {
+    --font-display: "Space Grotesk", "Pretendard Variable", system-ui, sans-serif;
+    --font-sans: "Pretendard Variable", "Space Grotesk", system-ui, sans-serif;
+}
+
+body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+/* ===== Aurora 배경 무대 ===== */
+.aurora-stage {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background: #06060a;
+}
+
+/* 오로라 빛 띠 (4 layer) */
+.aurora-band {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.6;
+    mix-blend-mode: screen;
+}
+
+.band-1 {
+    width: 70vw;
+    height: 70vh;
+    top: -20vh;
+    left: 10vw;
+    background: radial-gradient(circle, rgba(168, 85, 247, 0.6), transparent 70%);
+    animation: drift 18s ease-in-out infinite alternate;
+}
+
+.band-2 {
+    width: 60vw;
+    height: 60vh;
+    top: 10vh;
+    right: -10vw;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.55), transparent 70%);
+    animation: drift 22s ease-in-out infinite alternate-reverse;
+}
+
+.band-3 {
+    width: 50vw;
+    height: 50vh;
+    bottom: -10vh;
+    left: 20vw;
+    background: radial-gradient(circle, rgba(34, 211, 238, 0.4), transparent 70%);
+    animation: drift 25s ease-in-out infinite alternate;
+}
+
+.band-4 {
+    width: 40vw;
+    height: 40vh;
+    top: 30vh;
+    left: 40vw;
+    background: radial-gradient(circle, rgba(236, 72, 153, 0.3), transparent 70%);
+    animation: drift 20s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes drift {
+    0%   { transform: translate(0, 0) scale(1)   rotate(0deg); }
+    25%  { transform: translate(40px, -30px) scale(1.1) rotate(15deg); }
+    50%  { transform: translate(-30px, 40px) scale(0.95) rotate(-10deg); }
+    75%  { transform: translate(50px, 20px) scale(1.05) rotate(20deg); }
+    100% { transform: translate(-20px, -40px) scale(1) rotate(-5deg); }
+}
+
+/* ===== 별 파티클 (JS 로 생성, 여기선 컨테이너만) ===== */
+.stars {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+}
+
+.star {
+    position: absolute;
+    width: 2px;
+    height: 2px;
+    background: white;
+    border-radius: 50%;
+    opacity: 0;
+    animation: twinkle 4s ease-in-out infinite;
+}
+
+@keyframes twinkle {
+    0%, 100% { opacity: 0;   transform: scale(0.6); }
+    50%      { opacity: 0.8; transform: scale(1.0); }
+}
+
+/* ===== 비네팅 (테두리 어둡게) ===== */
+.vignette {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, transparent 30%, #06060a 100%);
+    pointer-events: none;
+}
+
+/* ===== 로고 마크 (홀로그램 글로우) ===== */
+.logo-mark {
+    filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.6));
+}
+
+/* ===== Hero 거대 타이포 ===== */
+.hero-title {
+    font-family: var(--font-display);
+    font-weight: 300;
+    font-size: clamp(4rem, 18vw, 14rem);
+    line-height: 1;
+    letter-spacing: -0.04em;
+    margin: 0;
+    position: relative;
+}
+
+.hero-title-text {
+    background: linear-gradient(
+        135deg,
+        #ffffff 0%,
+        #d8b4fe 25%,
+        #a855f7 50%,
+        #6366f1 75%,
+        #22d3ee 100%
+    );
+    background-size: 300% 300%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    animation: gradient-shift 8s ease-in-out infinite;
+    text-shadow: 0 0 60px rgba(168, 85, 247, 0.3);
+    display: inline-block;
+}
+
+@keyframes gradient-shift {
+    0%, 100% { background-position: 0% 50%; }
+    50%      { background-position: 100% 50%; }
+}
+
+/* hero 타이틀 외곽 글로우 */
+.hero-title::after {
+    content: "Aurora";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: rgba(168, 85, 247, 0.15);
+    filter: blur(40px);
+    z-index: -1;
+    pointer-events: none;
+    font-weight: 300;
+    letter-spacing: -0.04em;
+}
+
+/* ===== 반응형 미세조정 ===== */
+@media (max-width: 768px) {
+    .aurora-band {
+        filter: blur(60px);
+    }
+}
+
+/* ===== 스크롤바 (다크) ===== */
+::-webkit-scrollbar {
+    width: 6px;
+}
+::-webkit-scrollbar-track {
+    background: #06060a;
+}
+::-webkit-scrollbar-thumb {
+    background: #1f1f2a;
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #2a2a3a;
+}

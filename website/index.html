@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aurora — Next-Generation Algorithmic Trading</title>
+    <meta name="description" content="Aurora는 멀티 거래소·고배율·고빈도 자동매매 봇입니다. EMA · RSI Divergence · Bollinger Bands · MA Cross · Harmonic 통합." />
+
+    <!-- OG (Future deployment: aurora_project.com) -->
+    <meta property="og:title" content="Aurora — Algorithmic Trading" />
+    <meta property="og:description" content="다음 세대 자동매매를 정의하다" />
+    <meta property="og:url" content="https://aurora_project.com" />
+    <meta property="og:type" content="website" />
+
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Fonts: Space Grotesk (영문) + Pretendard (한글) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body class="font-sans bg-[#06060a] text-white overflow-x-hidden">
+
+    <!-- ===== Aurora 배경 ===== -->
+    <div class="aurora-stage">
+        <div class="aurora-band band-1"></div>
+        <div class="aurora-band band-2"></div>
+        <div class="aurora-band band-3"></div>
+        <div class="aurora-band band-4"></div>
+        <div id="stars" class="stars"></div>
+        <div class="vignette"></div>
+    </div>
+
+    <!-- ===== 상단 nav ===== -->
+    <nav class="relative z-20 flex items-center justify-between px-8 lg:px-16 py-6">
+        <div class="flex items-center gap-3">
+            <!-- 로고 마크: 다이아몬드 with gradient -->
+            <div class="logo-mark">
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                    <defs>
+                        <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#a855f7" />
+                            <stop offset="50%" stop-color="#6366f1" />
+                            <stop offset="100%" stop-color="#22d3ee" />
+                        </linearGradient>
+                    </defs>
+                    <path d="M14 2 L26 14 L14 26 L2 14 Z" stroke="url(#logoGrad)" stroke-width="1.5" fill="none" />
+                    <path d="M14 8 L20 14 L14 20 L8 14 Z" fill="url(#logoGrad)" opacity="0.6" />
+                </svg>
+            </div>
+            <span class="text-sm tracking-[0.25em] font-light">AURORA</span>
+        </div>
+
+        <ul class="hidden md:flex items-center gap-10 text-[11px] tracking-[0.2em] text-zinc-400">
+            <li><a href="#" class="hover:text-white transition">FEATURES</a></li>
+            <li><a href="#" class="hover:text-white transition">INDICATORS</a></li>
+            <li><a href="#" class="hover:text-white transition">DOCS</a></li>
+        </ul>
+
+        <div class="flex items-center gap-4 text-[11px] tracking-[0.2em] text-zinc-400">
+            <span class="hidden md:inline">EN · KR</span>
+            <button class="px-4 py-2 rounded-full border border-zinc-700 hover:border-white transition">
+                LAUNCH ↗
+            </button>
+        </div>
+    </nav>
+
+    <!-- ===== Hero ===== -->
+    <main class="relative z-10 min-h-[calc(100vh-100px)] flex flex-col items-center justify-center px-8 text-center">
+
+        <!-- 상단 미니 라벨 -->
+        <div class="mb-8 flex items-center gap-2 text-[10px] tracking-[0.3em] text-zinc-500">
+            <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            v0.1.0 · ALGORITHMIC TRADING ENGINE
+        </div>
+
+        <!-- 거대 타이포 -->
+        <h1 class="hero-title">
+            <span class="hero-title-text">Aurora</span>
+        </h1>
+
+        <!-- 태그라인 -->
+        <p class="mt-8 max-w-2xl text-base md:text-lg text-zinc-400 font-light leading-relaxed">
+            다음 세대 자동매매의 정의 — 멀티 거래소, 고배율, 고빈도.
+            <br />
+            <span class="text-zinc-500 text-sm">
+                Multi-Exchange · 10×~50× Leverage · Real-Time Signal Composition
+            </span>
+        </p>
+
+        <!-- 부가 정보 카드 -->
+        <div class="mt-16 grid grid-cols-2 md:grid-cols-4 gap-px bg-zinc-800/40 rounded-2xl overflow-hidden backdrop-blur-sm border border-zinc-800/50">
+            <div class="bg-[#0a0a14]/60 px-8 py-6 text-left">
+                <div class="text-[10px] tracking-[0.3em] text-zinc-500 mb-2">INDICATORS</div>
+                <div class="text-3xl font-light">6</div>
+                <div class="text-[10px] text-zinc-600 mt-1">EMA · RSI · BB · MA · Harmonic · Ichimoku</div>
+            </div>
+            <div class="bg-[#0a0a14]/60 px-8 py-6 text-left">
+                <div class="text-[10px] tracking-[0.3em] text-zinc-500 mb-2">TIMEFRAMES</div>
+                <div class="text-3xl font-light">8</div>
+                <div class="text-[10px] text-zinc-600 mt-1">15m → 1W weighted composition</div>
+            </div>
+            <div class="bg-[#0a0a14]/60 px-8 py-6 text-left">
+                <div class="text-[10px] tracking-[0.3em] text-zinc-500 mb-2">EXCHANGES</div>
+                <div class="text-3xl font-light">∞</div>
+                <div class="text-[10px] text-zinc-600 mt-1">ccxt unified — Bybit · OKX · Binance</div>
+            </div>
+            <div class="bg-[#0a0a14]/60 px-8 py-6 text-left">
+                <div class="text-[10px] tracking-[0.3em] text-zinc-500 mb-2">LEVERAGE</div>
+                <div class="text-3xl font-light">50<span class="text-base text-zinc-500">×</span></div>
+                <div class="text-[10px] text-zinc-600 mt-1">10×~50× user-configurable</div>
+            </div>
+        </div>
+
+        <!-- 하단 스크롤 인디케이터 -->
+        <div class="mt-16 flex flex-col items-center gap-2 text-[10px] tracking-[0.4em] text-zinc-600">
+            <span>SCROLL</span>
+            <div class="w-px h-12 bg-gradient-to-b from-zinc-700 to-transparent"></div>
+        </div>
+    </main>
+
+    <!-- ===== Footer ===== -->
+    <footer class="relative z-10 px-8 lg:px-16 py-8 mt-12 flex flex-col md:flex-row items-center justify-between gap-4 text-[10px] tracking-[0.2em] text-zinc-600 border-t border-zinc-900">
+        <div>© 2026 AURORA · PROPRIETARY</div>
+        <div class="flex items-center gap-6">
+            <span>BUILT WITH PYTHON · FASTAPI · CCXT</span>
+            <span class="text-zinc-700">aurora_project.com</span>
+        </div>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

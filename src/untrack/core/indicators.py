@@ -4,8 +4,9 @@
     - 순수 함수 (외부 상태·IO 없음)
     - pandas DataFrame 입력 표준: ['open', 'high', 'low', 'close', 'volume']
     - 결과는 입력 인덱스를 그대로 유지
+    - pandas + numpy 만 사용 (외부 지표 라이브러리 의존 X)
 
-담당: 팀원 A
+담당: 장수
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ def ema(close: pd.Series, period: int) -> pd.Series:
     Returns:
         EMA 시리즈.
     """
-    # TODO(A): pandas-ta 또는 직접 구현
+    # TODO(장수): pandas + numpy 로 직접 구현 (pandas-ta 사용 안 함)
     raise NotImplementedError
 
 

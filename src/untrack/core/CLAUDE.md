@@ -5,7 +5,7 @@
 입력: OHLCV DataFrame + 사용자 설정 → 출력: 신호 / 포지션 사이즈 / SL·TP 가격.
 
 ## 파일별 역할
-- `indicators.py` — EMA, RSI, RSI Divergence, BB, MA Cross, Harmonic, Ichimoku 계산 함수들
+- `indicators.py` — EMA, RSI, RSI Divergence (4종), BB, MA Cross, Harmonic, Ichimoku 계산 함수들 + 피벗 헬퍼(`pivot_low`, `pivot_high`)
 - `strategy.py` — 진입 룰 (EMA 터치, Divergence 단독, Select 지표 OR 조합)
 - `signal.py` — Fixed + Selectable 지표 결과를 합쳐서 최종 진입/청산 신호 산출
 - `risk.py` — 포지션 사이즈, SL/TP 거리 계산, 트레일링 로직, 레버리지별 SL 캡
@@ -15,6 +15,16 @@
 - **Selectable**: Bollinger / MA Cross / Harmonic / Ichimoku (사용자 on/off)
 - **단일 신호 진입 가능** (OR 방식)
 - **Tako TP/SL**: ATR/Fixed%/Manual% 3모드 + 4단계 분할 + 5가지 트레일링
+
+## RSI 사용 정책
+- **RSI 수치 자체는 진입 신호 X** (과매수/과매도 룰 사용 안 함)
+- **RSI Divergence 만 진입 신호** (TradingView 표준, 피벗 기반)
+- 4 가지 종류 검출:
+  - `regular_bull` — 가격 LL + RSI HL → 강세 반전 (롱 진입)
+  - `hidden_bull` — 가격 HL + RSI LL → 상승 추세 지속 (롱 추가)
+  - `regular_bear` — 가격 HH + RSI LH → 약세 반전 (숏 진입)
+  - `hidden_bear` — 가격 LH + RSI HH → 하락 추세 지속 (숏 추가)
+- 파라미터: `lb_left=5`, `lb_right=5`, `range_lower=5`, `range_upper=60`
 
 ## SL/TP 룰 (레버리지 기반, 구간 분기 + 그래디언트)
 

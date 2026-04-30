@@ -6,7 +6,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from untrack.core.indicators import ema, rsi, rsi_divergence
+from untrack.core.indicators import (
+    ema,
+    pivot_high,
+    pivot_low,
+    rsi,
+    rsi_divergence,
+)
 
 # ============================================================
 # EMA
@@ -38,7 +44,6 @@ def test_ema_recent_weighted_more_than_old() -> None:
     """최근 가격이 더 큰 가중치 → 단조 상승 시리즈에서 EMA 는 항상 입력보다 작거나 같음."""
     close = pd.Series([float(x) for x in range(100)])
     result = ema(close, period=20)
-    # 모든 위치에서 EMA <= close (단조 상승이므로 EMA 는 따라가는 형태)
     assert (result <= close).all()
 
 
@@ -94,64 +99,110 @@ def test_rsi_invalid_period_raises() -> None:
 
 
 # ============================================================
+# Pivot 헬퍼
+# ============================================================
+
+
+def test_pivot_low_detects_local_min() -> None:
+    """V 자 시리즈의 바닥이 피벗 저점으로 검출되어야 함."""
+    series = pd.Series([5.0, 4.0, 3.0, 2.0, 1.0, 2.0, 3.0, 4.0, 5.0])
+    # 인덱스 4 가 최저점, lb_left=4, lb_right=4 → 봉 8 에서 검출
+    result = pivot_low(series, lb_left=4, lb_right=4)
+    assert bool(result.iloc[8]) is True
+
+
+def test_pivot_high_detects_local_max() -> None:
+    """역 V 자 시리즈의 꼭대기가 피벗 고점으로 검출되어야 함."""
+    series = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0, 4.0, 3.0, 2.0, 1.0])
+    result = pivot_high(series, lb_left=4, lb_right=4)
+    assert bool(result.iloc[8]) is True
+
+
+def test_pivot_low_invalid_lb_raises() -> None:
+    series = pd.Series([1.0] * 20)
+    with pytest.raises(ValueError):
+        pivot_low(series, lb_left=0, lb_right=5)
+
+
+def test_pivot_high_invalid_lb_raises() -> None:
+    series = pd.Series([1.0] * 20)
+    with pytest.raises(ValueError):
+        pivot_high(series, lb_left=5, lb_right=0)
+
+
+# ============================================================
 # RSI Divergence
 # ============================================================
 
 
 def test_rsi_divergence_length_matches_input() -> None:
     rng = np.random.RandomState(0)
-    close = pd.Series(rng.randn(100).cumsum() + 100)
+    close = pd.Series(rng.randn(200).cumsum() + 100)
     r = rsi(close, period=14)
-    result = rsi_divergence(close, r, lookback=20)
+    result = rsi_divergence(close, close, r)
     assert len(result) == len(close)
 
 
-def test_rsi_divergence_initial_window_is_none() -> None:
-    """lookback 봉 이전에는 비교 불가 → 모두 None."""
-    rng = np.random.RandomState(0)
-    close = pd.Series(rng.randn(100).cumsum() + 100)
-    r = rsi(close, period=14)
-    result = rsi_divergence(close, r, lookback=20)
-    assert result.iloc[:20].isna().all()
-
-
 def test_rsi_divergence_only_valid_labels() -> None:
-    """결과는 'bullish' / 'bearish' / None 만 포함."""
+    """결과 라벨은 4 가지 종류 또는 None 만."""
     rng = np.random.RandomState(7)
-    close = pd.Series(rng.randn(100).cumsum() + 100)
+    close = pd.Series(rng.randn(300).cumsum() + 100)
     r = rsi(close, period=14)
-    result = rsi_divergence(close, r, lookback=20)
-    valid_labels = result.dropna().unique()
-    assert all(label in ("bullish", "bearish") for label in valid_labels)
+    result = rsi_divergence(close, close, r)
+    valid = result.dropna().unique()
+    expected = {"regular_bull", "hidden_bull", "regular_bear", "hidden_bear"}
+    assert all(label in expected for label in valid)
 
 
-def test_rsi_divergence_detects_bullish_pattern() -> None:
-    """급락 → 반등 → 더 낮지만 완만한 하락 → bullish 검출 기대.
+def test_rsi_divergence_detects_regular_bull() -> None:
+    """규칙적 강세 다이버전스: 가격 새 저점 + RSI 더 높은 저점.
 
-    데이터 길이 > lookback 이어야 검출 가능 (range(lookback, len) 루프).
-    35봉 / lookback=30 → bars 30~34 검사.
+    피벗 확정에 lb_right(5) 봉의 미래가 필요하므로 회복 구간을 데이터에 포함.
+    1차 급락 → 반등(피벗1 확정) → 2차 완만한 하락 → 회복(피벗2 확정).
     """
     close = pd.Series(
-        list(np.linspace(100.0, 55.0, 10))   # 급락 10봉 (100→55), RSI 깊이 떨어짐
-        + list(np.linspace(60.0, 75.0, 5))    # 반등 5봉
-        + list(np.linspace(73.0, 45.0, 20)),  # 완만한 하락 20봉 (73→45), 새 저점
+        list(np.linspace(100.0, 50.0, 30))     # 1차 급락: 매우 가파름 → RSI 깊이 떨어짐
+        + list(np.linspace(50.0, 75.0, 20))     # 반등 (피벗1 확정)
+        + list(np.linspace(75.0, 40.0, 35))     # 2차 완만 하락 → 새 저점 + RSI 덜 떨어짐
+        + list(np.linspace(40.0, 55.0, 15)),    # 회복 (피벗2 확정)
     )
     r = rsi(close, period=14)
-    result = rsi_divergence(close, r, lookback=30)
-    assert "bullish" in result.values, (
-        f"bullish 미검출. 결과: {result.dropna().tolist()}"
+    result = rsi_divergence(close, close, r)
+    assert "regular_bull" in result.values, (
+        f"regular_bull 미검출. 결과: {result.dropna().tolist()}"
     )
 
 
-def test_rsi_divergence_invalid_lookback_raises() -> None:
-    close = pd.Series([1.0] * 50)
-    r = pd.Series([50.0] * 50)
-    with pytest.raises(ValueError):
-        rsi_divergence(close, r, lookback=2)
+def test_rsi_divergence_detects_regular_bear() -> None:
+    """규칙적 약세 다이버전스: 가격 새 고점 + RSI 더 낮은 고점."""
+    close = pd.Series(
+        list(np.linspace(50.0, 100.0, 30))     # 1차 급등: 가파름 → RSI 높이 오름
+        + list(np.linspace(100.0, 75.0, 20))    # 조정 (피벗1 확정)
+        + list(np.linspace(75.0, 110.0, 35))    # 2차 완만 상승 → 새 고점 + RSI 덜 오름
+        + list(np.linspace(110.0, 95.0, 15)),   # 조정 (피벗2 확정)
+    )
+    r = rsi(close, period=14)
+    result = rsi_divergence(close, close, r)
+    assert "regular_bear" in result.values, (
+        f"regular_bear 미검출. 결과: {result.dropna().tolist()}"
+    )
 
 
 def test_rsi_divergence_length_mismatch_raises() -> None:
-    close = pd.Series([1.0] * 30)
+    low = pd.Series([1.0] * 30)
+    high = pd.Series([2.0] * 30)
     r = pd.Series([50.0] * 25)
     with pytest.raises(ValueError):
-        rsi_divergence(close, r)
+        rsi_divergence(low, high, r)
+
+
+def test_rsi_divergence_invalid_lb_raises() -> None:
+    s = pd.Series([1.0] * 50)
+    with pytest.raises(ValueError):
+        rsi_divergence(s, s, s, lb_left=0)
+
+
+def test_rsi_divergence_invalid_range_raises() -> None:
+    s = pd.Series([1.0] * 50)
+    with pytest.raises(ValueError):
+        rsi_divergence(s, s, s, range_lower=10, range_upper=5)

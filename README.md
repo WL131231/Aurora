@@ -4,7 +4,7 @@
 
 ## 핵심 정책
 - **AI API 호출 금지** — 100% 룰 기반 의사결정
-- 멀티 거래소: Bybit / OKX / Binance (ccxt 통합)
+- 멀티 거래소 (보류 — 컨택 중): ccxt 통합으로 어떤 거래소든 연결 가능한 구조
 - 페어: BTCUSDT, ETHUSDT (확장 예정)
 - 레버리지: 사용자 설정 (10x ~ 50x)
 - 인터페이스: `.exe` GUI (Pywebview + HTML/Tailwind/JS) + Telegram Bot

@@ -42,10 +42,14 @@
 - 공통: `__init__.py`, `config.py`, `main.py`, `pyproject.toml`, `tests/`
 
 ## 거래소 / 페어
-- **1순위 거래소**: Bybit (먼저 동작 확인 후 OKX, Binance 확장)
+- **거래소**: **보류** — 장수가 수수료율 높은 거래소와 별도 컨택 중
+  - 정책: ccxt 통합으로 어떤 거래소든 연결 가능한 구조 (어댑터 한 줄 추가로 확장)
+  - 후보: Bybit / OKX / Binance / 컨택 중인 거래소
 - **1순위 페어**: BTCUSDT, ETHUSDT (둘 다)
-- 추후 확장: OKX, Binance, 알트 페어
+- 추후 확장: 알트 페어
 - 레버리지: 사용자 설정, 10x ~ 50x
+- **동시 포지션**: 페어당 최대 1개 (ETH Long + BTC Short ⭕ / ETH Long + ETH Short ❌)
+- **시간대**: KST (Asia/Seoul) — 모든 표시 시각 기준 (거래소 데이터는 UTC, 변환 필요)
 
 ## 협업 규칙
 - **머지 방식**: Squash only (Merge commit / Rebase 비활성화 — GitHub 설정으로 강제)
@@ -61,8 +65,11 @@
 - **Phase 3**: 정식 배포 + 라이센스/구독 시스템
 
 ## 유의사항
-- 레버리지별 SL 캡: 10x → 최소 7%, 50x → 최소 3% (반비례, 청산선 거리 기반)
+- **SL/TP 룰** (레버리지별 구간 분기): 자세한 공식은 `src/untrack/core/CLAUDE.md` 참조
+  - 10~37x 보수: SL 2~3% / TP 3~5% 그래디언트
+  - 38~50x 공격: SL 0.08×L / TP SL+2~3
 - 펀딩비/수수료/슬리피지는 백테스트와 실거래 모두 반영 필요
-- 동시 포지션 수 제한 (기본 1개, 사용자 설정 가능)
+- **동시 포지션**: 페어당 1개 (config `max_positions_per_pair`)
+- **시간대**: KST (config `timezone`)
 - 4 명 팀 모두 AI 위주 작업 → 명확한 모듈 경계 + 풍부한 docstring 유지
 - 라이선스: 비공개 (Proprietary) — 배포·구독 모델

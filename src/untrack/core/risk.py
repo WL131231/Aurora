@@ -6,16 +6,15 @@ Tako 차용:
     - 5가지 트레일링: Moving Target, Moving 2-Target, Breakeven,
       Percent Below Triggers, Percent Below Highest
 
-담당: 팀원 A
+담당: 장수
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Literal
 
-import pandas as pd
+# Note: pandas / Literal 등은 추후 ATR 계산·구체 구현 시 다시 import.
 
 
 class TpSlMode(str, Enum):
@@ -70,18 +69,65 @@ class RiskPlan:
     trailing_mode: TrailingMode
 
 
-def min_sl_pct_by_leverage(leverage: int) -> float:
-    """레버리지별 최소 SL 거리 — 청산 위험 방지.
+def sl_pct_for_leverage(leverage: int) -> float:
+    """레버리지별 SL 거리 (가격 변동 %).
+
+    구간 분기:
+        10x ~ 37x (보수): SL = 2 + (L - 10) / 27   (선형: 10x→2%, 37x→3%)
+        38x ~ 50x (공격): SL = 0.08 × L            (50x→4%)
+
+    근거:
+        - 저배율(10~37x): 작은 가격 변동에도 의미 있는 거래라 SL 2~3% 충분.
+        - 고배율(38~50x): 풀시드 수수료가 시드를 많이 갉아먹음 (50x = 5.5%)
+                          → 더 큰 가격 변동 필요.
+        - 37x→38x 경계: 보수 → 공격 전환점 (의도된 점프).
 
     예시:
-        10x → 7%
-        20x → 5%
-        50x → 3%
+        10x → 2.00%
+        37x → 3.00% (보수 영역 끝)
+        38x → 3.04% (공격 영역 시작)
+        50x → 4.00%
 
-    이 값보다 좁은 SL은 청산선에 근접해 위험.
+    Note: 출발값이고 테스트 결과 따라 조정 가능.
     """
-    # TODO(A): 사용자 룰 확정 후 구현
-    raise NotImplementedError
+    if leverage <= 37:
+        return 2.0 + (leverage - 10) / 27.0
+    return 0.08 * leverage
+
+
+def tp_pct_range_for_leverage(leverage: int) -> tuple[float, float]:
+    """레버리지별 TP 범위 (가격 변동 %).
+
+    구간 분기:
+        10x ~ 37x: TP min/max 모두 선형 그래디언트
+            TP min(L) = SL(L) + 0.8        (10x→2.8%, 37x→3.8%)
+            TP max(L) = SL(L) + 1.8        (10x→3.8%, 37x→4.8%)
+        38x ~ 50x: TP = SL + 2 ~ 3
+            TP min = SL + 2.0              (50x→6%)
+            TP max = SL + 3.0              (50x→7%)
+
+    저배율은 작은 익절을 빈도로 누적, 고배율은 큰 가격 변동 요구.
+    사용자가 min~max 범위 내에서 선택 (디폴트 mid).
+
+    Returns:
+        (tp_min, tp_max) 튜플.
+
+    예시:
+        10x → (2.80%, 3.80%)
+        37x → (3.80%, 4.80%)
+        38x → (5.04%, 6.04%)
+        50x → (6.00%, 7.00%)
+    """
+    sl = sl_pct_for_leverage(leverage)
+    if leverage <= 37:
+        return (sl + 0.8, sl + 1.8)
+    return (sl + 2.0, sl + 3.0)
+
+
+# === Deprecated alias (이전 이름) ===
+def min_sl_pct_by_leverage(leverage: int) -> float:
+    """Deprecated: sl_pct_for_leverage 를 사용할 것."""
+    return sl_pct_for_leverage(leverage)
 
 
 def calc_position_size(

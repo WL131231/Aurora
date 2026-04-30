@@ -12,18 +12,18 @@ Tako 차용:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 # Note: pandas / Literal 등은 추후 ATR 계산·구체 구현 시 다시 import.
 
 
-class TpSlMode(str, Enum):
+class TpSlMode(StrEnum):
     ATR = "atr"
     FIXED_PCT = "fixed_pct"
     MANUAL = "manual"
 
 
-class TrailingMode(str, Enum):
+class TrailingMode(StrEnum):
     OFF = "off"
     MOVING_TARGET = "moving_target"
     MOVING_2_TARGET = "moving_2_target"

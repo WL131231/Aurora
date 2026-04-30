@@ -6,13 +6,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
-from typing import Literal
+from enum import StrEnum
 
 import pandas as pd
 
 
-class Direction(str, Enum):
+class Direction(StrEnum):
     LONG = "long"
     SHORT = "short"
 

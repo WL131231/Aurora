@@ -174,33 +174,34 @@ body {
    ===================================================== */
 .bg-image {
     position: absolute;
-    inset: -5%;
+    inset: 0;                          /* 컨테이너 정확히 채움 (오버사이즈 X) */
     background-image: url("assets/aurora-bg.jpg");
     background-size: cover;
     background-position: center;
+    background-repeat: no-repeat;
     opacity: 0;
-    /* 이미지 로드 성공 시 보이게 하려면 onload 처리 또는 fallback CSS */
-    /* 기본은 0 — 이미지 추가 후 opacity 0.6 정도로 조정 */
     animation: ken-burns 30s ease-in-out infinite;
+    /* 부모 .aurora-stage 의 overflow:hidden 으로 ken-burns 가 살짝 넘쳐도 자연스럽게 클립 */
 }
 
 /* 이미지가 있을 때 자동 보이게 — 사진 자체가 메인 배경이 됨 */
 .bg-image.has-image {
-    opacity: 0.85;
+    opacity: 0.9;
 }
 
 /* 이미지 있으면 CSS 띠/구름 톤 다운 (사진과 충돌 방지) */
 .bg-image.has-image ~ .aurora-band {
-    opacity: 0.3;
+    opacity: 0.25;
 }
 .bg-image.has-image ~ .cloud-blob {
-    opacity: 0.5;
+    opacity: 0.4;
 }
 
+/* ken-burns: 미세한 zoom + pan 으로 살아있는 느낌. 과도한 크롭 방지 위해 스케일 작게. */
 @keyframes ken-burns {
-    0%, 100% { transform: scale(1) translate(0, 0); }
-    33%      { transform: scale(1.08) translate(-1.5%, 1.5%); }
-    66%      { transform: scale(1.05) translate(2%, -1%); }
+    0%, 100% { transform: scale(1.02) translate(0, 0); }
+    33%      { transform: scale(1.05) translate(-1%, 0.5%); }
+    66%      { transform: scale(1.04) translate(1%, -0.5%); }
 }
 
 /* ===== 하단 구름 블롭 (오로라 사진 분위기 살리기) ===== */

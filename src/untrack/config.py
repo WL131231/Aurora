@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     # ===== 로그 =====
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
+    # ===== 시간대 =====
+    timezone: str = "Asia/Seoul"  # KST. 모든 표시 시각 기준 (거래소 데이터는 UTC).
+
+    # ===== 포지션 룰 =====
+    max_positions_per_pair: int = 1  # 페어당 최대 동시 포지션 (Long+Short 동시 보유 불가)
+
     # ===== 경로 =====
     project_root: Path = Field(default_factory=lambda: Path(__file__).resolve().parents[2])
 

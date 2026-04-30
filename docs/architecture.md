@@ -1,10 +1,10 @@
-# UnTrack 아키텍처
+# Aurora 아키텍처
 
 ## 전체 흐름
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  UnTrack.exe (Pywebview 윈도우)                  │
+│  Aurora.exe (Pywebview 윈도우)                  │
 │  ┌────────────────────────────────────────────┐  │
 │  │ Frontend: HTML / Tailwind / Vanilla JS     │  │
 │  │ - 게임 옵션창 스타일 GUI                    │  │

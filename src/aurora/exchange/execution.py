@@ -7,8 +7,8 @@ core 모듈이 산출한 RiskPlan을 받아 실제 주문 발행 + 4단계 TP/SL
 
 from __future__ import annotations
 
-from untrack.config import settings
-from untrack.exchange.base import ExchangeClient
+from aurora.config import settings
+from aurora.exchange.base import ExchangeClient
 
 
 class Executor:

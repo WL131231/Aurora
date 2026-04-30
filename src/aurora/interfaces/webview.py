@@ -13,8 +13,8 @@ from pathlib import Path
 
 import uvicorn
 
-from untrack.config import settings
-from untrack.interfaces.api import create_app
+from aurora.config import settings
+from aurora.interfaces.api import create_app
 
 
 def _start_api_server() -> None:
@@ -41,7 +41,7 @@ def launch() -> None:
 
     ui_path = Path(__file__).resolve().parents[3] / "ui" / "index.html"
     webview.create_window(
-        "UnTrack",
+        "Aurora",
         str(ui_path),
         width=1280,
         height=800,

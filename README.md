@@ -1,4 +1,4 @@
-# UnTrack
+# Aurora
 
 고빈도 룰 기반 자동매매 봇 — 멀티 거래소 / 멀티 페어 / 고배율 / 배포 SaaS 모델.
 
@@ -13,8 +13,8 @@
 
 ### 1. 저장소 클론
 ```bash
-git clone https://github.com/WL131231/UnTrack.git
-cd UnTrack
+git clone https://github.com/WL131231/Aurora.git
+cd Aurora
 ```
 
 ### 2. 가상환경 + 의존성 설치
@@ -38,35 +38,35 @@ cp .env.example .env
 ### 4. 실행
 ```bash
 # 패키지로 import 가능한지 확인
-python -c "import untrack; print(untrack.__version__)"
+python -c "import aurora; print(aurora.__version__)"
 
 # 테스트
 pytest
 
 # 메인 진입점 (아직 미구현 상태로 메시지만 출력)
-python -m untrack.main
+python -m aurora.main
 
 # GUI (Pywebview 윈도우)
-python -m untrack.interfaces.webview
+python -m aurora.interfaces.webview
 ```
 
 ### 5. .exe 빌드 (배포용)
 ```bash
 pip install pyinstaller
 python scripts/build_exe.py
-# → dist/UnTrack.exe
+# → dist/Aurora.exe
 ```
 
 ## 프로젝트 구조
 ```
-UnTrack/
+Aurora/
 ├── pyproject.toml             # 프로젝트 메타 + 의존성
 ├── requirements.txt           # 런타임 의존성
 ├── requirements-dev.txt       # 개발 의존성
 ├── CLAUDE.md                  # AI 보조 작업 시 자동 컨텍스트
 ├── .env.example               # 환경변수 템플릿
 │
-├── src/untrack/
+├── src/aurora/
 │   ├── main.py                # 진입점
 │   ├── config.py              # 전역 설정 (Pydantic)
 │   ├── core/      [팀원 A]    # 전략 / 지표 / 신호 / 리스크
@@ -85,9 +85,9 @@ UnTrack/
 ## 팀 분담
 | 멤버 | GitHub | 역할 | 담당 영역 |
 |---|---|---|---|
-| **장수** | `WL131231` | Backend Core + Supervisor | `src/untrack/core/` |
-| **ChoYoon** | `ChoYoon-Tier1` | Backend I/O + Analytics | `src/untrack/exchange/` + `src/untrack/backtest/` |
-| **정용우** | `yongwoo2004` | Full-stack Frontend | `src/untrack/interfaces/`, `ui/`, `scripts/` |
+| **장수** | `WL131231` | Backend Core + Supervisor | `src/aurora/core/` |
+| **ChoYoon** | `ChoYoon-Tier1` | Backend I/O + Analytics | `src/aurora/exchange/` + `src/aurora/backtest/` |
+| **정용우** | `yongwoo2004` | Full-stack Frontend | `src/aurora/interfaces/`, `ui/`, `scripts/` |
 | **WooJae** | `jwooo05` | Light Tasks (모바일·짧은 시간) | PR 리뷰, 이슈 triage, 문서·docstring 검수, 작은 CSS/텍스트 PR, 테스트 케이스 |
 
 **공통** (수정 전 공지): `__init__.py`, `config.py`, `main.py`, `pyproject.toml`, `requirements*.txt`, `tests/`, `README.md`, `CLAUDE.md`, `.env.example`

@@ -1,4 +1,4 @@
-"""UnTrack 진입점.
+"""Aurora 진입점.
 
 실행 흐름:
     1. 설정 로드 (config.settings)
@@ -13,13 +13,13 @@
 
 from __future__ import annotations
 
-from untrack.config import settings
+from aurora.config import settings
 
 
 def main() -> None:
     """진입점 — 추후 D 멤버가 interfaces 모듈과 연결."""
     # TODO(D): interfaces.webview.launch() 호출 + API 서버 + Telegram 동시 기동
-    print(f"UnTrack v0.1.0 — run_mode={settings.run_mode}")
+    print(f"Aurora v0.1.0 — run_mode={settings.run_mode}")
     print("(아직 구현되지 않음)")
 
 

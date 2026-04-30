@@ -1,9 +1,9 @@
-# UnTrack — AI 보조 작업 컨텍스트
+# Aurora — AI 보조 작업 컨텍스트
 
 이 파일은 팀원이 AI(Claude/ChatGPT 등)에게 작업 지시할 때 자동으로 읽히는 프로젝트 컨텍스트.
 
 ## 프로젝트 개요
-- **이름**: UnTrack
+- **이름**: Aurora
 - **목적**: 고배율 / 고빈도 / 멀티 거래소 자동매매 봇 (배포·구독 모델 대상)
 - **언어**: Python 3.11
 - **인터페이스**: `.exe` GUI (Pywebview + HTML/Tailwind/JS) + Telegram Bot
@@ -32,10 +32,10 @@
 - 트리거: Target / Percentage
 
 ## 폴더 구조 (담당)
-- `src/untrack/core/` — **장수** (전략/지표/신호/리스크 + 전체 supervision)
-- `src/untrack/exchange/` — **ChoYoon** (ccxt/데이터/실행)
-- `src/untrack/backtest/` — **ChoYoon** (백테스트/리플레이/통계)
-- `src/untrack/interfaces/` — **정용우** (API/Telegram/Webview)
+- `src/aurora/core/` — **장수** (전략/지표/신호/리스크 + 전체 supervision)
+- `src/aurora/exchange/` — **ChoYoon** (ccxt/데이터/실행)
+- `src/aurora/backtest/` — **ChoYoon** (백테스트/리플레이/통계)
+- `src/aurora/interfaces/` — **정용우** (API/Telegram/Webview)
 - `ui/` — **정용우** (HTML/CSS/JS)
 - `scripts/` — **정용우** (PyInstaller 빌드)
 - **WooJae** — 폴더 무소속, 라이트 작업 (PR 리뷰, 이슈 triage, 문서, docstring 검수, 작은 CSS/텍스트 PR, 테스트 케이스)
@@ -65,7 +65,7 @@
 - **Phase 3**: 정식 배포 + 라이센스/구독 시스템
 
 ## 유의사항
-- **SL/TP 룰** (레버리지별 구간 분기): 자세한 공식은 `src/untrack/core/CLAUDE.md` 참조
+- **SL/TP 룰** (레버리지별 구간 분기): 자세한 공식은 `src/aurora/core/CLAUDE.md` 참조
   - 10~37x 보수: SL 2~3% / TP 3~5% 그래디언트
   - 38~50x 공격: SL 0.08×L / TP SL+2~3
 - 펀딩비/수수료/슬리피지는 백테스트와 실거래 모두 반영 필요

@@ -1,4 +1,4 @@
-// UnTrack 프론트엔드 진입점.
+// Aurora 프론트엔드 진입점.
 // Pywebview 환경에서 로컬 FastAPI(127.0.0.1:8765)를 호출.
 
 const API_BASE = "http://127.0.0.1:8765";

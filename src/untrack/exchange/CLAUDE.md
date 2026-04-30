@@ -1,4 +1,4 @@
-# Exchange 모듈 — 팀원 B 담당 영역
+# Exchange 모듈 — ChoYoon 담당 영역 (backtest 모듈도 함께 담당)
 
 ## 책임 범위
 거래소 API 추상화 + 시세 데이터 + 주문 실행. ccxt 통합 사용.
@@ -10,8 +10,8 @@
 - `execution.py` — 주문 placement, 포지션 추적, 레버리지/마진 모드 설정
 
 ## 주요 스펙
-- **거래소**: Bybit / OKX / Binance — 사용자가 .env로 키 등록한 거래소만 활성화
-- **페어**: BTCUSDT, ETHUSDT (Phase 2에 알트 추가)
+- **1순위 거래소**: Bybit (먼저 동작 확인 후 OKX/Binance 확장)
+- **페어**: BTCUSDT, ETHUSDT (둘 다 — 1순위)
 - **레버리지**: 10x ~ 50x 사용자 설정
 - **타임프레임**: 1m, 3m, 5m, 15m, 1H, 2H, 4H, 1D, 1W
 - **마진 모드**: Isolated 권장

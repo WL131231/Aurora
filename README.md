@@ -83,23 +83,25 @@ UnTrack/
 각 모듈 폴더에 `CLAUDE.md`가 있으니, AI에게 "이 폴더 보고 작업해"라고 시키면 컨텍스트를 자동으로 받음.
 
 ## 팀 분담
-| 멤버 | 역할 | 담당 영역 |
-|---|---|---|
-| **A** | Backend Core | `src/untrack/core/` |
-| **B** | Backend I/O | `src/untrack/exchange/` |
-| **C** | Backend Analytics | `src/untrack/backtest/` |
-| **D** | Full-stack Frontend | `src/untrack/interfaces/`, `ui/`, `scripts/` |
+| 멤버 | GitHub | 역할 | 담당 영역 |
+|---|---|---|---|
+| **장수** | `WL131231` | Backend Core + Supervisor | `src/untrack/core/` |
+| **ChoYoon** | `ChoYoon-Tier1` | Backend I/O + Analytics | `src/untrack/exchange/` + `src/untrack/backtest/` |
+| **정용우** | `yongwoo2004` | Full-stack Frontend | `src/untrack/interfaces/`, `ui/`, `scripts/` |
+| **WooJae** | `jwooo05` | Light Tasks (모바일·짧은 시간) | PR 리뷰, 이슈 triage, 문서·docstring 검수, 작은 CSS/텍스트 PR, 테스트 케이스 |
 
 **공통** (수정 전 공지): `__init__.py`, `config.py`, `main.py`, `pyproject.toml`, `requirements*.txt`, `tests/`, `README.md`, `CLAUDE.md`, `.env.example`
 
 ## 협업 규칙 (필독)
-1. **`main` 직접 커밋 금지** — 항상 feature 브랜치에서 작업
-2. **작업 시작 전 `git pull` 먼저**
-3. **`git push --force` 금지**
-4. 자기 영역만 수정 (다른 영역 수정 시 사전 공지 + PR)
-5. 커밋 prefix: `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `test:`
-6. 모든 코드 한국어 docstring/주석
-7. 라이브러리 추가 시 `requirements.txt` 갱신 + 팀에 공지
+1. **머지 방식**: Squash only (저장소 설정으로 강제 — Merge commit/Rebase 비활성)
+2. **머지 후 feature 브랜치 자동 삭제**
+3. **`main` 직접 커밋 금지** — 항상 feature 브랜치에서 작업
+4. **작업 시작 전 `git pull` 먼저**
+5. **`git push --force` 금지**
+6. 자기 영역만 수정 (다른 영역 수정 시 사전 공지 + PR)
+7. 커밋 prefix: `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `test:`
+8. 모든 코드 한국어 docstring/주석
+9. 라이브러리 추가 시 `requirements.txt` 갱신 + 팀에 공지
 
 ## 전략 스펙 요약
 
@@ -128,4 +130,4 @@ UnTrack/
 - **Phase 3**: 정식 배포 + 라이센스/구독 시스템
 
 ## 라이선스
-(추후 결정)
+**비공개 (Proprietary)** — 배포·구독 모델 대상. 외부 공개·재배포 금지.

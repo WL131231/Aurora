@@ -32,19 +32,24 @@
 - 트리거: Target / Percentage
 
 ## 폴더 구조 (담당)
-- `src/untrack/core/` — 팀원 A (전략/지표/신호/리스크)
-- `src/untrack/exchange/` — 팀원 B (ccxt/데이터/실행)
-- `src/untrack/backtest/` — 팀원 C (백테스트/리플레이/통계)
-- `src/untrack/interfaces/` — 팀원 D (API/Telegram/Webview)
-- `ui/` — 팀원 D (HTML/CSS/JS)
+- `src/untrack/core/` — **장수** (전략/지표/신호/리스크 + 전체 supervision)
+- `src/untrack/exchange/` — **ChoYoon** (ccxt/데이터/실행)
+- `src/untrack/backtest/` — **ChoYoon** (백테스트/리플레이/통계)
+- `src/untrack/interfaces/` — **정용우** (API/Telegram/Webview)
+- `ui/` — **정용우** (HTML/CSS/JS)
+- `scripts/` — **정용우** (PyInstaller 빌드)
+- **WooJae** — 폴더 무소속, 라이트 작업 (PR 리뷰, 이슈 triage, 문서, docstring 검수, 작은 CSS/텍스트 PR, 테스트 케이스)
 - 공통: `__init__.py`, `config.py`, `main.py`, `pyproject.toml`, `tests/`
 
 ## 거래소 / 페어
-- 거래소: Bybit / OKX / Binance (ccxt로 통합 — 사용자 선택)
-- 페어: BTCUSDT, ETHUSDT (Phase 2에 알트 추가 가능)
+- **1순위 거래소**: Bybit (먼저 동작 확인 후 OKX, Binance 확장)
+- **1순위 페어**: BTCUSDT, ETHUSDT (둘 다)
+- 추후 확장: OKX, Binance, 알트 페어
 - 레버리지: 사용자 설정, 10x ~ 50x
 
 ## 협업 규칙
+- **머지 방식**: Squash only (Merge commit / Rebase 비활성화 — GitHub 설정으로 강제)
+- **머지 후 브랜치 자동 삭제**
 - `main` 직접 커밋 금지 → feature 브랜치 + PR
 - 작업 시작 전 `git pull`
 - 다른 사람 영역 수정은 사전 공지 + PR
@@ -60,3 +65,4 @@
 - 펀딩비/수수료/슬리피지는 백테스트와 실거래 모두 반영 필요
 - 동시 포지션 수 제한 (기본 1개, 사용자 설정 가능)
 - 4 명 팀 모두 AI 위주 작업 → 명확한 모듈 경계 + 풍부한 docstring 유지
+- 라이선스: 비공개 (Proprietary) — 배포·구독 모델

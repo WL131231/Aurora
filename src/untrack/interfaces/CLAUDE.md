@@ -1,4 +1,4 @@
-# Interfaces 모듈 — 팀원 D 담당 영역
+# Interfaces 모듈 — 정용우 담당 영역 (ui/, scripts/ 도 함께 담당)
 
 ## 책임 범위
 사용자가 봇을 컨트롤하는 모든 채널.

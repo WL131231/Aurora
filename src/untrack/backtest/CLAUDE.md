@@ -1,4 +1,4 @@
-# Backtest 모듈 — 팀원 C 담당 영역
+# Backtest 모듈 — ChoYoon 담당 영역 (exchange 모듈도 함께 담당)
 
 ## 책임 범위
 과거 데이터로 전략 룰 검증 + 파라미터 튜닝.

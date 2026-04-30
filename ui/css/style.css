@@ -1,0 +1,20 @@
+/* UnTrack 추가 스타일 — Tailwind로 못 처리하는 부분만 작성. */
+
+/* 부드러운 스크롤바 */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* 사이드바 활성 버튼 강조 */
+.nav-btn.active {
+    background-color: rgb(63 63 70); /* zinc-700 */
+    color: rgb(52 211 153); /* emerald-400 */
+}

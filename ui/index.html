@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UnTrack</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="css/style.css" />
+</head>
+<body class="bg-zinc-900 text-zinc-100 font-sans">
+    <div class="flex h-screen">
+        <!-- 좌측 카테고리 사이드바 -->
+        <aside class="w-56 bg-zinc-800 border-r border-zinc-700 p-4">
+            <h1 class="text-xl font-bold text-emerald-400 mb-6">UnTrack</h1>
+            <nav class="space-y-2">
+                <button class="nav-btn w-full text-left px-3 py-2 rounded bg-zinc-700">대시보드</button>
+                <button class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-700">거래소</button>
+                <button class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-700">전략 / 지표</button>
+                <button class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-700">TP / SL</button>
+                <button class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-700">백테스트</button>
+                <button class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-700">로그</button>
+            </nav>
+        </aside>
+
+        <!-- 메인 콘텐츠 -->
+        <main class="flex-1 overflow-y-auto p-8">
+            <h2 class="text-2xl font-semibold mb-6">대시보드</h2>
+            <div class="grid grid-cols-3 gap-4">
+                <div class="bg-zinc-800 p-4 rounded border border-zinc-700">
+                    <div class="text-zinc-400 text-sm">상태</div>
+                    <div id="status" class="text-2xl font-bold text-emerald-400 mt-2">로딩 중...</div>
+                </div>
+                <div class="bg-zinc-800 p-4 rounded border border-zinc-700">
+                    <div class="text-zinc-400 text-sm">모드</div>
+                    <div id="mode" class="text-2xl font-bold mt-2">-</div>
+                </div>
+                <div class="bg-zinc-800 p-4 rounded border border-zinc-700">
+                    <div class="text-zinc-400 text-sm">포지션</div>
+                    <div class="text-2xl font-bold mt-2">없음</div>
+                </div>
+            </div>
+
+            <p class="mt-8 text-zinc-500 text-sm">
+                ⚙️ 이 화면은 골격(skeleton)입니다. 팀원 D가 차근차근 채워나갑니다.
+            </p>
+        </main>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

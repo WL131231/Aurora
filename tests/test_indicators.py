@@ -8,7 +8,6 @@ import pytest
 
 from untrack.core.indicators import ema, rsi, rsi_divergence
 
-
 # ============================================================
 # EMA
 # ============================================================

@@ -14,7 +14,6 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-
 # 분 단위 TF 매핑
 TF_MINUTES = {
     "1m": 1, "3m": 3, "5m": 5, "15m": 15,

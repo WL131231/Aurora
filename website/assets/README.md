@@ -29,6 +29,28 @@
 
 저작권 확인 후 사용. Unsplash/Pexels 는 상업·비상업 모두 무료.
 
+## 📊 지표 사진 추가하기 (INDICATORS 섹션)
+
+`assets/indicators/` 폴더에 5개 사진을 다음 파일명으로 저장:
+
+| 파일명 | 지표 |
+|---|---|
+| `01-bollinger.jpg` | Bollinger Bands |
+| `02-rsi-divergence.jpg` | RSI Divergence |
+| `03-ema.jpg` | EMA |
+| `04-harmonic.jpg` | Harmonic Patterns |
+| `05-ichimoku.jpg` | Ichimoku Cloud |
+
+### 권장 사양
+- 비율: 4:3 (예: 1200×900)
+- 어두운 배경 (Aurora 톤과 어우러지게)
+- 차트/패턴이 명확히 보이게
+
+### 동작
+- 이미지 있으면 → 자동 표시
+- 없으면 → 그라디언트 fallback (지표 아이콘 + 이름)
+- 모든 사진은 그라디언트 보더 + glow 효과 자동 적용
+
 ## 다른 파일 추가
 필요시 이 폴더에 추가 가능 (예: 로고 PNG, favicon 등). 단, 큰 바이너리는
 `.gitignore` 검토 필요 (현재 `*.png`, `*.jpg` 등은 무시 안 됨).

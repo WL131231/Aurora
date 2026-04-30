@@ -76,8 +76,8 @@
         </div>
 
         <ul class="hidden md:flex items-center gap-10 text-[11px] tracking-[0.2em] text-zinc-400">
-            <li><a href="#" class="hover:text-white transition">FEATURES</a></li>
-            <li><a href="#" class="hover:text-white transition">INDICATORS</a></li>
+            <li><a href="#features" class="hover:text-white transition">FEATURES</a></li>
+            <li><a href="#indicators" class="hover:text-white transition">INDICATORS</a></li>
         </ul>
 
         <div class="flex items-center gap-4 text-[11px] tracking-[0.2em] text-zinc-400">
@@ -133,6 +133,170 @@
             <div class="w-px h-12 bg-gradient-to-b from-zinc-700 to-transparent"></div>
         </div>
     </main>
+
+    <!-- ===== INDICATORS 섹션 ===== -->
+    <section id="indicators" class="relative z-10 py-32 px-8 lg:px-16">
+        <div class="max-w-7xl mx-auto">
+
+            <!-- 섹션 헤더 -->
+            <div class="text-center mb-24">
+                <div class="inline-flex items-center gap-3 mb-6 text-[10px] tracking-[0.4em] text-zinc-500">
+                    <span class="w-8 h-px bg-zinc-700"></span>
+                    INDICATORS
+                    <span class="w-8 h-px bg-zinc-700"></span>
+                </div>
+                <h2 class="text-4xl md:text-5xl font-light leading-tight">
+                    <span class="indicators-title">5 Core Signals</span>
+                </h2>
+                <p class="mt-6 text-zinc-500 text-sm md:text-base font-light max-w-xl mx-auto">
+                    각 지표는 멀티 타임프레임에서 독립적으로 신호를 산출합니다.
+                    <br />
+                    HTF 가중치 기반 점수 합산으로 최종 진입을 결정합니다.
+                </p>
+            </div>
+
+            <!-- ── 01 Bollinger Bands ── -->
+            <article class="indicator-row">
+                <div class="indicator-photo">
+                    <div class="photo-frame">
+                        <img src="assets/indicators/01-bollinger.jpg" alt="Bollinger Bands" class="photo-img" onerror="this.style.display='none'" />
+                        <div class="photo-fallback">
+                            <div class="fb-icon">⊜</div>
+                            <div class="fb-name">Bollinger Bands</div>
+                        </div>
+                    </div>
+                    <div class="photo-meta">
+                        <span class="photo-number">01</span>
+                        <span class="photo-tag">SELECTABLE · 1H</span>
+                    </div>
+                </div>
+                <div class="indicator-desc">
+                    <h3 class="indicator-name">Bollinger Bands</h3>
+                    <div class="indicator-sub">범위 거래 회귀 매매</div>
+                    <ul class="indicator-points">
+                        <li>4-tier 진입 룰 (Squeeze · Reversal · 찢어짐 · Proximity)</li>
+                        <li>밴드 좁아진 구간(squeeze) 자동 보류</li>
+                        <li>찢어짐 후 회귀 시 강도 1.5 강화 신호</li>
+                        <li>가장자리 안쪽 0.5% Proximity zone 터치 진입</li>
+                        <li>양방향 진입+청산: 상단 → 숏 / 하단 → 롱</li>
+                    </ul>
+                </div>
+            </article>
+
+            <!-- ── 02 RSI Divergence ── -->
+            <article class="indicator-row">
+                <div class="indicator-photo">
+                    <div class="photo-frame">
+                        <img src="assets/indicators/02-rsi-divergence.jpg" alt="RSI Divergence" class="photo-img" onerror="this.style.display='none'" />
+                        <div class="photo-fallback">
+                            <div class="fb-icon">⤢</div>
+                            <div class="fb-name">RSI Divergence</div>
+                        </div>
+                    </div>
+                    <div class="photo-meta">
+                        <span class="photo-number">02</span>
+                        <span class="photo-tag">FIXED · 1H</span>
+                    </div>
+                </div>
+                <div class="indicator-desc">
+                    <h3 class="indicator-name">RSI Divergence</h3>
+                    <div class="indicator-sub">모멘텀 반전 신호</div>
+                    <ul class="indicator-points">
+                        <li>4 종류 검출: Regular / Hidden × Bullish / Bearish</li>
+                        <li>TradingView Pine Script 표준 (피벗 기반)</li>
+                        <li>RSI 수치 자체는 입력값 — 다이버전스만 진입 신호</li>
+                        <li>강세 다이버전스 → 롱 / 약세 → 숏</li>
+                        <li>Hidden Divergence → 추세 지속 추가 진입</li>
+                    </ul>
+                </div>
+            </article>
+
+            <!-- ── 03 EMA Touch ── -->
+            <article class="indicator-row">
+                <div class="indicator-photo">
+                    <div class="photo-frame">
+                        <img src="assets/indicators/03-ema.jpg" alt="EMA" class="photo-img" onerror="this.style.display='none'" />
+                        <div class="photo-fallback">
+                            <div class="fb-icon">∿</div>
+                            <div class="fb-name">EMA</div>
+                        </div>
+                    </div>
+                    <div class="photo-meta">
+                        <span class="photo-number">03</span>
+                        <span class="photo-tag">FIXED · 8 TF</span>
+                    </div>
+                </div>
+                <div class="indicator-desc">
+                    <h3 class="indicator-name">Exponential Moving Average</h3>
+                    <div class="indicator-sub">멀티 TF 지지/저항 터치</div>
+                    <ul class="indicator-points">
+                        <li>EMA 200 / EMA 480 — 표준 추세 라인</li>
+                        <li>8 타임프레임 동시 분석 (15m → 1W)</li>
+                        <li>가격이 EMA ±0.3% 이내 터치 시 신호</li>
+                        <li>위에서 지지 → 롱 / 아래서 저항 → 숏</li>
+                        <li>HTF 자동 가중치: 1W (25점) → 15m (1점)</li>
+                    </ul>
+                </div>
+            </article>
+
+            <!-- ── 04 Harmonic ── -->
+            <article class="indicator-row">
+                <div class="indicator-photo">
+                    <div class="photo-frame">
+                        <img src="assets/indicators/04-harmonic.jpg" alt="Harmonic" class="photo-img" onerror="this.style.display='none'" />
+                        <div class="photo-fallback">
+                            <div class="fb-icon">▲▽</div>
+                            <div class="fb-name">Harmonic</div>
+                        </div>
+                    </div>
+                    <div class="photo-meta">
+                        <span class="photo-number">04</span>
+                        <span class="photo-tag">SELECTABLE · 15m / 1H</span>
+                    </div>
+                </div>
+                <div class="indicator-desc">
+                    <h3 class="indicator-name">Harmonic Patterns</h3>
+                    <div class="indicator-sub">피보나치 정밀 패턴</div>
+                    <ul class="indicator-points">
+                        <li>Bat / Butterfly / Gartley 패턴 검출</li>
+                        <li>ZigZag 피벗 + 피보나치 비율 검증</li>
+                        <li>TP/SL 가격 = 패턴 자체 비율로 자동 산출</li>
+                        <li>다른 지표 대비 진입가·익절가 정밀</li>
+                        <li class="point-pending">구현 예정 — 백테스트로 패턴 정확도 검증</li>
+                    </ul>
+                </div>
+            </article>
+
+            <!-- ── 05 Ichimoku Cloud ── -->
+            <article class="indicator-row">
+                <div class="indicator-photo">
+                    <div class="photo-frame">
+                        <img src="assets/indicators/05-ichimoku.jpg" alt="Ichimoku Cloud" class="photo-img" onerror="this.style.display='none'" />
+                        <div class="photo-fallback">
+                            <div class="fb-icon">☁</div>
+                            <div class="fb-name">Ichimoku</div>
+                        </div>
+                    </div>
+                    <div class="photo-meta">
+                        <span class="photo-number">05</span>
+                        <span class="photo-tag">SELECTABLE · 1H / 2H / 4H</span>
+                    </div>
+                </div>
+                <div class="indicator-desc">
+                    <h3 class="indicator-name">Ichimoku Kumo</h3>
+                    <div class="indicator-sub">일목균형표 다중 시간 분석</div>
+                    <ul class="indicator-points">
+                        <li>Span A · Span B · Tenkan · Kijun 인지</li>
+                        <li>구름대 두께 = 지지/저항 강도 (두꺼움 → 강함)</li>
+                        <li>Span 터치 시 진입, 이탈 시 청산</li>
+                        <li>HTF 가중치 자동 (1H=2 / 2H=3 / 4H=5)</li>
+                        <li class="point-pending">구현 예정 — 두께 정량화 + 통합 트리거</li>
+                    </ul>
+                </div>
+            </article>
+
+        </div>
+    </section>
 
     <!-- ===== Footer ===== -->
     <footer class="relative z-10 px-8 lg:px-16 py-8 mt-12 flex flex-col md:flex-row items-center justify-between gap-4 text-[10px] tracking-[0.2em] text-zinc-600 border-t border-zinc-900">

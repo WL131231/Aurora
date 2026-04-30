@@ -174,14 +174,15 @@ body {
    ===================================================== */
 .bg-image {
     position: absolute;
-    inset: 0;                                /* 컨테이너 정확히 채움 */
+    inset: 0;
     background-image: url("assets/aurora-bg.jpg");
-    background-size: cover;
-    background-position: center 70%;          /* 아래쪽 (물·바위) 더 보이게 */
+    /* contain: 사진을 원본 비율 그대로 보여줌 (업스케일 최소 → 픽셀화 줄임) */
+    background-size: contain;
+    background-position: center;
     background-repeat: no-repeat;
+    background-color: transparent;            /* 가장자리 빈 곳은 CSS 오로라 띠가 채움 */
     opacity: 0;
     animation: ken-burns 40s ease-in-out infinite;
-    /* 부모 .aurora-stage 의 overflow:hidden 으로 ken-burns 가 살짝 넘쳐도 자연스럽게 클립 */
 }
 
 /* 이미지가 있을 때 자동 보이게 — 사진 자체가 메인 배경이 됨 */
@@ -189,19 +190,19 @@ body {
     opacity: 0.9;
 }
 
-/* 이미지 있으면 CSS 띠/구름 톤 다운 (사진과 충돌 방지) */
+/* 이미지 있으면 CSS 띠/구름 적당히 살림 (가장자리 letterbox 영역 자연스럽게 채움) */
 .bg-image.has-image ~ .aurora-band {
-    opacity: 0.25;
+    opacity: 0.5;
 }
 .bg-image.has-image ~ .cloud-blob {
-    opacity: 0.4;
+    opacity: 0.6;
 }
 
-/* ken-burns: 매우 미세한 zoom + pan (살아있는 느낌). 크롭 최소화 위해 스케일 작게. */
+/* ken-burns: contain 모드에선 zoom 거의 불필요 (이미지 자체가 화면에 fit).
+   미세한 호흡감만. */
 @keyframes ken-burns {
     0%, 100% { transform: scale(1.0)  translate(0, 0); }
-    33%      { transform: scale(1.03) translate(-0.5%, 0.3%); }
-    66%      { transform: scale(1.02) translate(0.5%, -0.3%); }
+    50%      { transform: scale(1.02) translate(0, 0); }
 }
 
 /* ===== 하단 구름 블롭 (오로라 사진 분위기 살리기) ===== */

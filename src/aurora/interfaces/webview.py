@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 from pathlib import Path
 
@@ -15,6 +16,23 @@ import uvicorn
 
 from aurora.config import settings
 from aurora.interfaces.api import create_app
+
+
+def _ui_index_path() -> Path:
+    """``ui/index.html`` 경로 해결 — 소스 트리 / PyInstaller 번들 모두 대응.
+
+    PyInstaller 빌드 환경에서는 ``--add-data "ui;ui"`` 로 번들된 데이터가
+    ``sys._MEIPASS`` (런타임 임시 디렉토리) 아래에 풀린다. ``--onefile`` 모드는
+    실행 시마다, 폴더 모드는 ``_internal/`` 안에 유지.
+
+    Returns:
+        실제 ``index.html`` 파일 경로 (소스 트리든 번들이든).
+    """
+    if hasattr(sys, "_MEIPASS"):
+        # PyInstaller 환경 (onefile / folder 모두 _MEIPASS 가짐)
+        return Path(sys._MEIPASS) / "ui" / "index.html"  # type: ignore[attr-defined]
+    # 소스 트리: src/aurora/interfaces/webview.py 기준 ../../../ui/index.html
+    return Path(__file__).resolve().parents[3] / "ui" / "index.html"
 
 
 def _start_api_server() -> None:
@@ -38,7 +56,8 @@ def launch() -> None:
     1. ``_start_api_server`` 를 daemon 스레드로 시작 (FastAPI 가 준비될 때까지
        Pywebview 가 잠시 빈 화면을 보여줄 수 있음 — ``ui/`` 의 ``apiClient.js``
        가 retry 처리).
-    2. ``ui/index.html`` 파일 경로 해결 (소스 트리 / PyInstaller 번들 모두 대응).
+    2. ``_ui_index_path()`` 로 ui/index.html 경로 해결 (소스 트리 / PyInstaller
+       번들 모두 대응).
     3. ``webview.create_window(...)`` + ``webview.start()`` 로 GUI 시작.
 
     Note:
@@ -50,8 +69,7 @@ def launch() -> None:
     api_thread = threading.Thread(target=_start_api_server, daemon=True)
     api_thread.start()
 
-    # 소스 트리: ``src/aurora/interfaces/webview.py`` 기준 ``../../../ui/index.html``
-    ui_path = Path(__file__).resolve().parents[3] / "ui" / "index.html"
+    ui_path = _ui_index_path()
 
     webview.create_window(
         "Aurora",

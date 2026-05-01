@@ -37,7 +37,10 @@ yarn-error.log*
 out/
 
 # ===== 데이터 / 로그 / DB =====
-data/
+# data/ 는 통째 무시하되 .gitkeep + 백테스트 sanity check용 샘플 1개는 예외 (PR-2)
+data/*
+!data/.gitkeep
+!data/ETHUSDT_1m_sample.parquet
 logs/
 *.log
 *.db

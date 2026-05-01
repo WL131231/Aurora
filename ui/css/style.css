@@ -1,20 +1,480 @@
-/* Aurora 추가 스타일 — Tailwind로 못 처리하는 부분만 작성. */
+/* ============================================================
+   Aurora GUI 콘솔 — 디자인 시스템
+   웹사이트(`website/style.css`) 톤 차용:
+     - 배경 #06060a + 오로라 그라디언트 글로우
+     - Bodoni Moda / Space Grotesk / Pretendard 폰트
+     - 다이아몬드 로고 그라디언트 (purple → indigo → cyan)
+     - photo-frame 카드 (다크 + 라디얼 글로우 + 그라디언트 보더)
+   GUI 차이: hero 거대 타이포 X, 정보 밀도 ↑, 사진 배경 X.
+   ============================================================ */
 
-/* 부드러운 스크롤바 */
+/* ===== 폰트 변수 (웹사이트와 동일) ===== */
+:root {
+    --font-display: "Space Grotesk", "Pretendard Variable", system-ui, sans-serif;
+    --font-sans: "Pretendard Variable", "Space Grotesk", system-ui, sans-serif;
+    --font-wordmark: "Monica Allcaps Stencil", "Bodoni Moda", "Playfair Display", "Times New Roman", serif;
+
+    --bg: #06060a;
+    --bg-card: #0d0d18;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-soft: rgba(255, 255, 255, 0.05);
+    --text-1: rgba(255, 255, 255, 0.95);
+    --text-2: rgba(255, 255, 255, 0.7);
+    --text-3: rgba(255, 255, 255, 0.4);
+    --text-4: rgba(255, 255, 255, 0.25);
+
+    --aurora-purple: #a855f7;
+    --aurora-indigo: #6366f1;
+    --aurora-cyan: #22d3ee;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+/* ===== 워드마크 ===== */
+.wordmark {
+    font-family: var(--font-wordmark);
+    font-weight: 500;
+    letter-spacing: 0.25em;
+}
+
+/* ===== 다이아몬드 로고 글로우 (웹사이트와 동일) ===== */
+.logo-mark {
+    filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.5));
+}
+
+/* ============================================================
+   배경 오로라 (웹사이트보다 약하게 — 정보 가독성 우선)
+   ============================================================ */
+.aurora-stage {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background: var(--bg);
+}
+
+.aurora-band {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(90px);
+    opacity: 0.35;        /* 웹사이트 0.9 → GUI 0.35 (약하게) */
+    mix-blend-mode: screen;
+}
+
+.band-1 {
+    width: 60vw; height: 60vh; top: -20vh; left: -10vw;
+    background: radial-gradient(circle, rgba(168, 85, 247, 0.85), transparent 65%);
+    animation: drift 25s ease-in-out infinite alternate;
+}
+.band-2 {
+    width: 50vw; height: 50vh; top: 15vh; right: -15vw;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.7), transparent 65%);
+    animation: drift 30s ease-in-out infinite alternate-reverse;
+}
+.band-3 {
+    width: 45vw; height: 45vh; bottom: -15vh; left: 30vw;
+    background: radial-gradient(circle, rgba(34, 211, 238, 0.55), transparent 65%);
+    animation: drift 28s ease-in-out infinite alternate;
+}
+
+@keyframes drift {
+    0%   { transform: translate(0, 0)        scale(1); }
+    50%  { transform: translate(30px, -20px) scale(1.05); }
+    100% { transform: translate(-20px, 30px) scale(0.98); }
+}
+
+.vignette {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, transparent 30%, var(--bg) 100%);
+    pointer-events: none;
+}
+
+/* ============================================================
+   사이드바 네비게이션
+   ============================================================ */
+.nav-btn {
+    width: 100%;
+    display: flex;
+    align-items: baseline;
+    gap: 0.875rem;
+    padding: 0.875rem 1.5rem;
+    text-align: left;
+    border-left: 2px solid transparent;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    background: transparent;
+}
+
+.nav-btn:hover {
+    background: rgba(255, 255, 255, 0.02);
+    border-left-color: rgba(168, 85, 247, 0.3);
+}
+
+.nav-btn.active {
+    background: rgba(168, 85, 247, 0.06);
+    border-left-color: var(--aurora-purple);
+}
+
+.nav-num {
+    font-family: var(--font-display);
+    font-size: 11px;
+    font-weight: 300;
+    color: var(--text-3);
+    letter-spacing: 0.1em;
+    min-width: 1.5rem;
+}
+
+.nav-btn.active .nav-num {
+    color: var(--aurora-purple);
+}
+
+.nav-label {
+    font-size: 13px;
+    color: var(--text-2);
+    letter-spacing: 0.02em;
+}
+
+.nav-btn.active .nav-label {
+    color: var(--text-1);
+}
+
+/* ============================================================
+   View 섹션 (라우팅으로 보이기/숨기기)
+   ============================================================ */
+.view-section {
+    display: none;
+    padding: 4rem 0 6rem;
+    animation: view-fade-in 0.4s ease-out;
+}
+
+.view-section.view-active {
+    display: block;
+}
+
+@keyframes view-fade-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* View 헤더 (NUMBER 인디케이터 스타일 차용) */
+.view-header {
+    padding: 0 3rem 2.5rem;
+    border-bottom: 1px solid var(--border-soft);
+    margin-bottom: 3rem;
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0 1.25rem;
+}
+
+.view-num {
+    font-family: var(--font-display);
+    font-size: 0.875rem;
+    font-weight: 300;
+    color: var(--text-3);
+    letter-spacing: 0.15em;
+}
+
+.view-title {
+    font-family: var(--font-wordmark);
+    font-weight: 500;
+    font-size: clamp(2.25rem, 4vw, 3.5rem);
+    line-height: 1;
+    letter-spacing: -0.01em;
+    background: linear-gradient(135deg, #ffffff 0%, #d8b4fe 50%, var(--aurora-purple) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+}
+
+.view-sub {
+    width: 100%;
+    margin-top: 0.75rem;
+    font-size: 0.8125rem;
+    color: var(--text-3);
+    letter-spacing: 0.02em;
+}
+
+/* ============================================================
+   카드 (photo-frame 스타일 차용 — 약간 단순화)
+   ============================================================ */
+.metric-card,
+.indicator-toggle-card,
+.placeholder-card {
+    position: relative;
+    border-radius: 14px;
+    padding: 1.5rem 1.5rem 1.25rem;
+    border: 1px solid var(--border);
+    background:
+        radial-gradient(ellipse at 30% 20%, rgba(168, 85, 247, 0.10), transparent 60%),
+        radial-gradient(ellipse at 70% 80%, rgba(34, 211, 238, 0.08), transparent 60%),
+        linear-gradient(135deg, var(--bg-card), #060610);
+    backdrop-filter: blur(20px);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.05) inset,
+        0 20px 40px -20px rgba(0, 0, 0, 0.5),
+        0 0 30px -10px rgba(168, 85, 247, 0.10);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.metric-card:hover,
+.indicator-toggle-card:hover {
+    transform: translateY(-2px);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.08) inset,
+        0 30px 50px -20px rgba(0, 0, 0, 0.6),
+        0 0 50px -10px rgba(168, 85, 247, 0.18);
+}
+
+/* metric-card 내부 */
+.metric-label {
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    color: var(--text-3);
+    text-transform: uppercase;
+    margin-bottom: 0.875rem;
+}
+
+.metric-value {
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    font-weight: 300;
+    color: var(--text-1);
+    line-height: 1.1;
+    letter-spacing: 0.02em;
+}
+
+.metric-line {
+    margin-top: 1rem;
+    width: 2.5rem;
+    height: 1px;
+    background: linear-gradient(to right, rgba(168, 85, 247, 0.7), transparent);
+}
+
+/* indicator-toggle-card */
+.indicator-toggle-card {
+    display: grid;
+    grid-template-areas:
+        "num     toggle"
+        "name    toggle"
+        "sub     toggle";
+    grid-template-columns: 1fr auto;
+    gap: 0.25rem 1rem;
+}
+
+.ind-num {
+    grid-area: num;
+    font-family: var(--font-display);
+    font-size: 11px;
+    font-weight: 300;
+    color: var(--text-3);
+    letter-spacing: 0.15em;
+}
+
+.ind-name {
+    grid-area: name;
+    font-family: var(--font-wordmark);
+    font-weight: 500;
+    font-size: 1.5rem;
+    line-height: 1.1;
+    color: var(--text-1);
+}
+
+.ind-sub {
+    grid-area: sub;
+    font-size: 0.8125rem;
+    color: var(--text-3);
+    margin-top: 0.5rem;
+}
+
+/* ============================================================
+   토글 스위치
+   ============================================================ */
+.toggle-switch {
+    grid-area: toggle;
+    align-self: center;
+    position: relative;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-switch .slider {
+    position: absolute;
+    inset: 0;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    transition: 0.25s ease;
+}
+
+.toggle-switch .slider::before {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.6);
+    transition: 0.25s ease;
+}
+
+.toggle-switch input:checked + .slider {
+    background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(99, 102, 241, 0.4));
+    border-color: rgba(168, 85, 247, 0.6);
+}
+
+.toggle-switch input:checked + .slider::before {
+    transform: translateX(20px);
+    background: linear-gradient(135deg, var(--aurora-purple), var(--aurora-cyan));
+}
+
+/* ============================================================
+   제어 버튼
+   ============================================================ */
+.ctrl-btn {
+    padding: 0.75rem 1.75rem;
+    border-radius: 8px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--text-2);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.ctrl-btn:hover {
+    border-color: var(--text-3);
+    color: var(--text-1);
+}
+
+.ctrl-start:hover {
+    border-color: rgba(34, 211, 238, 0.5);
+    color: var(--aurora-cyan);
+    box-shadow: 0 0 24px -8px rgba(34, 211, 238, 0.4);
+}
+
+.ctrl-stop:hover {
+    border-color: rgba(244, 63, 94, 0.5);
+    color: #fb7185;
+    box-shadow: 0 0 24px -8px rgba(244, 63, 94, 0.3);
+}
+
+.ctrl-save:hover {
+    border-color: rgba(168, 85, 247, 0.5);
+    color: #d8b4fe;
+    box-shadow: 0 0 24px -8px rgba(168, 85, 247, 0.4);
+}
+
+/* ============================================================
+   Placeholder 카드 (미구현 view용)
+   ============================================================ */
+.placeholder-card {
+    padding: 2.5rem;
+}
+
+.placeholder-title {
+    font-family: var(--font-display);
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    color: var(--text-3);
+    text-transform: uppercase;
+    margin-bottom: 1.5rem;
+}
+
+.placeholder-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+}
+
+.placeholder-list li {
+    position: relative;
+    padding-left: 1.5rem;
+    font-size: 0.9375rem;
+    color: var(--text-2);
+    line-height: 1.6;
+}
+
+.placeholder-list li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.7rem;
+    width: 0.75rem;
+    height: 1px;
+    background: linear-gradient(to right, rgba(168, 85, 247, 0.8), transparent);
+}
+
+.placeholder-todo {
+    margin-top: 1.75rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border-soft);
+    font-size: 0.75rem;
+    color: var(--text-3);
+    font-style: italic;
+    letter-spacing: 0.02em;
+}
+
+/* ============================================================
+   로그 박스
+   ============================================================ */
+.log-box {
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.4);
+    padding: 1.5rem;
+    height: 60vh;
+    overflow-y: auto;
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text-2);
+}
+
+.log-empty {
+    color: var(--text-4);
+    font-style: italic;
+    text-align: center;
+    margin-top: 4rem;
+    font-family: var(--font-sans);
+}
+
+/* ============================================================
+   스크롤바 (웹사이트와 동일)
+   ============================================================ */
 ::-webkit-scrollbar {
     width: 8px;
-    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: var(--bg);
 }
 ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: #1f1f2a;
     border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
-}
-
-/* 사이드바 활성 버튼 강조 */
-.nav-btn.active {
-    background-color: rgb(63 63 70); /* zinc-700 */
-    color: rgb(52 211 153); /* emerald-400 */
+    background: #2a2a3a;
 }

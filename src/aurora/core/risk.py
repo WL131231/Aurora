@@ -13,8 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-
-# Note: pandas / Literal 등은 추후 ATR 계산·구체 구현 시 다시 import.
+from typing import NamedTuple
 
 
 class TpSlMode(StrEnum):
@@ -56,15 +55,29 @@ class TpSlConfig:
     trailing_pct: float = 1.0  # 트레일링 거리
 
 
+class PositionSize(NamedTuple):
+    """포지션 사이즈 계산 결과 — 거래소 주문 + 시드 추적 + 분할 익절 모두 활용.
+
+    Attributes:
+        notional_usd: 명목 가치 (USD). 거래소 ``cost`` 파라미터에 자연스러움.
+        margin_usd: 실제 묶이는 마진 (USD) = notional / leverage.
+        coin_amount: 코인 수량 = notional / entry_price. ccxt ``amount`` 인자.
+    """
+
+    notional_usd: float
+    margin_usd: float
+    coin_amount: float
+
+
 @dataclass(slots=True)
 class RiskPlan:
-    """진입 시 산출되는 리스크 계획."""
+    """진입 시 산출되는 리스크 계획 — SL/TP 가격 + 포지션 사이즈."""
 
     entry_price: float
     direction: str
     leverage: int
-    position_usd: float
-    tp_prices: list[float]  # 4개
+    position: PositionSize  # notional / margin / coin_amount 한 번에
+    tp_prices: list[float]  # 4개 (분할 익절)
     sl_price: float
     trailing_mode: TrailingMode
 
@@ -130,18 +143,101 @@ def min_sl_pct_by_leverage(leverage: int) -> float:
     return sl_pct_for_leverage(leverage)
 
 
+# ============================================================
+# 포지션 사이즈 계산
+# ============================================================
+
+# 사용자 정책: 매 거래의 마진은 시드의 최소 ``MIN_SEED_PCT`` 이상 사용.
+# risk-based 계산 결과가 너무 작으면 강제로 끌어올림 (수수료 비율 보호).
+DEFAULT_MIN_SEED_PCT: float = 0.40
+
+
 def calc_position_size(
     equity_usd: float,
     leverage: int,
-    risk_pct: float,
     sl_distance_pct: float,
-) -> float:
-    """리스크 기반 포지션 사이즈 계산.
+    entry_price: float,
+    *,
+    risk_pct: float | None = None,
+    full_seed: bool = False,
+    min_seed_pct: float = DEFAULT_MIN_SEED_PCT,
+) -> PositionSize:
+    """포지션 사이즈 계산 — risk-based 기본, 풀시드 옵션, 최소 시드 강제.
 
-    risk_pct: 1회 거래 최대 손실 비율 (전체 자본 대비)
+    두 모드:
+        - **풀시드** (``full_seed=True``):
+              ``notional = equity_usd × leverage`` (시드 전체 × 레버리지).
+              ``risk_pct`` 무시. 마진은 항상 시드 100%.
+        - **risk-based** (``full_seed=False``, default):
+              ``risk_amount = equity_usd × risk_pct`` (거래당 최대 손실).
+              ``notional = risk_amount / sl_distance_pct``.
+              ``margin = notional / leverage``.
+
+    **최소 시드 강제** (양 모드 공통):
+        계산된 ``margin < equity_usd × min_seed_pct`` 면 강제로 ``min_seed_pct``
+        마진으로 끌어올림. 기본 40% (사용자 정책: 너무 작은 진입은 수수료
+        비율이 커져 손익비 망가짐 방지).
+
+    Args:
+        equity_usd: 시드 (사용 가능 자본금, USD).
+        leverage: 레버리지 배율 (예: 10~50).
+        sl_distance_pct: SL 까지 가격 변동 % (예: 0.04 = 4%).
+        entry_price: 진입 가격 (코인 수량 환산용).
+        risk_pct: 거래당 최대 손실 비율 (예: 0.01 = 1%). risk-based 모드에서 필수.
+        full_seed: 풀시드 모드 사용 여부 (default False).
+        min_seed_pct: 최소 진입 마진 비율 (default 0.40 = 시드의 40%).
+
+    Returns:
+        ``PositionSize(notional_usd, margin_usd, coin_amount)``.
+
+    Raises:
+        ValueError: 입력값이 양수가 아니거나 risk_pct 누락 (non-fullseed) 시.
     """
-    # TODO(A)
-    raise NotImplementedError
+    if equity_usd <= 0:
+        raise ValueError(f"equity_usd 는 양수여야 함 (받은: {equity_usd})")
+    if leverage < 1:
+        raise ValueError(f"leverage 는 1 이상 (받은: {leverage})")
+    if entry_price <= 0:
+        raise ValueError(f"entry_price 는 양수여야 함 (받은: {entry_price})")
+    if not (0 <= min_seed_pct <= 1):
+        raise ValueError(
+            f"min_seed_pct 는 0~1 범위 (받은: {min_seed_pct})"
+        )
+
+    if full_seed:
+        # 풀시드: 시드 전체 사용
+        margin_usd = float(equity_usd)
+        notional_usd = margin_usd * leverage
+    else:
+        if risk_pct is None or risk_pct <= 0:
+            raise ValueError(
+                f"risk-based 모드는 risk_pct 양수 필요 (받은: {risk_pct})"
+            )
+        if sl_distance_pct <= 0:
+            raise ValueError(
+                f"risk-based 모드는 sl_distance_pct 양수 필요 (받은: {sl_distance_pct})"
+            )
+        risk_amount = equity_usd * risk_pct
+        notional_usd = risk_amount / sl_distance_pct
+        margin_usd = notional_usd / leverage
+
+        # 최소 시드 강제 (margin 너무 작으면 끌어올림)
+        min_margin = equity_usd * min_seed_pct
+        if margin_usd < min_margin:
+            margin_usd = min_margin
+            notional_usd = margin_usd * leverage
+
+    coin_amount = notional_usd / entry_price
+    return PositionSize(
+        notional_usd=notional_usd,
+        margin_usd=margin_usd,
+        coin_amount=coin_amount,
+    )
+
+
+# ============================================================
+# 통합 리스크 플랜 빌더
+# ============================================================
 
 
 def build_risk_plan(
@@ -151,10 +247,100 @@ def build_risk_plan(
     equity_usd: float,
     config: TpSlConfig,
     atr: float | None = None,
+    *,
+    risk_pct: float = 0.01,
+    full_seed: bool = False,
+    min_seed_pct: float = DEFAULT_MIN_SEED_PCT,
 ) -> RiskPlan:
-    """진입 시점에 SL/TP/사이즈를 한 번에 계산."""
-    # TODO(A)
-    raise NotImplementedError
+    """진입 시점에 SL/TP 가격 + 포지션 사이즈를 한 번에 계산.
+
+    SL/TP 거리는 ``config.mode`` 따라 결정:
+        - ``ATR``: ``sl = atr × atr_sl_multiplier``,
+                   ``tp[i] = atr × atr_tp_multipliers[i]``.
+        - ``FIXED_PCT``: ``sl = entry × fixed_sl_pct%``,
+                          ``tp[i] = entry × fixed_tp_pcts[i]%``.
+        - ``MANUAL``: ``sl = entry × manual_sl_pct%``,
+                       ``tp[i] = entry × manual_tp_pcts[i]%``.
+
+    방향별 가격 산출:
+        - long: ``sl_price = entry - sl_dist``, ``tp_price[i] = entry + tp_dist[i]``.
+        - short: ``sl_price = entry + sl_dist``, ``tp_price[i] = entry - tp_dist[i]``.
+
+    Args:
+        entry_price: 진입 가격.
+        direction: 'long' 또는 'short' (대소문자 무관).
+        leverage: 레버리지 배율.
+        equity_usd: 시드.
+        config: TP/SL 설정 (모드 + 모드별 파라미터 + 트레일링).
+        atr: ATR 값 (``mode=ATR`` 일 때만 필요).
+        risk_pct: risk-based 모드의 거래당 최대 손실 비율.
+        full_seed: 풀시드 모드 사용.
+        min_seed_pct: 최소 진입 마진 비율.
+
+    Returns:
+        ``RiskPlan`` (entry/direction/leverage/position/tp_prices/sl_price/trailing).
+
+    Raises:
+        ValueError: 잘못된 direction / mode / atr 누락 등.
+    """
+    direction_norm = direction.lower()
+    if direction_norm not in ("long", "short"):
+        raise ValueError(
+            f"direction 은 'long' 또는 'short' (받은: {direction!r})"
+        )
+    if entry_price <= 0:
+        raise ValueError(f"entry_price 는 양수여야 함 (받은: {entry_price})")
+
+    # 모드별 SL/TP 거리 산출
+    if config.mode == TpSlMode.ATR:
+        if atr is None or atr <= 0:
+            raise ValueError("ATR 모드는 atr 양수 필요")
+        sl_dist = atr * config.atr_sl_multiplier
+        tp_dists = [atr * m for m in config.atr_tp_multipliers]
+    elif config.mode == TpSlMode.FIXED_PCT:
+        sl_dist = entry_price * (config.fixed_sl_pct / 100.0)
+        tp_dists = [entry_price * (p / 100.0) for p in config.fixed_tp_pcts]
+    elif config.mode == TpSlMode.MANUAL:
+        sl_dist = entry_price * (config.manual_sl_pct / 100.0)
+        tp_dists = [entry_price * (p / 100.0) for p in config.manual_tp_pcts]
+    else:
+        raise ValueError(f"unknown TpSlMode: {config.mode}")
+
+    sl_distance_pct = sl_dist / entry_price
+
+    # 방향별 가격
+    if direction_norm == "long":
+        sl_price = entry_price - sl_dist
+        tp_prices = [entry_price + d for d in tp_dists]
+    else:
+        sl_price = entry_price + sl_dist
+        tp_prices = [entry_price - d for d in tp_dists]
+
+    # 포지션 사이즈
+    position = calc_position_size(
+        equity_usd=equity_usd,
+        leverage=leverage,
+        sl_distance_pct=sl_distance_pct,
+        entry_price=entry_price,
+        risk_pct=risk_pct,
+        full_seed=full_seed,
+        min_seed_pct=min_seed_pct,
+    )
+
+    return RiskPlan(
+        entry_price=entry_price,
+        direction=direction_norm,
+        leverage=leverage,
+        position=position,
+        tp_prices=tp_prices,
+        sl_price=sl_price,
+        trailing_mode=config.trailing_mode,
+    )
+
+
+# ============================================================
+# 트레일링 SL 갱신 (5가지 모드)
+# ============================================================
 
 
 def update_trailing_sl(
@@ -165,9 +351,91 @@ def update_trailing_sl(
     highest_since_entry: float,
     lowest_since_entry: float,
 ) -> float:
-    """트레일링 모드에 따라 SL 갱신.
+    """트레일링 모드에 따라 SL 갱신 — 5가지 모드 + OFF.
 
-    tp_hits: 0~4 (몇 단계 익절 도달)
+    SL 은 단방향만 이동 (롱은 위로, 숏은 아래로). 즉 새 SL 이 현재 SL 보다
+    "유리한" 쪽이 아니면 그대로 유지.
+
+    모드:
+        - **OFF**: SL 갱신 없음.
+        - **MOVING_TARGET**: TP n단계 도달 시 SL 을 (n-1) 가격으로 이동.
+            · n=1: SL = entry_price (브레이크이븐)
+            · n=2: SL = tp_prices[0]
+            · n=3: SL = tp_prices[1]
+            · n=4: SL = tp_prices[2]
+        - **MOVING_2_TARGET**: TP n단계 도달 시 SL 을 (n-2) 가격으로 이동.
+            · n=2: SL = entry_price
+            · n=3: SL = tp_prices[0]
+            · n=4: SL = tp_prices[1]
+        - **BREAKEVEN**: ``trailing_trigger_target`` 단계 도달 시 SL = entry_price.
+        - **PERCENT_BELOW_TRIGGERS**: trigger 도달 후부터 활성화.
+            · 롱: SL = highest_since_entry × (1 − trailing_pct/100)
+            · 숏: SL = lowest_since_entry × (1 + trailing_pct/100)
+        - **PERCENT_BELOW_HIGHEST**: 진입 직후부터 활성화 (no trigger).
+            · 롱: SL = highest_since_entry × (1 − trailing_pct/100)
+            · 숏: SL = lowest_since_entry × (1 + trailing_pct/100)
+
+    Args:
+        current_sl: 현재 SL 가격.
+        plan: 진입 시 산출한 ``RiskPlan``.
+        config: 트레일링 설정.
+        tp_hits: 도달한 TP 단계 수 (0~4).
+        highest_since_entry: 진입 후 최고가 (롱 트레일링용).
+        lowest_since_entry: 진입 후 최저가 (숏 트레일링용).
+
+    Returns:
+        갱신된 SL 가격 (단방향 보장: 롱이면 ``max(current_sl, new_sl)``,
+        숏이면 ``min(current_sl, new_sl)``).
     """
-    # TODO(A): 5가지 트레일링 모드 구현
-    raise NotImplementedError
+    is_long = plan.direction == "long"
+    entry = plan.entry_price
+    new_sl = current_sl
+
+    if config.trailing_mode == TrailingMode.OFF:
+        return current_sl
+
+    elif config.trailing_mode == TrailingMode.MOVING_TARGET:
+        if tp_hits >= 1:
+            # n=1 → entry, n=2 → tp[0], n=3 → tp[1], n=4 → tp[2]
+            target_idx = tp_hits - 2
+            if target_idx < 0:
+                new_sl = entry
+            elif target_idx < len(plan.tp_prices):
+                new_sl = plan.tp_prices[target_idx]
+            else:
+                # 마지막 TP 단계 도달 후엔 마지막 tp[-1] 유지
+                new_sl = plan.tp_prices[-1]
+
+    elif config.trailing_mode == TrailingMode.MOVING_2_TARGET:
+        if tp_hits >= 2:
+            target_idx = tp_hits - 3
+            if target_idx < 0:
+                new_sl = entry
+            elif target_idx < len(plan.tp_prices):
+                new_sl = plan.tp_prices[target_idx]
+            else:
+                new_sl = plan.tp_prices[-1]
+
+    elif config.trailing_mode == TrailingMode.BREAKEVEN:
+        if tp_hits >= config.trailing_trigger_target:
+            new_sl = entry
+
+    elif config.trailing_mode == TrailingMode.PERCENT_BELOW_TRIGGERS:
+        if tp_hits >= config.trailing_trigger_target:
+            pct = config.trailing_pct / 100.0
+            if is_long:
+                new_sl = highest_since_entry * (1.0 - pct)
+            else:
+                new_sl = lowest_since_entry * (1.0 + pct)
+
+    elif config.trailing_mode == TrailingMode.PERCENT_BELOW_HIGHEST:
+        pct = config.trailing_pct / 100.0
+        if is_long:
+            new_sl = highest_since_entry * (1.0 - pct)
+        else:
+            new_sl = lowest_since_entry * (1.0 + pct)
+
+    # 단방향 보장: SL 은 유리한 방향으로만 이동
+    if is_long:
+        return max(current_sl, new_sl)
+    return min(current_sl, new_sl)

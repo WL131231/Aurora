@@ -7,6 +7,32 @@
 const Api = window.AuroraApi;
 
 // ============================================================
+// 0. 부팅 스플래시 — AURORA 페이드 인 → 정지 → 대시보드
+// ============================================================
+//
+// 타이밍 (CSS 의 splash-fade-in 1.5s 와 동기):
+//   0.0s        splash 페이드 인 시작
+//   1.5s        페이드 인 끝 (글자 완전 표시 + 그라디언트 시프트 시작)
+//   2.5s        오버레이 fade-out 클래스 추가 (0.8s 페이드 아웃)
+//   3.3s        오버레이 DOM 제거 + body splash-active 해제 → 메인 GUI 인터랙션
+//
+// 이 사이 메인 셸 (.main-shell) 은 opacity 0 (CSS) → 페이드 인 0.6s @ delay 0.4s
+// 로 자연스럽게 등장.
+
+window.addEventListener("load", () => {
+    setTimeout(() => {
+        const splash = document.getElementById("splash");
+        if (!splash) return;
+        splash.classList.add("fade-out");
+        // 페이드 아웃 끝(0.8s) 후 DOM 제거 + body 클래스 해제
+        setTimeout(() => {
+            splash.remove();
+            document.body.classList.remove("splash-active");
+        }, 800);
+    }, 2500); // 1.5s (페이드 인) + 1.0s (정지)
+});
+
+// ============================================================
 // 1. 라우팅 (사이드바 네비 → view 토글)
 // ============================================================
 

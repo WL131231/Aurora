@@ -816,3 +816,111 @@ def test_evaluate_selectable_harmonic_on() -> None:
     harmonic_sigs = [s for s in signals if s.source.startswith("harmonic")]
     assert len(harmonic_sigs) >= 1
     assert harmonic_sigs[0].direction == Direction.LONG
+
+
+# ============================================================
+# EntrySignal 식별 필드 (bar_timestamp / pattern_id) — M2/M3 dedup
+# ============================================================
+
+
+def _datetime_indexed_df(values: list[float], freq: str = "1h") -> pd.DataFrame:
+    """DatetimeIndex 가 붙은 OHLC DataFrame."""
+    s = pd.Series(values, dtype=float)
+    idx = pd.date_range("2026-01-01", periods=len(values), freq=freq)
+    return pd.DataFrame(
+        {"open": s.values, "high": s.values * 1.005, "low": s.values * 0.995, "close": s.values},
+        index=idx,
+    )
+
+
+def test_entry_signal_default_identifiers_none() -> None:
+    """식별 필드는 default None — 기존 호출처 호환."""
+    sig = EntrySignal(direction=Direction.LONG, timeframe="1H", source="test")
+    assert sig.bar_timestamp is None
+    assert sig.pattern_id is None
+
+
+def test_ema_touch_fills_bar_timestamp_with_datetime_index() -> None:
+    """DatetimeIndex 면 ``bar_timestamp`` 가 마지막 봉 시각으로 채워짐."""
+    closes = [100.0] * 250 + [100.2]
+    df = _datetime_indexed_df(closes)
+    config = StrategyConfig()
+    signals = detect_ema_touch({"1H": df}, config)
+    assert len(signals) >= 1
+    assert signals[0].bar_timestamp == df.index[-1]
+
+
+def test_ema_touch_bar_timestamp_none_with_default_index() -> None:
+    """RangeIndex (DatetimeIndex 아님) 이면 ``bar_timestamp`` 는 None."""
+    closes = [100.0] * 250 + [100.2]
+    df_by_tf = {"1H": _make_df(closes)}
+    config = StrategyConfig()
+    signals = detect_ema_touch(df_by_tf, config)
+    assert len(signals) >= 1
+    assert signals[0].bar_timestamp is None
+
+
+def test_bollinger_signal_fills_bar_timestamp() -> None:
+    """BB 신호도 DatetimeIndex 면 timestamp 채워짐."""
+    # squeeze 안 걸리도록 변동성 + 마지막 봉 high 가 upper zone 진입
+    rng = np.random.RandomState(0)
+    closes = list(rng.normal(100, 1.5, 50))
+    closes[-1] = 102.5
+    s = pd.Series(closes, dtype=float)
+    idx = pd.date_range("2026-01-01", periods=len(closes), freq="1h")
+    df = pd.DataFrame(
+        {"open": s.values, "high": s.values + 0.8, "low": s.values - 0.8, "close": s.values},
+        index=idx,
+    )
+    df.loc[df.index[-1], "high"] = 103.0
+    config = StrategyConfig(bollinger_period=10, bollinger_squeeze_threshold=0.001)
+    signals = detect_bollinger_touch(df, config)
+    for sig in signals:
+        assert sig.bar_timestamp == df.index[-1]
+
+
+def test_harmonic_signal_fills_pattern_id() -> None:
+    """Harmonic 신호는 pattern_id 채워짐 (재진입 방지용)."""
+    df = _bullish_bat_df()
+    config = _harmonic_cfg()
+    signals = detect_harmonic_signal({"1H": df}, config)
+    assert len(signals) == 1
+    pid = signals[0].pattern_id
+    assert pid is not None
+    assert pid.startswith("bat@1H@d_bar=")
+
+
+def test_harmonic_signal_pattern_id_stable_across_calls() -> None:
+    """같은 데이터 두 번 호출 시 같은 pattern_id (멱등성, 재진입 dedup 가능)."""
+    df = _bullish_bat_df()
+    config = _harmonic_cfg()
+    sigs1 = detect_harmonic_signal({"1H": df}, config)
+    sigs2 = detect_harmonic_signal({"1H": df}, config)
+    assert len(sigs1) == 1 and len(sigs2) == 1
+    assert sigs1[0].pattern_id == sigs2[0].pattern_id
+
+
+def test_harmonic_signal_pattern_id_includes_tf() -> None:
+    """같은 패턴이 15m/1H 두 TF 에서 동시 발현 시 pattern_id 가 다름 (TF 포함)."""
+    df = _bullish_bat_df()
+    config = _harmonic_cfg()
+    signals = detect_harmonic_signal({"15m": df, "1H": df}, config)
+    pids = {s.pattern_id for s in signals}
+    assert len(pids) == 2  # TF 별로 다른 식별자
+
+
+def test_ichimoku_signal_fills_bar_timestamp() -> None:
+    """Ichimoku 도 DatetimeIndex 면 timestamp 채워짐."""
+    closes = [100.0] * 30 + [101.0]
+    s = pd.Series(closes, dtype=float)
+    idx = pd.date_range("2026-01-01", periods=len(closes), freq="1h")
+    df = pd.DataFrame(
+        {"open": s.values, "high": s.values, "low": s.values, "close": s.values},
+        index=idx,
+    )
+    df.loc[df.index[-1], "high"] = 101.5
+    df.loc[df.index[-1], "low"] = 99.5
+    config = _ichimoku_cfg()
+    signals = detect_ichimoku_signal({"1H": df}, config)
+    assert len(signals) >= 1
+    assert signals[0].bar_timestamp == df.index[-1]

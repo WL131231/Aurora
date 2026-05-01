@@ -19,6 +19,7 @@ from aurora.core.indicators import (
     ma_cross,
     rsi,
     rsi_divergence,
+    volume_confirmation,
 )
 
 # ============================================================
@@ -83,6 +84,14 @@ class StrategyConfig:
     rsi_div_lb_left: int = 5
     rsi_div_lb_right: int = 5
 
+    # 거래량 컨펌 (EMA 한 세트, 단독 신호 X — strength 부스트만)
+    volume_period: int = 20
+    """거래량 평균 계산 기간 (SMA)."""
+    volume_multiplier: float = 1.5
+    """평균 대비 배율 임계 (사용자 결정 = 1.5배)."""
+    volume_boost: float = 1.5
+    """거래량 동반 시 ``EntrySignal.strength`` 곱셈 (기본 1.5)."""
+
     # Bollinger Bands (Selectable — 1H 고정)
     bollinger_period: int = 20
     bollinger_std: float = 2.0
@@ -111,6 +120,22 @@ class StrategyConfig:
     """피벗 검출 lookback 봉수 (트뷰 ``pivots_f`` length)."""
     harmonic_tolerance: float = 0.10
     """비율 검증 허용 오차 (기본 ±10%)."""
+
+    # 2,4,6,8 타점 매매 (BTC 전용, 가격 기반, 항상 ON — Selectable 아님)
+    use_2468: bool = True
+    """2468 룰 활성화 (디폴트 True). 테스트/실험용 flag — 일반 사용자 GUI 노출 X."""
+    k_unit: float = 1000.0
+    """가격 단위 (BTC = $1000 = 1K). 90K → 91K 같은 심리적 단위."""
+    zone_lower_min: float = 200.0
+    """상방 추세 저항 zone 시작 (= N.200)."""
+    zone_lower_max: float = 400.0
+    """상방 추세 저항 zone 끝 (= N.400)."""
+    zone_upper_min: float = 600.0
+    """하방 추세 지지 zone 시작 (= N.600)."""
+    zone_upper_max: float = 800.0
+    """하방 추세 지지 zone 끝 (= N.800)."""
+    zone_sl_buffer: float = 1000.0
+    """SL = zone 너머 ``zone_sl_buffer`` 이상 이탈 (기본 1K = 1000 USD)."""
 
 
 # ============================================================
@@ -151,6 +176,21 @@ def detect_ema_touch(
 
         ts = _last_bar_timestamp(df)
 
+        # 거래량 컨펌 (EMA 한 세트, 단독 신호 X — strength 부스트용)
+        # 자료 인용: "거래량 동반 = 진짜 의미 있는 상승" → strength 부스트.
+        # volume 컬럼 없거나 데이터 짧으면 컨펌 X (기본 신호만 emit).
+        vol_confirmed = False
+        if "volume" in df.columns and len(df) >= config.volume_period:
+            try:
+                vol_series = volume_confirmation(
+                    df["volume"],
+                    period=config.volume_period,
+                    multiplier=config.volume_multiplier,
+                )
+                vol_confirmed = bool(vol_series.iloc[-1])
+            except ValueError:
+                vol_confirmed = False
+
         for period in config.ema_periods:
             ema_series = ema(df["close"], period)
             ema_val = ema_series.iloc[-1]
@@ -169,12 +209,17 @@ def detect_ema_touch(
                 direction = Direction.SHORT
                 note = f"EMA{period} 저항 (close < EMA, 거리 {distance:.4f})"
 
+            # 거래량 동반 시 공격적 진입 = strength 부스트
+            strength = config.volume_boost if vol_confirmed else 1.0
+            if vol_confirmed:
+                note += f" + 거래량 동반(×{config.volume_multiplier})"
+
             signals.append(
                 EntrySignal(
                     direction=direction,
                     timeframe=tf,
                     source=f"ema_touch_{period}",
-                    strength=1.0,
+                    strength=strength,
                     note=note,
                     bar_timestamp=ts,
                 )
@@ -682,6 +727,161 @@ def detect_harmonic_exit(
 
 
 # ============================================================
+# 2,4,6,8 타점 매매 (BTC 전용, 가격 기반, 항상 ON)
+# ============================================================
+#
+# 자료: PDF "나뇨띠 — 2,4,6,8 타점 매매".
+#   - "2,4,6,8" = 200/400/600/800 (1K 단위 내 위치)
+#   - **상방 추세** → N.200~N.400 = 1차 저항 zone (SHORT 진입)
+#   - **하방 추세** → N.600~N.800 = 1차 지지 zone (LONG 진입)
+#   - 추세 판단: MA Cross 상태 (사용자 결정 = B)
+#   - SL: zone 너머 ``zone_sl_buffer`` (= 1K) 이상 이탈
+#   - **TF 무관 — 가격 기반 작동** (사용자 명시).
+#     호출자가 어떤 TF df 줘도 마지막 봉 high/low 로 판정.
+#     관례적으로 가장 빠른 TF (15m → 1H → ...) 우선 사용.
+
+
+# 가장 빠른 TF 부터 우선순위 (가격 기반이라 빠른 TF 가 가격 변동 빠르게 반영)
+_2468_TF_PREFERENCE: tuple[str, ...] = ("15m", "1H", "2H", "4H", "6H", "12H", "1D", "1W")
+
+
+def _select_2468_df(df_by_tf: dict[str, pd.DataFrame]) -> tuple[str, pd.DataFrame] | None:
+    """``df_by_tf`` 에서 2468 판정에 사용할 (TF, df) 한 쌍 선택.
+
+    가장 빠른 TF 부터 시도해 ``high/low/close`` 컬럼이 있고 비어있지 않은
+    첫 데이터를 반환. 모두 부적합하면 None.
+    """
+    for tf in _2468_TF_PREFERENCE:
+        df = df_by_tf.get(tf)
+        if df is None or df.empty:
+            continue
+        if not {"high", "low", "close"}.issubset(df.columns):
+            continue
+        return tf, df
+    return None
+
+
+def _detect_ma_trend(df: pd.DataFrame, fast: int, slow: int) -> str | None:
+    """MA Cross 상태 기반 현재 추세 — 가장 최근 cross 의 방향.
+
+    Returns:
+        ``"up"`` (가장 최근 cross = golden) / ``"down"`` (dead) / ``None`` (아직 cross 없음).
+    """
+    if "close" not in df.columns or len(df) < slow:
+        return None
+    cross = ma_cross(df["close"], fast=fast, slow=slow).dropna()
+    if cross.empty:
+        return None
+    last = cross.iloc[-1]
+    if last == "golden":
+        return "up"
+    if last == "dead":
+        return "down"
+    return None
+
+
+def detect_2468_signal(
+    df_by_tf: dict[str, pd.DataFrame],
+    config: StrategyConfig,
+    symbol: str = "BTC/USDT",
+) -> list[EntrySignal]:
+    """2,4,6,8 타점 매매 — 가격 기반, BTC 전용, 항상 ON.
+
+    PDF 룰 (사용자 결정 반영):
+        - **상방 추세** (MA Cross golden) → 가격이 N.200~N.400 zone 터치 → SHORT
+        - **하방 추세** (MA Cross dead) → 가격이 N.600~N.800 zone 터치 → LONG
+        - 가격대 = ``close // k_unit × k_unit`` (예: 91234 → 91000 K 봉)
+        - zone 진입 판정: 마지막 봉 ``high/low`` 가 zone 안에 닿음 (사용자 결정 a)
+
+    BTC 전용:
+        ``symbol`` 이 ``"BTC"`` 로 시작하지 않으면 빈 리스트 반환.
+
+    TF 무관 (가격 기반):
+        ``df_by_tf`` 중 가장 빠른 TF (15m → 1H → ...) 자동 선택.
+        signal.timeframe 은 선택된 TF, strength 1.0 (HTF 가중치 자연 적용).
+
+    SL:
+        EntrySignal 자체엔 SL 가격 미포함 — 호출자(상위 청산 레이어)가
+        ``config.zone_sl_buffer`` 와 ``note`` 정보로 판정.
+        예: SHORT @ 91.2~91.4 → SL = 91.4 + 1000 = 92.4.
+
+    Args:
+        df_by_tf: TF 별 OHLC DataFrame.
+        config: 전략 설정 (k_unit, zone_*, ma_cross_*).
+        symbol: 거래 페어 (예: "BTC/USDT"). BTC 가 아니면 무시.
+
+    Returns:
+        ``EntrySignal`` 리스트 (0 또는 1 개).
+    """
+    if not config.use_2468:
+        return []
+    if not symbol.upper().startswith("BTC"):
+        return []  # PDF 자체가 BTC 1K 단위 심리 기반
+
+    selected = _select_2468_df(df_by_tf)
+    if selected is None:
+        return []
+    tf, df = selected
+
+    # 추세 판단 (MA Cross 상태)
+    trend = _detect_ma_trend(df, fast=config.ma_cross_fast, slow=config.ma_cross_slow)
+    if trend is None:
+        return []  # 추세 미확정 → 진입 보류
+
+    last_close = float(df["close"].iloc[-1])
+    last_high = float(df["high"].iloc[-1])
+    last_low = float(df["low"].iloc[-1])
+    if any(pd.isna(v) for v in (last_close, last_high, last_low)):
+        return []
+
+    # 1K 단위 정규화 — 현재 봉이 속한 N.000 가격대
+    k_floor = (last_close // config.k_unit) * config.k_unit
+    # zone 절대 가격
+    short_zone_lo = k_floor + config.zone_lower_min  # N.200
+    short_zone_hi = k_floor + config.zone_lower_max  # N.400
+    long_zone_lo = k_floor + config.zone_upper_min   # N.600
+    long_zone_hi = k_floor + config.zone_upper_max   # N.800
+
+    ts = _last_bar_timestamp(df)
+
+    # 상방 추세 + N.200~N.400 zone 터치 → SHORT
+    if trend == "up" and last_high >= short_zone_lo and last_low <= short_zone_hi:
+        sl_price = short_zone_hi + config.zone_sl_buffer
+        return [EntrySignal(
+            direction=Direction.SHORT,
+            timeframe=tf,
+            source="zone_2468_short",
+            strength=1.0,
+            note=(
+                f"2468 저항 ({tf}, 상방추세, "
+                f"zone={short_zone_lo:.0f}~{short_zone_hi:.0f}, "
+                f"high={last_high:.0f}, SL={sl_price:.0f})"
+            ),
+            bar_timestamp=ts,
+            pattern_id=f"2468@{tf}@N{int(k_floor)}_short",
+        )]
+
+    # 하방 추세 + N.600~N.800 zone 터치 → LONG
+    if trend == "down" and last_high >= long_zone_lo and last_low <= long_zone_hi:
+        sl_price = long_zone_lo - config.zone_sl_buffer
+        return [EntrySignal(
+            direction=Direction.LONG,
+            timeframe=tf,
+            source="zone_2468_long",
+            strength=1.0,
+            note=(
+                f"2468 지지 ({tf}, 하방추세, "
+                f"zone={long_zone_lo:.0f}~{long_zone_hi:.0f}, "
+                f"low={last_low:.0f}, SL={sl_price:.0f})"
+            ),
+            bar_timestamp=ts,
+            pattern_id=f"2468@{tf}@N{int(k_floor)}_long",
+        )]
+
+    return []
+
+
+# ============================================================
 # Selectable 지표 라우터 (사용자 on/off)
 # ============================================================
 
@@ -689,14 +889,23 @@ def detect_harmonic_exit(
 def evaluate_selectable(
     df_by_tf: dict[str, pd.DataFrame],
     config: StrategyConfig,
+    symbol: str = "BTC/USDT",
 ) -> list[EntrySignal]:
-    """사용자가 켠 Selectable 지표만 평가해서 신호 리스트 반환.
+    """사용자가 켠 Selectable 지표 + 2468(항상 ON, BTC 전용) 신호 합본.
 
     각 지표는 자기 고정 TF 의 데이터만 참조.
+
+    2468 정책 (사용자 결정):
+        - **별도 Selectable 지표 X, 기본값 ON** — GUI 토글에 노출 안 함
+          (``config.use_2468`` 은 테스트/실험용 internal flag).
+        - **BTC 전용** — 다른 symbol 에선 자동 무시.
+        - **우선순위**: 일반 지표 > 2468 (strength 1.0 vs 다른 지표 1.0~1.5,
+          HTF 가중치 합산으로 자연 정렬).
 
     Args:
         df_by_tf: TF 별 DataFrame 딕셔너리.
         config: 어떤 Selectable 지표를 켤지 결정.
+        symbol: 거래 페어 (예: "BTC/USDT"). 2468 BTC 전용 검증에 사용.
 
     Returns:
         활성화된 지표들의 ``EntrySignal`` 합본 리스트.
@@ -716,5 +925,8 @@ def evaluate_selectable(
 
     if config.use_harmonic:
         signals.extend(detect_harmonic_signal(df_by_tf, config))
+
+    # 2,4,6,8 — 항상 ON, BTC 전용 (GUI 토글 X)
+    signals.extend(detect_2468_signal(df_by_tf, config, symbol=symbol))
 
     return signals

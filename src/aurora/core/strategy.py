@@ -33,13 +33,37 @@ class Direction(StrEnum):
 
 @dataclass(slots=True)
 class EntrySignal:
-    """진입 신호 (지표 1개 × TF 1개 산출 단위)."""
+    """진입 신호 (지표 1개 × TF 1개 산출 단위).
+
+    식별 필드 (``bar_timestamp`` / ``pattern_id``) 는 신호 dedup 및 재진입
+    방지용. 호출자(position management 또는 봇 메인루프) 가 같은 식별자의
+    신호를 중복 합산 / 재진입하지 않도록 사용한다.
+    """
 
     direction: Direction
     timeframe: str  # "15m", "1H", "4H", etc.
     source: str  # "ema_touch_200", "rsi_div", "bb", etc.
     strength: float = 1.0  # 0.0 ~ 1.0
     note: str = ""
+
+    # ─── 식별 필드 (M2/M3 dedup용) ──────────────────────────
+    bar_timestamp: pd.Timestamp | None = None
+    """신호 발생 봉의 timestamp. 같은 봉에서 같은 source 가 두 번
+    emit 되면 호출자가 dedup 해야 한다.
+    DataFrame 인덱스가 DatetimeIndex 일 때만 채워짐 (그 외 None)."""
+
+    pattern_id: str | None = None
+    """패턴 단위 식별자 (Harmonic 등). 예: ``"bat@d_bar=50"``.
+    같은 패턴이 여러 봉에 걸쳐 검출될 때 재진입 방지용."""
+
+
+def _last_bar_timestamp(df: pd.DataFrame) -> pd.Timestamp | None:
+    """DataFrame 의 마지막 봉 timestamp (DatetimeIndex 일 때만, 그 외 None)."""
+    if df is None or df.empty:
+        return None
+    if isinstance(df.index, pd.DatetimeIndex):
+        return df.index[-1]
+    return None
 
 
 @dataclass(slots=True)
@@ -125,6 +149,8 @@ def detect_ema_touch(
         if pd.isna(last_close) or last_close <= 0:
             continue
 
+        ts = _last_bar_timestamp(df)
+
         for period in config.ema_periods:
             ema_series = ema(df["close"], period)
             ema_val = ema_series.iloc[-1]
@@ -150,6 +176,7 @@ def detect_ema_touch(
                     source=f"ema_touch_{period}",
                     strength=1.0,
                     note=note,
+                    bar_timestamp=ts,
                 )
             )
 
@@ -213,6 +240,7 @@ def detect_rsi_divergence(
             source=f"rsi_div_{last}",
             strength=1.0,
             note=f"RSI {last}",
+            bar_timestamp=_last_bar_timestamp(df_1h),
         )
     ]
 
@@ -270,6 +298,7 @@ def detect_bollinger_touch(
     last_upper_f = float(last_upper)
     last_lower_f = float(last_lower)
     last_middle_f = float(last_middle)
+    ts = _last_bar_timestamp(df_1h)
 
     # ─── 1. Squeeze 보류 ──────────────────────────────────
     if last_middle_f > 0:
@@ -294,6 +323,7 @@ def detect_bollinger_touch(
                 strength=1.5,
                 note=f"BB 상단 찢어짐 회귀 (prev={prev_close:.4f}>{prev_upper_f:.4f}, "
                      f"last={last_close:.4f}≤{last_upper_f:.4f})",
+                bar_timestamp=ts,
             )]
         # 아래로 찢어졌다 회귀
         if prev_close < prev_lower_f and last_close >= last_lower_f:
@@ -304,6 +334,7 @@ def detect_bollinger_touch(
                 strength=1.5,
                 note=f"BB 하단 찢어짐 회귀 (prev={prev_close:.4f}<{prev_lower_f:.4f}, "
                      f"last={last_close:.4f}≥{last_lower_f:.4f})",
+                bar_timestamp=ts,
             )]
 
     # ─── 3. 찢어짐 보류 (현재 봉 종가가 BB 밖) ────────────
@@ -322,6 +353,7 @@ def detect_bollinger_touch(
             source="bollinger_upper",
             strength=1.0,
             note=f"BB 상단 zone 진입 (high={last_high:.4f}, zone_start={upper_zone_start:.4f})",
+            bar_timestamp=ts,
         ))
     if last_low <= lower_zone_end:
         signals.append(EntrySignal(
@@ -330,6 +362,7 @@ def detect_bollinger_touch(
             source="bollinger_lower",
             strength=1.0,
             note=f"BB 하단 zone 진입 (low={last_low:.4f}, zone_end={lower_zone_end:.4f})",
+            bar_timestamp=ts,
         ))
     return signals
 
@@ -369,6 +402,7 @@ def detect_ma_cross(
 
         cross = ma_cross(df["close"], fast=config.ma_cross_fast, slow=config.ma_cross_slow)
         last = cross.iloc[-1]
+        ts = _last_bar_timestamp(df)
         if last == "golden":
             signals.append(EntrySignal(
                 direction=Direction.LONG,
@@ -376,6 +410,7 @@ def detect_ma_cross(
                 source="ma_cross_golden",
                 strength=1.0,
                 note=f"SMA{config.ma_cross_fast}/{config.ma_cross_slow} 골든크로스 ({tf})",
+                bar_timestamp=ts,
             ))
         elif last == "dead":
             signals.append(EntrySignal(
@@ -384,6 +419,7 @@ def detect_ma_cross(
                 source="ma_cross_dead",
                 strength=1.0,
                 note=f"SMA{config.ma_cross_fast}/{config.ma_cross_slow} 데드크로스 ({tf})",
+                bar_timestamp=ts,
             ))
 
     return signals
@@ -450,6 +486,7 @@ def detect_ichimoku_signal(
         last_low = float(df["low"].iloc[-1])
         upper_f = float(last_upper)
         lower_f = float(last_lower)
+        ts = _last_bar_timestamp(df)
 
         # 가격이 구름 위 + 상단 스팬 터치 → LONG
         if last_close > upper_f and last_low <= upper_f:
@@ -460,6 +497,7 @@ def detect_ichimoku_signal(
                 strength=1.0,
                 note=f"이치모쿠 구름 상단 지지 ({tf}, "
                      f"low={last_low:.4f}≤upper={upper_f:.4f}<close={last_close:.4f})",
+                bar_timestamp=ts,
             ))
         # 가격이 구름 아래 + 하단 스팬 터치 → SHORT
         elif last_close < lower_f and last_high >= lower_f:
@@ -470,6 +508,7 @@ def detect_ichimoku_signal(
                 strength=1.0,
                 note=f"이치모쿠 구름 하단 저항 ({tf}, "
                      f"close={last_close:.4f}<lower={lower_f:.4f}≤high={last_high:.4f})",
+                bar_timestamp=ts,
             ))
 
     return signals
@@ -593,6 +632,9 @@ def detect_harmonic_signal(
                 f"SL={match.sl_price:.4f}, TP1={match.tp1_price:.4f}, "
                 f"TP2={match.tp2_price:.4f})"
             ),
+            bar_timestamp=_last_bar_timestamp(df),
+            # 재진입 방지용 식별자: 같은 D 봉의 같은 패턴이면 같은 id
+            pattern_id=f"{match.name}@{tf}@d_bar={match.d_bar}",
         ))
 
     return signals

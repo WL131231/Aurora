@@ -101,6 +101,31 @@ def test_ema_touch_skips_short_df_nan_ema() -> None:
     assert detect_ema_touch(df_by_tf, config) == []
 
 
+def test_ema_touch_skips_ema_480_on_1w() -> None:
+    """1W TF 에선 EMA 480 적용 X — 메모리 spec (데이터 절대량 부족 정책).
+
+    1D 등 다른 TF 는 EMA 200/480 둘 다 적용. 1W 만 EMA 200 만 emit.
+    """
+    closes = [100.0] * 600 + [100.2]  # EMA 수렴 후 마지막 터치
+    df_by_tf = {"1W": _make_df(closes)}
+    config = StrategyConfig()  # ema_periods = (200, 480)
+    signals = detect_ema_touch(df_by_tf, config)
+    sources = {s.source for s in signals}
+    assert "ema_touch_200" in sources
+    assert "ema_touch_480" not in sources  # 1W EMA 480 제외
+
+
+def test_ema_touch_applies_both_periods_on_1d() -> None:
+    """1D 는 EMA 200/480 둘 다 적용 — 1W 와 달리 데이터 충분 (Binance 차트 확인됨)."""
+    closes = [100.0] * 600 + [100.2]
+    df_by_tf = {"1D": _make_df(closes)}
+    config = StrategyConfig()
+    signals = detect_ema_touch(df_by_tf, config)
+    sources = {s.source for s in signals}
+    assert "ema_touch_200" in sources
+    assert "ema_touch_480" in sources
+
+
 # ============================================================
 # detect_rsi_divergence (단순 smoke + 빈 DF 처리)
 # ============================================================

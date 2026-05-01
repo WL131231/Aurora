@@ -145,6 +145,13 @@ class StrategyConfig:
 # EMA 터치 진입에 사용할 TF 목록 (project_indicator_spec.md 기준)
 EMA_TIMEFRAMES: tuple[str, ...] = ("15m", "1H", "2H", "4H", "6H", "12H", "1D", "1W")
 
+# EMA 480 (장기 EMA) 안정 warmup 데이터 절대량 부족 TF — 메모리 spec 명시.
+# 1W EMA 480 안정 warmup 위해 ~25년치 (5×period 주) 필요한데 BTC 자체가 ~10년치 한계
+# → 1W 는 EMA 200 만 적용. 거래소 차트도 1W 에선 480 미표시 (사용자 확인 2026-05).
+EMA_LONG_EXCLUDED_TFS: tuple[str, ...] = ("1W",)
+EMA_LONG_THRESHOLD: int = 480
+"""``EMA_LONG_EXCLUDED_TFS`` 의 TF에서 이 값 이상의 EMA period 제외."""
+
 
 def detect_ema_touch(
     df_by_tf: dict[str, pd.DataFrame],
@@ -192,6 +199,11 @@ def detect_ema_touch(
                 vol_confirmed = False
 
         for period in config.ema_periods:
+            # 1W 등 데이터 절대량 부족 TF 에선 EMA 480 같은 장기 EMA 제외
+            # (메모리 spec: 1W 는 EMA 200 만 사용 — Binance 차트도 1W 480 미표시)
+            if period >= EMA_LONG_THRESHOLD and tf in EMA_LONG_EXCLUDED_TFS:
+                continue
+
             ema_series = ema(df["close"], period)
             ema_val = ema_series.iloc[-1]
             if pd.isna(ema_val) or ema_val <= 0:

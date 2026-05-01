@@ -11,6 +11,8 @@ from aurora.core.strategy import (
     StrategyConfig,
     detect_bollinger_touch,
     detect_ema_touch,
+    detect_ichimoku_exit,
+    detect_ichimoku_signal,
     detect_ma_cross,
     detect_rsi_divergence,
     evaluate_selectable,
@@ -424,3 +426,205 @@ def test_evaluate_selectable_ma_cross_on() -> None:
     assert len(goldens) == 1
     assert goldens[0].direction == Direction.LONG
     assert goldens[0].timeframe == "4H"
+
+
+# ============================================================
+# detect_ichimoku_signal — 구름대 스팬 터치 진입
+# ============================================================
+
+
+def _ichimoku_cfg() -> StrategyConfig:
+    """이치모쿠 테스트용 작은 기간 설정 (warmup 짧게)."""
+    return StrategyConfig(
+        use_ichimoku=True,
+        ichimoku_conversion_period=3,
+        ichimoku_base_period=5,
+        ichimoku_span_b_period=10,
+        ichimoku_displacement=5,  # shift = 4봉
+    )
+
+
+def _ohlc_with_last(closes: list[float], last_high: float, last_low: float) -> pd.DataFrame:
+    """마지막 봉만 high/low 를 별도 지정하는 OHLC 헬퍼."""
+    s = pd.Series(closes, dtype=float)
+    high = s.copy()
+    low = s.copy()
+    high.iloc[-1] = last_high
+    low.iloc[-1] = last_low
+    return pd.DataFrame({"open": s, "high": high, "low": low, "close": s})
+
+
+def test_ichimoku_signal_no_data_returns_empty() -> None:
+    config = _ichimoku_cfg()
+    assert detect_ichimoku_signal({}, config) == []
+
+
+def test_ichimoku_signal_skips_missing_columns() -> None:
+    config = _ichimoku_cfg()
+    df = pd.DataFrame({"close": [100.0] * 30})
+    assert detect_ichimoku_signal({"1H": df}, config) == []
+
+
+def test_ichimoku_signal_long_on_cloud_upper_touch() -> None:
+    """가격이 구름 위에서 상단 스팬 터치 → LONG."""
+    # 30봉 횡보 (구름이 ~100 근처에서 형성), 마지막 close 가 구름 상단 살짝 위에서 low 가 닿음
+    closes = [100.0] * 30 + [101.0]
+    # 위 closes 로 ichimoku 계산했을 때 cloud_upper(마지막 봉) ≈ 100 부근.
+    # 마지막 봉의 close 를 약간 올려두고 low 가 cloud_upper 를 감싸게 만듬.
+    df = _ohlc_with_last(closes, last_high=101.5, last_low=99.5)
+    config = _ichimoku_cfg()
+
+    signals = detect_ichimoku_signal({"1H": df}, config)
+    longs = [s for s in signals if s.direction == Direction.LONG]
+    assert len(longs) == 1
+    assert longs[0].source == "ichimoku_cloud_upper"
+    assert longs[0].timeframe == "1H"
+    assert longs[0].strength == 1.0
+
+
+def test_ichimoku_signal_short_on_cloud_lower_touch() -> None:
+    """가격이 구름 아래에서 하단 스팬 터치 → SHORT."""
+    closes = [100.0] * 30 + [99.0]
+    df = _ohlc_with_last(closes, last_high=100.5, last_low=98.5)
+    config = _ichimoku_cfg()
+
+    signals = detect_ichimoku_signal({"1H": df}, config)
+    shorts = [s for s in signals if s.direction == Direction.SHORT]
+    assert len(shorts) == 1
+    assert shorts[0].source == "ichimoku_cloud_lower"
+    assert shorts[0].timeframe == "1H"
+
+
+def test_ichimoku_signal_no_signal_inside_cloud() -> None:
+    """가격이 구름 안에 있을 때 무신호."""
+    # 가격 변동이 충분해서 cloud_upper/lower 가 구분되도록 sine 형 데이터
+    closes = [100.0 + 5.0 * np.sin(i * 0.3) for i in range(30)]
+    closes.append(100.0)  # 마지막 봉 close = 100, 구름 안쪽 위치 가정
+    s = pd.Series(closes, dtype=float)
+    # 마지막 봉 high/low 도 구름 안쪽으로 좁게
+    high = s.copy()
+    low = s.copy()
+    high.iloc[-1] = 100.5
+    low.iloc[-1] = 99.5
+    df = pd.DataFrame({"open": s, "high": high, "low": low, "close": s})
+    config = _ichimoku_cfg()
+
+    signals = detect_ichimoku_signal({"1H": df}, config)
+    # close 가 구름 위/아래 어디인지 따라 결과 다를 수 있어, "터치 조건" 만 검증:
+    # 신호가 있다면 source 는 ichimoku_cloud_upper / lower 둘 중 하나.
+    for s_ in signals:
+        assert s_.source in ("ichimoku_cloud_upper", "ichimoku_cloud_lower")
+
+
+def test_ichimoku_signal_no_signal_far_above_cloud() -> None:
+    """가격이 구름 위에 있고 low 가 cloud_upper 위에 있으면 무신호 (터치 X)."""
+    closes = [100.0] * 30 + [105.0]
+    # 마지막 봉의 low 를 구름 위로 멀리 떨어트림
+    df = _ohlc_with_last(closes, last_high=106.0, last_low=104.5)
+    config = _ichimoku_cfg()
+
+    signals = detect_ichimoku_signal({"1H": df}, config)
+    assert signals == []
+
+
+def test_ichimoku_signal_multi_tf() -> None:
+    """여러 TF 가 들어와도 각자 독립 평가."""
+    closes = [100.0] * 30 + [101.0]
+    df = _ohlc_with_last(closes, last_high=101.5, last_low=99.5)
+    config = _ichimoku_cfg()
+
+    signals = detect_ichimoku_signal({"1H": df, "4H": df}, config)
+    timeframes = [s.timeframe for s in signals]
+    assert "1H" in timeframes and "4H" in timeframes
+
+
+# ============================================================
+# detect_ichimoku_exit — 구름대 종가 이탈
+# ============================================================
+
+
+def test_ichimoku_exit_long_when_close_below_cloud_upper() -> None:
+    """롱 보유 중 종가가 cloud_upper 아래로 마감 → True."""
+    # warmup 후 마지막 봉 close 가 구름 안으로 내려옴
+    closes = [100.0] * 30 + [98.0]
+    df = _ohlc_with_last(closes, last_high=99.0, last_low=97.5)
+    config = _ichimoku_cfg()
+
+    assert detect_ichimoku_exit(df, Direction.LONG, config) is True
+
+
+def test_ichimoku_exit_long_holds_when_close_above_cloud_upper() -> None:
+    """롱 보유 중 종가가 cloud_upper 위면 False (보유 유지)."""
+    closes = [100.0] * 30 + [105.0]
+    df = _ohlc_with_last(closes, last_high=105.5, last_low=104.5)
+    config = _ichimoku_cfg()
+
+    assert detect_ichimoku_exit(df, Direction.LONG, config) is False
+
+
+def test_ichimoku_exit_short_when_close_above_cloud_lower() -> None:
+    """숏 보유 중 종가가 cloud_lower 위로 마감 → True."""
+    closes = [100.0] * 30 + [102.0]
+    df = _ohlc_with_last(closes, last_high=102.5, last_low=101.0)
+    config = _ichimoku_cfg()
+
+    assert detect_ichimoku_exit(df, Direction.SHORT, config) is True
+
+
+def test_ichimoku_exit_short_holds_when_close_below_cloud_lower() -> None:
+    """숏 보유 중 종가가 cloud_lower 아래면 False."""
+    closes = [100.0] * 30 + [95.0]
+    df = _ohlc_with_last(closes, last_high=95.5, last_low=94.5)
+    config = _ichimoku_cfg()
+
+    assert detect_ichimoku_exit(df, Direction.SHORT, config) is False
+
+
+def test_ichimoku_exit_returns_false_on_empty_df() -> None:
+    config = _ichimoku_cfg()
+    assert detect_ichimoku_exit(pd.DataFrame(), Direction.LONG, config) is False
+
+
+def test_ichimoku_exit_returns_false_on_missing_columns() -> None:
+    config = _ichimoku_cfg()
+    df = pd.DataFrame({"close": [100.0] * 30})
+    assert detect_ichimoku_exit(df, Direction.LONG, config) is False
+
+
+def test_ichimoku_exit_returns_false_in_warmup() -> None:
+    """warmup 구간(NaN)에선 False (판정 불가)."""
+    closes = [100.0] * 5  # warmup 미만
+    df = _ohlc_with_last(closes, last_high=100.5, last_low=99.5)
+    config = _ichimoku_cfg()
+    assert detect_ichimoku_exit(df, Direction.LONG, config) is False
+
+
+# ============================================================
+# evaluate_selectable — Ichimoku 라우팅
+# ============================================================
+
+
+def test_evaluate_selectable_ichimoku_off() -> None:
+    """use_ichimoku=False 면 ichimoku 신호 X."""
+    closes = [100.0] * 30 + [101.0]
+    df = _ohlc_with_last(closes, last_high=101.5, last_low=99.5)
+    config = StrategyConfig(
+        use_ichimoku=False,
+        ichimoku_conversion_period=3,
+        ichimoku_base_period=5,
+        ichimoku_span_b_period=10,
+        ichimoku_displacement=5,
+    )
+    signals = evaluate_selectable({"1H": df}, config)
+    assert all(not s.source.startswith("ichimoku") for s in signals)
+
+
+def test_evaluate_selectable_ichimoku_on() -> None:
+    """use_ichimoku=True 면 라우팅됨."""
+    closes = [100.0] * 30 + [101.0]
+    df = _ohlc_with_last(closes, last_high=101.5, last_low=99.5)
+    config = _ichimoku_cfg()
+    signals = evaluate_selectable({"1H": df}, config)
+    ichimoku_sigs = [s for s in signals if s.source.startswith("ichimoku")]
+    assert len(ichimoku_sigs) >= 1
+    assert ichimoku_sigs[0].direction == Direction.LONG

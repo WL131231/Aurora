@@ -350,11 +350,85 @@ def harmonic_pattern(ohlc: pd.DataFrame) -> pd.Series:
     raise NotImplementedError
 
 
-def ichimoku_cloud(ohlc: pd.DataFrame) -> pd.DataFrame:
-    """일목균형표 — Span A, Span B 등.
+def ichimoku_cloud(
+    ohlc: pd.DataFrame,
+    conversion_period: int = 9,
+    base_period: int = 26,
+    span_b_period: int = 52,
+    displacement: int = 26,
+) -> pd.DataFrame:
+    """일목균형표 — Span A / Span B 구름대 (TradingView 표준).
+
+    트뷰 Pine Script 표준 수식:
+        donchian(len) = (rolling_high(len) + rolling_low(len)) / 2
+        Tenkan = donchian(conversion_period)        # 내부 계산용
+        Kijun  = donchian(base_period)              # 내부 계산용
+        Span A = (Tenkan + Kijun) / 2               # Leading Span A
+        Span B = donchian(span_b_period)            # Leading Span B
+        plot offset = displacement - 1              # forward shift = 25봉
+
+    Tenkan/Kijun 은 Span A 계산용으로만 내부에서 사용 (반환하지 않음).
+    Span A / B 는 (displacement - 1) 만큼 forward shift 되어, 차트 상의
+    "현재 봉 구름값" = "(displacement - 1)봉 전에 계산된 lead 값" 이 됨.
+
+    Args:
+        ohlc: 'high', 'low' 컬럼이 있는 DataFrame.
+        conversion_period: Conversion Line 기간 (기본 9).
+        base_period: Base Line 기간 (기본 26).
+        span_b_period: Leading Span B 기간 (기본 52).
+        displacement: forward shift 양 (기본 26 → 실제 shift = 25봉).
 
     Returns:
-        DataFrame with columns: ['tenkan', 'kijun', 'span_a', 'span_b', 'chikou']
+        DataFrame with columns: ['span_a', 'span_b', 'cloud_upper', 'cloud_lower'].
+        ``cloud_upper`` = max(span_a, span_b),
+        ``cloud_lower`` = min(span_a, span_b).
+        초기 ``span_b_period + displacement - 2`` 봉은 NaN.
+
+    Raises:
+        ValueError: 컬럼 누락 또는 파라미터 잘못된 값일 때.
     """
-    # TODO(장수)
-    raise NotImplementedError
+    required = {"high", "low"}
+    if not required.issubset(ohlc.columns):
+        raise ValueError(
+            f"ohlc 에 'high','low' 컬럼 필요 (받은: {list(ohlc.columns)})"
+        )
+    if conversion_period < 1 or base_period < 1 or span_b_period < 1:
+        raise ValueError(
+            f"기간들은 1 이상 (받은: conversion={conversion_period}, "
+            f"base={base_period}, span_b={span_b_period})"
+        )
+    if displacement < 1:
+        raise ValueError(f"displacement 는 1 이상 (받은: {displacement})")
+
+    high = ohlc["high"]
+    low = ohlc["low"]
+
+    def _donchian(length: int) -> pd.Series:
+        return (
+            high.rolling(window=length, min_periods=length).max()
+            + low.rolling(window=length, min_periods=length).min()
+        ) / 2.0
+
+    tenkan = _donchian(conversion_period)
+    kijun = _donchian(base_period)
+
+    lead_a = (tenkan + kijun) / 2.0
+    lead_b = _donchian(span_b_period)
+
+    shift = displacement - 1  # 트뷰 표준: 25봉 forward
+    span_a = lead_a.shift(shift)
+    span_b = lead_b.shift(shift)
+
+    pair = pd.concat([span_a, span_b], axis=1)
+    cloud_upper = pair.max(axis=1)
+    cloud_lower = pair.min(axis=1)
+
+    return pd.DataFrame(
+        {
+            "span_a": span_a,
+            "span_b": span_b,
+            "cloud_upper": cloud_upper,
+            "cloud_lower": cloud_lower,
+        },
+        index=ohlc.index,
+    )

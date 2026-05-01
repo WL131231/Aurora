@@ -5,12 +5,15 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from aurora.core.indicators import HarmonicMatch
 from aurora.core.strategy import (
     Direction,
     EntrySignal,
     StrategyConfig,
     detect_bollinger_touch,
     detect_ema_touch,
+    detect_harmonic_exit,
+    detect_harmonic_signal,
     detect_ichimoku_exit,
     detect_ichimoku_signal,
     detect_ma_cross,
@@ -628,3 +631,188 @@ def test_evaluate_selectable_ichimoku_on() -> None:
     ichimoku_sigs = [s for s in signals if s.source.startswith("ichimoku")]
     assert len(ichimoku_sigs) >= 1
     assert ichimoku_sigs[0].direction == Direction.LONG
+
+
+# ============================================================
+# detect_harmonic_signal — 5종 패턴, 15m/1H 멀티 TF
+# ============================================================
+
+
+def _zigzag_df(points: list[float], between: int = 10, spread: float = 0.1) -> pd.DataFrame:
+    closes: list[float] = []
+    for i in range(len(points) - 1):
+        leg = list(np.linspace(points[i], points[i + 1], between, endpoint=False))
+        closes.extend(leg)
+    closes.append(points[-1])
+    s = pd.Series(closes, dtype=float)
+    return pd.DataFrame({"open": s, "high": s + spread, "low": s - spread, "close": s})
+
+
+def _bullish_bat_df() -> pd.DataFrame:
+    """검증된 bullish Bat 합성 데이터."""
+    return _zigzag_df([105, 100, 120, 110, 115, 102.7, 104], between=10)
+
+
+def _harmonic_cfg(use: bool = True) -> StrategyConfig:
+    return StrategyConfig(
+        use_harmonic=use,
+        harmonic_pivot_length=5,
+        harmonic_tolerance=0.10,
+    )
+
+
+def test_harmonic_signal_no_data_returns_empty() -> None:
+    config = _harmonic_cfg()
+    assert detect_harmonic_signal({}, config) == []
+
+
+def test_harmonic_signal_skips_missing_columns() -> None:
+    config = _harmonic_cfg()
+    df = pd.DataFrame({"close": [100.0] * 60})
+    assert detect_harmonic_signal({"1H": df}, config) == []
+
+
+def test_harmonic_signal_long_on_bullish_bat() -> None:
+    """Bullish Bat 검출 → LONG 신호."""
+    df = _bullish_bat_df()
+    config = _harmonic_cfg()
+    signals = detect_harmonic_signal({"1H": df}, config)
+    longs = [s for s in signals if s.direction == Direction.LONG]
+    assert len(longs) == 1
+    assert longs[0].source == "harmonic_bat"
+    assert longs[0].timeframe == "1H"
+
+
+def test_harmonic_signal_short_on_bearish_bat() -> None:
+    """Bearish Bat 검출 → SHORT 신호."""
+    df = _zigzag_df([115, 120, 100, 110, 105, 117.3, 116], between=10)
+    config = _harmonic_cfg()
+    signals = detect_harmonic_signal({"1H": df}, config)
+    shorts = [s for s in signals if s.direction == Direction.SHORT]
+    assert len(shorts) == 1
+    assert shorts[0].source == "harmonic_bat"
+
+
+def test_harmonic_signal_multi_tf_htf_priority() -> None:
+    """15m + 1H 모두 검출 시 각각 신호 (가중치는 signal.compose_entry 가 처리)."""
+    df = _bullish_bat_df()
+    config = _harmonic_cfg()
+    signals = detect_harmonic_signal({"15m": df, "1H": df}, config)
+    timeframes = [s.timeframe for s in signals]
+    assert "15m" in timeframes
+    assert "1H" in timeframes
+
+
+def test_harmonic_signal_off_when_random_data() -> None:
+    """단순 상승 데이터엔 패턴 없음 → 빈 리스트."""
+    rng = np.random.RandomState(0)
+    closes = list(rng.randn(80).cumsum() * 0.1 + 100)
+    s = pd.Series(closes, dtype=float)
+    df = pd.DataFrame({"open": s, "high": s + 0.1, "low": s - 0.1, "close": s})
+    config = _harmonic_cfg()
+    signals = detect_harmonic_signal({"1H": df}, config)
+    # 패턴 없을 가능성 높지만 우연히 검출 시 source 가 harmonic_ 로 시작해야 함
+    for sig in signals:
+        assert sig.source.startswith("harmonic_")
+
+
+# ============================================================
+# detect_harmonic_exit — 패턴별 자체 SL/TP
+# ============================================================
+
+
+def _bat_match_long() -> HarmonicMatch:
+    """테스트용 Bat HarmonicMatch (롱 진입)."""
+    return HarmonicMatch(
+        name="bat", direction="long",
+        x=100, a=120, b=110, c=115, d=102.7,
+        x_bar=10, a_bar=20, b_bar=30, c_bar=40, d_bar=50,
+        xab=0.5, abc=0.5, bcd=2.4, xad=0.865,
+        sl_price=97.27,    # A - 1.13 × XA
+        tp1_price=109.29,  # D + 0.382 × |A-D|
+        tp2_price=113.42,  # D + 0.618 × |A-D|
+    )
+
+
+def _bat_match_short() -> HarmonicMatch:
+    return HarmonicMatch(
+        name="bat", direction="short",
+        x=120, a=100, b=110, c=105, d=117.3,
+        x_bar=10, a_bar=20, b_bar=30, c_bar=40, d_bar=50,
+        xab=0.5, abc=0.5, bcd=2.4, xad=0.865,
+        sl_price=122.6,    # A + 1.13 × XA
+        tp1_price=110.71,  # D - 0.382 × |A-D|
+        tp2_price=106.58,  # D - 0.618 × |A-D|
+    )
+
+
+def test_harmonic_exit_long_sl_hit() -> None:
+    """롱 보유 + 가격이 SL 이하 → 'sl'."""
+    match = _bat_match_long()
+    assert detect_harmonic_exit(Direction.LONG, last_price=97.0, match=match) == "sl"
+
+
+def test_harmonic_exit_long_tp1_hit() -> None:
+    """롱 보유 + TP1 도달 (TP2 미도달) → 'tp1'."""
+    match = _bat_match_long()
+    assert detect_harmonic_exit(Direction.LONG, last_price=110.0, match=match) == "tp1"
+
+
+def test_harmonic_exit_long_tp2_hit() -> None:
+    """롱 보유 + TP2 도달 → 'tp2' (tp1 보다 우선)."""
+    match = _bat_match_long()
+    assert detect_harmonic_exit(Direction.LONG, last_price=114.0, match=match) == "tp2"
+
+
+def test_harmonic_exit_long_holds_in_between() -> None:
+    """롱 보유 + 가격이 D 위·TP1 아래 → None."""
+    match = _bat_match_long()
+    assert detect_harmonic_exit(Direction.LONG, last_price=105.0, match=match) is None
+
+
+def test_harmonic_exit_short_sl_hit() -> None:
+    """숏 보유 + 가격이 SL 이상 → 'sl'."""
+    match = _bat_match_short()
+    assert detect_harmonic_exit(Direction.SHORT, last_price=123.0, match=match) == "sl"
+
+
+def test_harmonic_exit_short_tp1_hit() -> None:
+    match = _bat_match_short()
+    assert detect_harmonic_exit(Direction.SHORT, last_price=110.0, match=match) == "tp1"
+
+
+def test_harmonic_exit_short_tp2_hit() -> None:
+    match = _bat_match_short()
+    assert detect_harmonic_exit(Direction.SHORT, last_price=106.0, match=match) == "tp2"
+
+
+def test_harmonic_exit_short_holds() -> None:
+    match = _bat_match_short()
+    assert detect_harmonic_exit(Direction.SHORT, last_price=115.0, match=match) is None
+
+
+# ============================================================
+# evaluate_selectable — Harmonic 라우팅
+# ============================================================
+
+
+def test_evaluate_selectable_harmonic_off() -> None:
+    """use_harmonic=False 면 harmonic 신호 X."""
+    df = _bullish_bat_df()
+    config = StrategyConfig(
+        use_harmonic=False,
+        harmonic_pivot_length=5,
+        harmonic_tolerance=0.10,
+    )
+    signals = evaluate_selectable({"1H": df}, config)
+    assert all(not s.source.startswith("harmonic") for s in signals)
+
+
+def test_evaluate_selectable_harmonic_on() -> None:
+    """use_harmonic=True 면 라우팅됨."""
+    df = _bullish_bat_df()
+    config = _harmonic_cfg()
+    signals = evaluate_selectable({"1H": df}, config)
+    harmonic_sigs = [s for s in signals if s.source.startswith("harmonic")]
+    assert len(harmonic_sigs) >= 1
+    assert harmonic_sigs[0].direction == Direction.LONG

@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pandas as pd
 
 # ============================================================
@@ -340,14 +342,330 @@ def ma_cross(close: pd.Series, fast: int = 50, slow: int = 200) -> pd.Series:
     return result
 
 
-def harmonic_pattern(ohlc: pd.DataFrame) -> pd.Series:
-    """하모닉 패턴 감지 (Bat / Butterfly / Gartley).
+def detect_pivots(
+    ohlc: pd.DataFrame,
+    length: int = 10,
+) -> pd.DataFrame:
+    """ZigZag 류 피벗 검출 — 가장 최근 피벗부터 역순으로 반환.
+
+    트뷰 ``Tailored-Custom Harmonic Patterns`` 의 ``pivots_f`` 알고리즘 포팅:
+        - 봉 ``t`` 에서 ``high[t]`` 가 좌측 ``length`` 봉 윈도우의 최고가면 swing high
+        - 봉 ``t`` 에서 ``low[t]``  가 좌측 ``length`` 봉 윈도우의 최저가면 swing low
+        - 같은 방향 연속 피벗은 더 극단값으로 갱신 (high 면 더 높은 값,
+          low 면 더 낮은 값) → ZigZag 효과
+        - 마지막(가장 최근) 피벗은 미확정 가능성 → 호출자 측에서 ``[1:]`` 사용
+
+    Note:
+        피벗 검출은 ``length`` 봉만큼 lookback 만 사용 (우측 미래 봉 미사용) →
+        실시간 검출 가능, 단 마지막 피벗은 추후 갱신될 수 있음.
+
+    Args:
+        ohlc: 'high', 'low' 컬럼이 있는 DataFrame.
+        length: 좌측 lookback 봉수 (기본 10).
 
     Returns:
-        시리즈 — pattern name 또는 None per bar.
+        DataFrame with columns: ['bar_idx', 'value', 'dir'] — 가장 최근 피벗이
+        index 0 (역순). dir 은 +1 (high) 또는 -1 (low).
+
+    Raises:
+        ValueError: 컬럼 누락 또는 length < 2.
     """
-    # TODO(장수): ZigZag 피벗 + 피보 비율 검증
-    raise NotImplementedError
+    if not {"high", "low"}.issubset(ohlc.columns):
+        raise ValueError(
+            f"ohlc 에 'high','low' 컬럼 필요 (받은: {list(ohlc.columns)})"
+        )
+    if length < 2:
+        raise ValueError(f"length 는 2 이상이어야 함 (받은: {length})")
+
+    high = ohlc["high"].to_numpy()
+    low = ohlc["low"].to_numpy()
+    n = len(ohlc)
+
+    rolling_high = ohlc["high"].rolling(window=length, min_periods=length).max().to_numpy()
+    rolling_low = ohlc["low"].rolling(window=length, min_periods=length).min().to_numpy()
+
+    pivots: list[tuple[int, float, int]] = []  # (bar_idx, value, dir)
+    for t in range(length - 1, n):
+        is_high = high[t] == rolling_high[t]
+        is_low = low[t] == rolling_low[t]
+        # 동시 만족 시 한쪽만 채택 (직전 추세 반대 방향 우선)
+        if is_high and not is_low:
+            new_pivot = (t, float(high[t]), 1)
+        elif is_low and not is_high:
+            new_pivot = (t, float(low[t]), -1)
+        else:
+            continue
+
+        # 같은 방향 연속이면 더 극단값으로 갱신
+        if pivots and pivots[-1][2] == new_pivot[2]:
+            prev = pivots[-1]
+            if (new_pivot[2] == 1 and new_pivot[1] > prev[1]) or (
+                new_pivot[2] == -1 and new_pivot[1] < prev[1]
+            ):
+                pivots[-1] = new_pivot
+        else:
+            pivots.append(new_pivot)
+
+    # 가장 최근 피벗이 index 0 (역순)
+    pivots.reverse()
+    if not pivots:
+        return pd.DataFrame(columns=["bar_idx", "value", "dir"])
+    return pd.DataFrame(pivots, columns=["bar_idx", "value", "dir"])
+
+
+@dataclass(slots=True, frozen=True)
+class HarmonicPatternSpec:
+    """하모닉 패턴 검증 스펙 (PDF '할머니의하모닉' 기반).
+
+    Note:
+        모든 비율은 절댓값 기반: |B-A|/|X-A|, |D-C|/|B-C|, |D-A|/|X-A| 등.
+        BC projection / AB=CD 는 여러 옵션 중 적어도 하나에 ±tolerance 매치
+        시 통과 (PDF 의 multi-target 정의를 OR 조건으로 해석).
+    """
+
+    name: str
+    b_min: float            # B/XA 최소 (예: Bat 0.382)
+    b_max: float            # B/XA 최대 (예: Bat 0.55)
+    d_target: float         # D/XA 정확값 (예: Bat 0.886, Crab 1.618)
+    bc_proj_options: tuple[float, ...]  # BC projection 옵션 (CD/BC)
+    abcd_options: tuple[float, ...]     # AB=CD 옵션 (CD/AB)
+    sl_xa: float            # SL = sl_xa × XA (예: Bat 1.13)
+
+
+HARMONIC_PATTERN_SPECS: tuple[HarmonicPatternSpec, ...] = (
+    # PDF p.4 Bat Pattern
+    HarmonicPatternSpec(
+        name="bat",
+        b_min=0.382, b_max=0.55,
+        d_target=0.886,
+        bc_proj_options=(1.618, 2.0, 2.24, 2.618),
+        abcd_options=(1.0, 1.27, 1.618),
+        sl_xa=1.13,
+    ),
+    # PDF p.8 Butterfly Pattern
+    HarmonicPatternSpec(
+        name="butterfly",
+        b_min=0.756, b_max=0.816,
+        d_target=1.272,
+        bc_proj_options=(1.618, 2.0, 2.24),
+        abcd_options=(1.0, 1.27),
+        sl_xa=1.414,
+    ),
+    # PDF p.2 Gartley Pattern
+    HarmonicPatternSpec(
+        name="gartley",
+        b_min=0.588, b_max=0.648,
+        d_target=0.786,
+        bc_proj_options=(1.13, 1.272, 1.414, 1.618),
+        abcd_options=(1.0, 1.27),
+        sl_xa=1.0,
+    ),
+    # PDF p.6 Crab Pattern
+    HarmonicPatternSpec(
+        name="crab",
+        b_min=0.382, b_max=0.886,
+        d_target=1.618,
+        bc_proj_options=(2.618, 3.14, 3.618),
+        abcd_options=(1.27, 1.618),
+        sl_xa=2.0,
+    ),
+    # PDF p.7 Deep Crab Pattern
+    HarmonicPatternSpec(
+        name="deep_crab",
+        b_min=0.886, b_max=0.936,
+        d_target=1.618,
+        bc_proj_options=(2.0, 2.24, 2.618, 3.14, 3.618),
+        abcd_options=(1.0, 1.27, 1.618),
+        sl_xa=2.0,
+    ),
+)
+
+
+# C point 범위 (모든 패턴 공통, PDF: 0.382~0.99 AB)
+_HARMONIC_C_MIN = 0.382
+_HARMONIC_C_MAX = 0.99
+
+
+def _within(value: float, target: float, tolerance: float) -> bool:
+    """value 가 target ± tolerance 비율 이내면 True."""
+    if target == 0:
+        return abs(value) <= tolerance
+    return abs(value - target) / abs(target) <= tolerance
+
+
+def _within_any(value: float, targets: tuple[float, ...], tolerance: float) -> bool:
+    """value 가 targets 중 적어도 하나와 ± tolerance 매치하면 True."""
+    return any(_within(value, t, tolerance) for t in targets)
+
+
+@dataclass(slots=True, frozen=True)
+class HarmonicMatch:
+    """검출된 하모닉 패턴 결과."""
+
+    name: str           # 'bat' / 'butterfly' / 'gartley' / 'crab' / 'deep_crab'
+    direction: str      # 'long' (bullish, X<A) / 'short' (bearish, X>A)
+    x: float
+    a: float
+    b: float
+    c: float
+    d: float
+    x_bar: int
+    a_bar: int
+    b_bar: int
+    c_bar: int
+    d_bar: int
+    xab: float
+    abc: float
+    bcd: float
+    xad: float
+    sl_price: float     # 패턴별 SL 가격 (X 방향 연장)
+    tp1_price: float    # 0.382 AD 되돌림
+    tp2_price: float    # 0.618 AD 되돌림
+
+
+def harmonic_pattern(
+    ohlc: pd.DataFrame,
+    pivot_length: int = 10,
+    tolerance: float = 0.10,
+) -> HarmonicMatch | None:
+    """하모닉 패턴 검출 (PDF 5개 패턴 풀 검증, 마지막 봉 시점).
+
+    검증 항목 (PDF '할머니의하모닉' 풀 스펙):
+        1. **B point**: |B-A|/|X-A| ∈ [b_min, b_max] ± tolerance
+        2. **C point**: |C-B|/|A-B| ∈ [0.382, 0.99] ± tolerance (모든 패턴 공통)
+        3. **D point**: |D-A|/|X-A| ≈ d_target ± tolerance (정확값)
+        4. **BC projection**: |D-C|/|B-C| ∈ bc_proj_options 중 하나 ± tolerance
+        5. **AB=CD**: |D-C|/|B-A| ∈ abcd_options 중 하나 ± tolerance
+
+    위 5개 모두 통과해야 패턴 인정.
+
+    진입 방향 (PDF):
+        - X < A (=가격이 X에서 위로) → bullish XABCD → **long** 진입 at D
+        - X > A (=가격이 X에서 아래로) → bearish XABCD → **short** 진입 at D
+
+    SL/TP (PDF, 패턴별 자체 룰):
+        - SL = X 방향으로 패턴별 sl_xa × |X-A| 연장 가격
+        - TP1 = 0.382 × |A-D| 되돌림 (A 방향)
+        - TP2 = 0.618 × |A-D| 되돌림 (A 방향)
+
+    Args:
+        ohlc: 'high', 'low' 컬럼이 있는 DataFrame.
+        pivot_length: 피벗 검출 lookback (기본 10).
+        tolerance: 비율 검증 허용 오차 (기본 0.10 = ±10%).
+
+    Returns:
+        ``HarmonicMatch`` 객체 또는 None (패턴 미검출).
+
+    Raises:
+        ValueError: 컬럼 누락, pivot_length < 2, tolerance ≤ 0 일 때.
+    """
+    if not {"high", "low"}.issubset(ohlc.columns):
+        raise ValueError(
+            f"ohlc 에 'high','low' 컬럼 필요 (받은: {list(ohlc.columns)})"
+        )
+    if tolerance <= 0:
+        raise ValueError(f"tolerance 는 양수여야 함 (받은: {tolerance})")
+
+    pivots = detect_pivots(ohlc, length=pivot_length)
+    # 가장 최근 피벗(index 0)은 미확정. 1번부터 5개(D,C,B,A,X) 사용.
+    if len(pivots) < 6:
+        return None
+
+    d_row = pivots.iloc[1]
+    c_row = pivots.iloc[2]
+    b_row = pivots.iloc[3]
+    a_row = pivots.iloc[4]
+    x_row = pivots.iloc[5]
+
+    # XABCD 방향 일관성: X-A-B-C-D 가 high-low-high-low-high (bearish) 또는
+    # low-high-low-high-low (bullish) 지그재그여야 함
+    expected_dirs_bull = (-1, 1, -1, 1, -1)  # X=low, A=high, B=low, C=high, D=low
+    expected_dirs_bear = (1, -1, 1, -1, 1)
+    actual_dirs = (
+        int(x_row["dir"]),
+        int(a_row["dir"]),
+        int(b_row["dir"]),
+        int(c_row["dir"]),
+        int(d_row["dir"]),
+    )
+    if actual_dirs == expected_dirs_bull:
+        direction = "long"  # bullish XABCD: D 가 swing low → 롱 진입
+    elif actual_dirs == expected_dirs_bear:
+        direction = "short"
+    else:
+        return None  # 지그재그 패턴 아님
+
+    x = float(x_row["value"])
+    a = float(a_row["value"])
+    b = float(b_row["value"])
+    c = float(c_row["value"])
+    d = float(d_row["value"])
+
+    # 비율 계산 (절댓값 기반, 트뷰 표준)
+    xa_dist = abs(x - a)
+    ab_dist = abs(a - b)
+    bc_dist = abs(b - c)
+    if xa_dist == 0 or ab_dist == 0 or bc_dist == 0:
+        return None
+
+    xab = abs(b - a) / xa_dist
+    abc = abs(c - b) / ab_dist
+    bcd = abs(d - c) / bc_dist
+    xad = abs(d - a) / xa_dist
+    abcd = abs(d - c) / ab_dist  # AB=CD 비율 (CD 길이 / AB 길이)
+
+    # C point 공통 범위 검증 (0.382~0.99 ± tolerance)
+    if not (
+        _HARMONIC_C_MIN * (1 - tolerance) <= abc <= _HARMONIC_C_MAX * (1 + tolerance)
+    ):
+        return None
+
+    # 5개 패턴 매칭 시도
+    for spec in HARMONIC_PATTERN_SPECS:
+        # 1. B point 범위
+        if not (
+            spec.b_min * (1 - tolerance) <= xab <= spec.b_max * (1 + tolerance)
+        ):
+            continue
+        # 2. D point 정확값
+        if not _within(xad, spec.d_target, tolerance):
+            continue
+        # 3. BC projection (옵션 중 하나)
+        if not _within_any(bcd, spec.bc_proj_options, tolerance):
+            continue
+        # 4. AB=CD (옵션 중 하나)
+        if not _within_any(abcd, spec.abcd_options, tolerance):
+            continue
+
+        # SL/TP 가격 계산 (PDF 룰)
+        # SL = X 방향으로 sl_xa × |XA| 연장
+        if direction == "long":
+            # bullish: D=low, X=low, X<A. SL 은 D 보다 더 아래 (X 방향 연장)
+            sl_price = a - spec.sl_xa * xa_dist
+            tp1_price = d + 0.382 * abs(a - d)
+            tp2_price = d + 0.618 * abs(a - d)
+        else:
+            # bearish: D=high, X=high, X>A. SL 은 D 보다 더 위
+            sl_price = a + spec.sl_xa * xa_dist
+            tp1_price = d - 0.382 * abs(a - d)
+            tp2_price = d - 0.618 * abs(a - d)
+
+        return HarmonicMatch(
+            name=spec.name,
+            direction=direction,
+            x=x, a=a, b=b, c=c, d=d,
+            x_bar=int(x_row["bar_idx"]),
+            a_bar=int(a_row["bar_idx"]),
+            b_bar=int(b_row["bar_idx"]),
+            c_bar=int(c_row["bar_idx"]),
+            d_bar=int(d_row["bar_idx"]),
+            xab=xab, abc=abc, bcd=bcd, xad=xad,
+            sl_price=sl_price,
+            tp1_price=tp1_price,
+            tp2_price=tp2_price,
+        )
+
+    return None
 
 
 def ichimoku_cloud(

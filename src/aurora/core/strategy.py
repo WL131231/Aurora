@@ -11,8 +11,10 @@ from enum import StrEnum
 import pandas as pd
 
 from aurora.core.indicators import (
+    HarmonicMatch,
     bollinger_bands,
     ema,
+    harmonic_pattern,
     ichimoku_cloud,
     ma_cross,
     rsi,
@@ -79,6 +81,12 @@ class StrategyConfig:
     """Leading Span B donchian 기간."""
     ichimoku_displacement: int = 26
     """forward shift 양 (트뷰 표준 26 → 실제 shift = 25봉)."""
+
+    # Harmonic Pattern (Selectable — 15m/1H 멀티 TF, HTF 가중치 자동 적용)
+    harmonic_pivot_length: int = 10
+    """피벗 검출 lookback 봉수 (트뷰 ``pivots_f`` length)."""
+    harmonic_tolerance: float = 0.10
+    """비율 검증 허용 오차 (기본 ±10%)."""
 
 
 # ============================================================
@@ -522,6 +530,116 @@ def detect_ichimoku_exit(
 
 
 # ============================================================
+# Selectable: Harmonic Pattern (15m/1H, HTF 가중치 자동 적용)
+# ============================================================
+
+HARMONIC_TIMEFRAMES: tuple[str, ...] = ("15m", "1H")
+
+
+def detect_harmonic_signal(
+    df_by_tf: dict[str, pd.DataFrame],
+    config: StrategyConfig,
+) -> list[EntrySignal]:
+    """하모닉 패턴 진입 — D 비율 도달 시 (15m/1H 멀티 TF, HTF 가중치 자동 적용).
+
+    PDF '할머니의하모닉' 5개 패턴 풀 검증 (B/C/D point + BC projection + AB=CD):
+        - **Bat**, **Butterfly**, **Gartley**, **Crab**, **Deep Crab**
+
+    진입 룰:
+        - bullish XABCD (X<A) 패턴 검출 → **LONG** 진입 at D
+        - bearish XABCD (X>A) 패턴 검출 → **SHORT** 진입 at D
+
+    HTF 가중치 (15m=1, 1H=2) 는 ``signal.compose_entry`` 가 자동 적용:
+        예) 15m Bat + 1H Crab 동시 발현 → 1H 신호가 2배 우선.
+
+    Args:
+        df_by_tf: TF 별 OHLC DataFrame.
+        config: 전략 설정 (harmonic_pivot_length, harmonic_tolerance).
+
+    Returns:
+        ``EntrySignal`` 리스트 (TF 별로 0~1 개).
+    """
+    signals: list[EntrySignal] = []
+
+    for tf in HARMONIC_TIMEFRAMES:
+        df = df_by_tf.get(tf)
+        if df is None or df.empty:
+            continue
+        if not {"high", "low"}.issubset(df.columns):
+            continue
+
+        try:
+            match = harmonic_pattern(
+                df,
+                pivot_length=config.harmonic_pivot_length,
+                tolerance=config.harmonic_tolerance,
+            )
+        except ValueError:
+            continue
+
+        if match is None:
+            continue
+
+        direction = Direction.LONG if match.direction == "long" else Direction.SHORT
+        signals.append(EntrySignal(
+            direction=direction,
+            timeframe=tf,
+            source=f"harmonic_{match.name}",
+            strength=1.0,
+            note=(
+                f"{match.name} ({tf}, "
+                f"XAB={match.xab:.3f}, ABC={match.abc:.3f}, "
+                f"BCD={match.bcd:.3f}, XAD={match.xad:.3f}, "
+                f"SL={match.sl_price:.4f}, TP1={match.tp1_price:.4f}, "
+                f"TP2={match.tp2_price:.4f})"
+            ),
+        ))
+
+    return signals
+
+
+def detect_harmonic_exit(
+    position_direction: Direction,
+    last_price: float,
+    match: HarmonicMatch,
+) -> str | None:
+    """하모닉 청산 — 패턴별 자체 SL/TP 도달 검출.
+
+    PDF 룰 (레버리지 SL 캡 미적용 — 사용자 명시):
+        - **SL**: 가격이 패턴별 SL (X 방향 연장) 도달 → 'sl'
+        - **TP1**: 가격이 0.382 AD 도달 → 'tp1' (반익절 권장)
+        - **TP2**: 가격이 0.618 AD 도달 → 'tp2' (전체 청산)
+
+    우선순위: SL > TP2 > TP1 (가까운 게 먼저 도달했으므로 보수적으로 SL 우선 검사).
+
+    Args:
+        position_direction: 현재 포지션 방향.
+        last_price: 마지막 봉 종가 (또는 실시간 가격).
+        match: 진입 시 사용된 ``HarmonicMatch``.
+
+    Returns:
+        'sl' / 'tp1' / 'tp2' / None (어느 레벨도 도달 X).
+    """
+    if position_direction == Direction.LONG:
+        # 롱: SL 은 D 보다 아래 (X 방향)
+        if last_price <= match.sl_price:
+            return "sl"
+        if last_price >= match.tp2_price:
+            return "tp2"
+        if last_price >= match.tp1_price:
+            return "tp1"
+    elif position_direction == Direction.SHORT:
+        # 숏: SL 은 D 보다 위 (X 방향)
+        if last_price >= match.sl_price:
+            return "sl"
+        if last_price <= match.tp2_price:
+            return "tp2"
+        if last_price <= match.tp1_price:
+            return "tp1"
+    return None
+
+
+# ============================================================
 # Selectable 지표 라우터 (사용자 on/off)
 # ============================================================
 
@@ -554,6 +672,7 @@ def evaluate_selectable(
     if config.use_ichimoku:
         signals.extend(detect_ichimoku_signal(df_by_tf, config))
 
-    # TODO(장수): Harmonic 추가 (별도 PR)
+    if config.use_harmonic:
+        signals.extend(detect_harmonic_signal(df_by_tf, config))
 
     return signals

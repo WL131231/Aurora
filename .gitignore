@@ -24,6 +24,7 @@ ENV/
 *.egg-info/
 dist/
 build/
+*.spec
 
 # ===== Node.js =====
 node_modules/

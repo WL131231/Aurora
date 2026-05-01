@@ -40,6 +40,7 @@ def main() -> int:
     # 진입점 = interfaces/webview.py (launch() 자동 호출)
     entry = PROJECT_ROOT / "src" / "aurora" / "interfaces" / "webview.py"
     ui_dir = PROJECT_ROOT / "ui"
+    icon_path = PROJECT_ROOT / "assets" / "aurora.ico"
 
     cmd = [
         sys.executable, "-m", "PyInstaller",
@@ -62,6 +63,13 @@ def main() -> int:
         "--clean",
         "--noconfirm",
     ]
+
+    # 앱 아이콘 (assets/aurora.ico) — generate_icon.py 로 생성
+    if icon_path.exists():
+        cmd.extend(["--icon", str(icon_path)])
+    else:
+        print(f"⚠ 아이콘 파일 없음: {icon_path}")
+        print("   먼저 실행: python scripts/generate_icon.py")
 
     if onefile:
         cmd.append("--onefile")

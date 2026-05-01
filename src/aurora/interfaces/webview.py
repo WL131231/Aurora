@@ -1,9 +1,9 @@
-"""Pywebview 윈도우 진입점 — .exe로 패키징될 GUI 셸.
+"""Pywebview 윈도우 진입점 — .exe 로 패키징될 GUI 셸.
 
-내부에서 FastAPI를 별도 스레드로 띄우고, Pywebview는 ui/index.html을
-표시하면서 JS Bridge로 백엔드 호출.
+내부에서 FastAPI 를 별도 daemon 스레드로 띄우고, Pywebview 는 ``ui/index.html``
+을 표시하면서 ``http://127.0.0.1:<api_port>`` 로 백엔드 호출.
 
-담당: 팀원 D
+담당: 정용우
 """
 
 from __future__ import annotations
@@ -18,7 +18,11 @@ from aurora.interfaces.api import create_app
 
 
 def _start_api_server() -> None:
-    """백그라운드 스레드에서 FastAPI 실행."""
+    """백그라운드 daemon 스레드에서 FastAPI 실행.
+
+    daemon=True 이므로 메인(Pywebview) 가 종료되면 자동 정리.
+    프로덕션 빌드 시 ``log_level`` 은 ``warning`` 이상 권장 (성능).
+    """
     app = create_app()
     uvicorn.run(
         app,
@@ -29,23 +33,34 @@ def _start_api_server() -> None:
 
 
 def launch() -> None:
-    """Pywebview 윈도우 띄우기."""
-    # TODO(D):
-    #   1. _start_api_server를 daemon 스레드로 시작
-    #   2. import webview; webview.create_window(...) 로 ui/index.html 열기
-    #   3. webview.start()
+    """Pywebview 윈도우 띄우기.
+
+    1. ``_start_api_server`` 를 daemon 스레드로 시작 (FastAPI 가 준비될 때까지
+       Pywebview 가 잠시 빈 화면을 보여줄 수 있음 — ``ui/`` 의 ``apiClient.js``
+       가 retry 처리).
+    2. ``ui/index.html`` 파일 경로 해결 (소스 트리 / PyInstaller 번들 모두 대응).
+    3. ``webview.create_window(...)`` + ``webview.start()`` 로 GUI 시작.
+
+    Note:
+        ``import webview`` 는 함수 내부에서 호출 — pywebview 가 설치 안 된 환경
+        (예: CI, headless 서버) 에서 모듈 import 자체는 통과하도록.
+    """
     import webview  # type: ignore[import-not-found]
 
     api_thread = threading.Thread(target=_start_api_server, daemon=True)
     api_thread.start()
 
+    # 소스 트리: ``src/aurora/interfaces/webview.py`` 기준 ``../../../ui/index.html``
     ui_path = Path(__file__).resolve().parents[3] / "ui" / "index.html"
+
     webview.create_window(
         "Aurora",
         str(ui_path),
         width=1280,
         height=800,
+        min_size=(960, 600),
         resizable=True,
+        background_color="#06060a",  # 웹사이트 배경과 동일 (로딩 깜빡임 방지)
     )
     webview.start()
 

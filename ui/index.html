@@ -3,49 +3,269 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Aurora</title>
+    <title>Aurora — Trading Console</title>
+
+    <!-- Favicon (웹사이트와 동일 다이아몬드) -->
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+
+    <!-- Tailwind CDN (웹사이트와 동일) -->
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Fonts: Bodoni Moda (워드마크) + Space Grotesk (라벨) + Pretendard (한글) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,500;0,6..96,700&family=Space+Grotesk:wght@300;400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+
     <link rel="stylesheet" href="css/style.css" />
 </head>
-<body class="bg-zinc-900 text-zinc-100 font-sans">
-    <div class="flex h-screen">
-        <!-- 좌측 카테고리 사이드바 -->
-        <aside class="w-56 bg-zinc-800 border-r border-zinc-700 p-4">
-            <h1 class="text-xl font-bold text-emerald-400 mb-6">Aurora</h1>
-            <nav class="space-y-2">
-                <button class="nav-btn w-full text-left px-3 py-2 rounded bg-zinc-700">대시보드</button>
-                <button class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-700">거래소</button>
-                <button class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-700">전략 / 지표</button>
-                <button class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-700">TP / SL</button>
-                <button class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-700">백테스트</button>
-                <button class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-700">로그</button>
-            </nav>
-        </aside>
+<body class="font-sans bg-[#06060a] text-zinc-100 overflow-hidden h-screen">
 
-        <!-- 메인 콘텐츠 -->
-        <main class="flex-1 overflow-y-auto p-8">
-            <h2 class="text-2xl font-semibold mb-6">대시보드</h2>
-            <div class="grid grid-cols-3 gap-4">
-                <div class="bg-zinc-800 p-4 rounded border border-zinc-700">
-                    <div class="text-zinc-400 text-sm">상태</div>
-                    <div id="status" class="text-2xl font-bold text-emerald-400 mt-2">로딩 중...</div>
+    <!-- ===== 배경 오로라 글로우 (웹사이트보다 약하게 — 정보 가독성 우선) ===== -->
+    <div class="aurora-stage">
+        <div class="aurora-band band-1"></div>
+        <div class="aurora-band band-2"></div>
+        <div class="aurora-band band-3"></div>
+        <div class="vignette"></div>
+    </div>
+
+    <!-- ===== 메인 셸 (좌측 사이드바 + 우측 콘텐츠) ===== -->
+    <div class="relative z-10 flex h-screen">
+
+        <!-- ─── 좌측 사이드바 ─────────────────────── -->
+        <aside class="w-60 border-r border-white/5 bg-black/40 backdrop-blur-xl flex flex-col">
+
+            <!-- 로고 + 워드마크 -->
+            <div class="px-6 py-6 border-b border-white/5 flex items-center gap-3">
+                <div class="logo-mark">
+                    <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                        <defs>
+                            <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stop-color="#a855f7" />
+                                <stop offset="50%" stop-color="#6366f1" />
+                                <stop offset="100%" stop-color="#22d3ee" />
+                            </linearGradient>
+                        </defs>
+                        <path d="M14 2 L26 14 L14 26 L2 14 Z" stroke="url(#logoGrad)" stroke-width="1.5" fill="none" />
+                        <path d="M14 8 L20 14 L14 20 L8 14 Z" fill="url(#logoGrad)" opacity="0.6" />
+                    </svg>
                 </div>
-                <div class="bg-zinc-800 p-4 rounded border border-zinc-700">
-                    <div class="text-zinc-400 text-sm">모드</div>
-                    <div id="mode" class="text-2xl font-bold mt-2">-</div>
-                </div>
-                <div class="bg-zinc-800 p-4 rounded border border-zinc-700">
-                    <div class="text-zinc-400 text-sm">포지션</div>
-                    <div class="text-2xl font-bold mt-2">없음</div>
-                </div>
+                <span class="text-xs tracking-[0.25em] font-light wordmark">AURORA</span>
             </div>
 
-            <p class="mt-8 text-zinc-500 text-sm">
-                ⚙️ 이 화면은 골격(skeleton)입니다. 팀원 D가 차근차근 채워나갑니다.
-            </p>
+            <!-- 네비게이션 -->
+            <nav class="flex-1 py-4">
+                <button data-view="dashboard" class="nav-btn active">
+                    <span class="nav-num">01</span>
+                    <span class="nav-label">대시보드</span>
+                </button>
+                <button data-view="exchange" class="nav-btn">
+                    <span class="nav-num">02</span>
+                    <span class="nav-label">거래소</span>
+                </button>
+                <button data-view="strategy" class="nav-btn">
+                    <span class="nav-num">03</span>
+                    <span class="nav-label">전략 / 지표</span>
+                </button>
+                <button data-view="risk" class="nav-btn">
+                    <span class="nav-num">04</span>
+                    <span class="nav-label">TP / SL</span>
+                </button>
+                <button data-view="backtest" class="nav-btn">
+                    <span class="nav-num">05</span>
+                    <span class="nav-label">백테스트</span>
+                </button>
+                <button data-view="logs" class="nav-btn">
+                    <span class="nav-num">06</span>
+                    <span class="nav-label">로그</span>
+                </button>
+            </nav>
+
+            <!-- 하단 상태 표시 -->
+            <div class="px-6 py-4 border-t border-white/5 text-[10px] tracking-[0.2em] text-zinc-500">
+                <div class="flex items-center gap-2 mb-1">
+                    <span id="conn-dot" class="inline-block w-1.5 h-1.5 rounded-full bg-zinc-600"></span>
+                    <span id="conn-label">CONNECTING...</span>
+                </div>
+                <div>v0.1.0 · MODE <span id="mode-label">—</span></div>
+            </div>
+        </aside>
+
+        <!-- ─── 우측 메인 콘텐츠 ──────────────────── -->
+        <main class="flex-1 overflow-y-auto">
+
+            <!-- ===== View: 대시보드 ===== -->
+            <section data-view-content="dashboard" class="view-section view-active">
+                <div class="view-header">
+                    <span class="view-num">01</span>
+                    <h1 class="view-title">대시보드</h1>
+                    <p class="view-sub">봇 상태 · 포지션 · 자본금 한눈에</p>
+                </div>
+
+                <div class="grid grid-cols-3 gap-6 px-12">
+                    <div class="metric-card">
+                        <div class="metric-label">상태</div>
+                        <div id="m-status" class="metric-value">로딩 중</div>
+                        <div class="metric-line"></div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">모드</div>
+                        <div id="m-mode" class="metric-value">—</div>
+                        <div class="metric-line"></div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">포지션</div>
+                        <div id="m-positions" class="metric-value">0</div>
+                        <div class="metric-line"></div>
+                    </div>
+                </div>
+
+                <div class="px-12 mt-8">
+                    <div class="metric-card">
+                        <div class="metric-label">현재 자본금 (USD)</div>
+                        <div id="m-equity" class="metric-value text-3xl">—</div>
+                        <p class="text-xs text-zinc-500 mt-3">거래소 어댑터 미연결 시 표시 안 됨 (TODO 정용우)</p>
+                    </div>
+                </div>
+
+                <div class="px-12 mt-12 flex gap-3">
+                    <button id="btn-start" class="ctrl-btn ctrl-start">봇 시작</button>
+                    <button id="btn-stop" class="ctrl-btn ctrl-stop">봇 중지</button>
+                </div>
+            </section>
+
+            <!-- ===== View: 거래소 ===== -->
+            <section data-view-content="exchange" class="view-section">
+                <div class="view-header">
+                    <span class="view-num">02</span>
+                    <h1 class="view-title">거래소</h1>
+                    <p class="view-sub">API 키 등록 · 페어 선택 · 잔고 확인</p>
+                </div>
+                <div class="px-12">
+                    <div class="placeholder-card">
+                        <div class="placeholder-title">미구현 영역</div>
+                        <ul class="placeholder-list">
+                            <li>거래소 선택 UI (Bybit / OKX / Binance ...)</li>
+                            <li>API Key / Secret 입력 (보안 저장: keyring)</li>
+                            <li>페어 멀티 선택 (BTC/USDT, ETH/USDT 기본)</li>
+                            <li>연결 테스트 버튼 → ``/health`` + 거래소 ping</li>
+                        </ul>
+                        <div class="placeholder-todo">TODO 정용우 · ChoYoon (exchange/ 어댑터 연동)</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===== View: 전략 / 지표 ===== -->
+            <section data-view-content="strategy" class="view-section">
+                <div class="view-header">
+                    <span class="view-num">03</span>
+                    <h1 class="view-title">전략 · 지표</h1>
+                    <p class="view-sub">Selectable 지표 on/off · 파라미터 튜닝</p>
+                </div>
+                <div class="px-12 grid grid-cols-2 gap-6">
+                    <div class="indicator-toggle-card">
+                        <span class="ind-num">02</span>
+                        <h3 class="ind-name">Bollinger Bands</h3>
+                        <p class="ind-sub">횡보장 특화 · 1H 고정</p>
+                        <label class="toggle-switch">
+                            <input type="checkbox" data-config="use_bollinger" />
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="indicator-toggle-card">
+                        <span class="ind-num">03</span>
+                        <h3 class="ind-name">MA Cross</h3>
+                        <p class="ind-sub">골크/데크 · 1H/2H/4H 멀티</p>
+                        <label class="toggle-switch">
+                            <input type="checkbox" data-config="use_ma_cross" />
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="indicator-toggle-card">
+                        <span class="ind-num">04</span>
+                        <h3 class="ind-name">Ichimoku Cloud</h3>
+                        <p class="ind-sub">스팬 터치 · 1H/2H/4H</p>
+                        <label class="toggle-switch">
+                            <input type="checkbox" data-config="use_ichimoku" />
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="indicator-toggle-card">
+                        <span class="ind-num">05</span>
+                        <h3 class="ind-name">Harmonic</h3>
+                        <p class="ind-sub">5종 패턴 · 15m/1H · 자체 SL/TP</p>
+                        <label class="toggle-switch">
+                            <input type="checkbox" data-config="use_harmonic" />
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="px-12 mt-8">
+                    <button id="btn-save-config" class="ctrl-btn ctrl-save">설정 저장</button>
+                    <span id="config-msg" class="ml-4 text-xs text-zinc-500"></span>
+                </div>
+            </section>
+
+            <!-- ===== View: TP / SL ===== -->
+            <section data-view-content="risk" class="view-section">
+                <div class="view-header">
+                    <span class="view-num">04</span>
+                    <h1 class="view-title">TP · SL</h1>
+                    <p class="view-sub">레버리지 · 리스크 · 트레일링 5모드</p>
+                </div>
+                <div class="px-12">
+                    <div class="placeholder-card">
+                        <div class="placeholder-title">미구현 영역</div>
+                        <ul class="placeholder-list">
+                            <li>레버리지 슬라이더 (10~50x) → ``/config`` POST</li>
+                            <li>리스크 % 입력 + 풀시드 토글</li>
+                            <li>TP/SL 모드 라디오 (ATR / FIXED_PCT / MANUAL)</li>
+                            <li>4단계 분할 익절 비율 슬라이더 (합 100)</li>
+                            <li>트레일링 모드 선택 (5종 + OFF)</li>
+                        </ul>
+                        <div class="placeholder-todo">TODO 정용우 · backend ``risk.py`` 연동</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===== View: 백테스트 ===== -->
+            <section data-view-content="backtest" class="view-section">
+                <div class="view-header">
+                    <span class="view-num">05</span>
+                    <h1 class="view-title">백테스트</h1>
+                    <p class="view-sub">기간 · 페어 · 결과 분석</p>
+                </div>
+                <div class="px-12">
+                    <div class="placeholder-card">
+                        <div class="placeholder-title">미구현 영역</div>
+                        <ul class="placeholder-list">
+                            <li>OHLCV 데이터 소스 선택 (CSV / 거래소 API)</li>
+                            <li>기간 선택 (date range picker)</li>
+                            <li>실행 버튼 → ChoYoon ``backtest/`` 엔진 호출</li>
+                            <li>결과: 누적 수익률 차트 · 승률 · DD · 샤프</li>
+                        </ul>
+                        <div class="placeholder-todo">TODO 정용우 · ChoYoon (backtest/ 연동, 사용자 수동 실행 정책)</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===== View: 로그 ===== -->
+            <section data-view-content="logs" class="view-section">
+                <div class="view-header">
+                    <span class="view-num">06</span>
+                    <h1 class="view-title">로그</h1>
+                    <p class="view-sub">최근 100줄 · 자동 갱신</p>
+                </div>
+                <div class="px-12">
+                    <div class="log-box" id="log-box">
+                        <div class="log-empty">로그 없음 — ``GET /logs`` 미구현 (TODO 정용우)</div>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
 
+    <script src="js/apiClient.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

@@ -89,6 +89,15 @@ class ControlResponse(BaseModel):
 
 
 # ============================================================
+# 런타임 상태 (Phase 1: 단일 사용자 가정 → 모듈 레벨 플래그)
+# ============================================================
+
+# 봇 실행 여부. ``/start`` / ``/stop`` 으로 토글, ``/status`` 가 읽음.
+# Phase 2 이후 다중 인스턴스/멀티 유저 지원 시 ``app.state`` 또는 별도 매니저로 이전.
+_bot_running: bool = False
+
+
+# ============================================================
 # 앱 팩토리
 # ============================================================
 
@@ -128,9 +137,9 @@ def create_app() -> FastAPI:
     @app.get("/status", response_model=StatusResponse)
     async def status() -> StatusResponse:
         """봇 런타임 상태 요약 — 대시보드 첫 화면용."""
-        # TODO(정용우): 실제 봇 인스턴스에서 running 여부 + open positions 수 + equity 조회.
+        # TODO(정용우): open_positions / equity 도 봇 인스턴스에서 실제 값 조회.
         return StatusResponse(
-            running=False,
+            running=_bot_running,
             mode=settings.run_mode,
             open_positions=0,
             equity_usd=None,
@@ -165,21 +174,23 @@ def create_app() -> FastAPI:
 
     @app.post("/start", response_model=ControlResponse)
     async def start_bot() -> ControlResponse:
-        """봇 시작."""
-        # TODO(정용우):
-        #   1. 이미 실행 중이면 ControlResponse(success=False, message="이미 실행 중")
-        #   2. 봇 인스턴스 ``start()`` 호출
-        #   3. 시작 시각 기록
-        return ControlResponse(success=False, message="미구현 (정용우 영역)")
+        """봇 시작 — 모듈 레벨 ``_bot_running`` 플래그 토글."""
+        global _bot_running
+        if _bot_running:
+            return ControlResponse(success=False, message="이미 실행 중")
+        _bot_running = True
+        # TODO(정용우): 실제 봇 인스턴스 ``start()`` 호출 + 시작 시각 기록.
+        return ControlResponse(success=True, message="봇 시작됨")
 
     @app.post("/stop", response_model=ControlResponse)
     async def stop_bot() -> ControlResponse:
-        """봇 중지."""
-        # TODO(정용우):
-        #   1. 실행 중 아니면 ControlResponse(success=False, message="이미 중지됨")
-        #   2. 열린 포지션이 있으면 안전 청산 옵션 안내
-        #   3. 봇 인스턴스 ``stop()``
-        return ControlResponse(success=False, message="미구현 (정용우 영역)")
+        """봇 중지 — 모듈 레벨 ``_bot_running`` 플래그 토글."""
+        global _bot_running
+        if not _bot_running:
+            return ControlResponse(success=False, message="이미 중지됨")
+        _bot_running = False
+        # TODO(정용우): 열린 포지션 안전 청산 옵션 + 봇 인스턴스 ``stop()`` 호출.
+        return ControlResponse(success=True, message="봇 중지됨")
 
     # ───── 로그 (단순 폴링) ─────────────────────────
 

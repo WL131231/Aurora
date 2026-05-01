@@ -1,15 +1,25 @@
 """interfaces.api 단위 테스트 — FastAPI TestClient 로 엔드포인트 골격 검증.
 
-stub 단계라 응답 구조와 status code 만 확인 (실제 봇 동작은 후속 PR).
+stub 단계라 응답 구조와 status code 위주로 확인. ``/start`` / ``/stop`` 은
+모듈 레벨 ``_bot_running`` 플래그 토글 동작이므로 각 테스트 시작 전 fixture 로
+초기화하여 격리.
 
 담당: 정용우
 """
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
+from aurora.interfaces import api
 from aurora.interfaces.api import create_app
+
+
+@pytest.fixture(autouse=True)
+def _reset_bot_running() -> None:
+    """모듈 레벨 ``_bot_running`` 플래그를 매 테스트 시작 전 False 로 초기화."""
+    api._bot_running = False
 
 
 def _client() -> TestClient:
@@ -92,24 +102,61 @@ def test_post_config_echoes_input() -> None:
 
 
 # ============================================================
-# 제어 (stub — 미구현 응답)
+# 제어 (start/stop) — _bot_running 토글 동작
 # ============================================================
 
 
-def test_start_bot_stub_returns_unimplemented() -> None:
-    r = _client().post("/start")
+def test_start_bot_sets_running_true() -> None:
+    """``/start`` 호출 시 success=True 반환 + ``/status`` 의 running=True 반영."""
+    client = _client()
+
+    r = client.post("/start")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is True
+    assert body["message"] == "봇 시작됨"
+
+    # /status 가 새 상태를 반영해야 함.
+    s = client.get("/status")
+    assert s.status_code == 200
+    assert s.json()["running"] is True
+
+
+def test_start_bot_when_already_running_returns_failure() -> None:
+    """이미 실행 중인 상태에서 ``/start`` 재호출 시 success=False."""
+    client = _client()
+    client.post("/start")  # 첫 호출로 True 전이
+
+    r = client.post("/start")
     assert r.status_code == 200
     body = r.json()
     assert body["success"] is False
-    assert "미구현" in body["message"]
+    assert body["message"] == "이미 실행 중"
 
 
-def test_stop_bot_stub_returns_unimplemented() -> None:
+def test_stop_bot_sets_running_false() -> None:
+    """실행 중일 때 ``/stop`` 호출 시 success=True + running=False 로 복귀."""
+    client = _client()
+    client.post("/start")  # 먼저 실행 상태로
+
+    r = client.post("/stop")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is True
+    assert body["message"] == "봇 중지됨"
+
+    s = client.get("/status")
+    assert s.status_code == 200
+    assert s.json()["running"] is False
+
+
+def test_stop_bot_when_already_stopped_returns_failure() -> None:
+    """초기 상태(중지)에서 ``/stop`` 호출 시 success=False."""
     r = _client().post("/stop")
     assert r.status_code == 200
     body = r.json()
     assert body["success"] is False
-    assert "미구현" in body["message"]
+    assert body["message"] == "이미 중지됨"
 
 
 # ============================================================

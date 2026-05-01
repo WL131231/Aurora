@@ -7,8 +7,11 @@ import pandas as pd
 import pytest
 
 from aurora.core.indicators import (
+    HarmonicMatch,
     bollinger_bands,
+    detect_pivots,
     ema,
+    harmonic_pattern,
     ichimoku_cloud,
     ma_cross,
     pivot_high,
@@ -473,3 +476,153 @@ def test_ichimoku_invalid_displacement_raises() -> None:
     df = _make_ohlc([100.0] * 60)
     with pytest.raises(ValueError):
         ichimoku_cloud(df, displacement=0)
+
+
+# ============================================================
+# Harmonic Pattern (5종 PDF 풀 검증)
+# ============================================================
+
+
+def _zigzag_ohlc(points: list[float], between: int = 10, spread: float = 0.1) -> pd.DataFrame:
+    """X-A-B-C-D... 꼭짓점들을 between 봉씩 선형 보간해 OHLC 생성.
+
+    각 leg 의 마지막 봉에서 high/low 가 다음 꼭짓점에 정확히 닿도록 함.
+    """
+    closes: list[float] = []
+    for i in range(len(points) - 1):
+        leg = list(np.linspace(points[i], points[i + 1], between, endpoint=False))
+        closes.extend(leg)
+    closes.append(points[-1])
+    s = pd.Series(closes, dtype=float)
+    return pd.DataFrame({
+        "open": s,
+        "high": s + spread,
+        "low": s - spread,
+        "close": s,
+    })
+
+
+def test_detect_pivots_columns_and_dir() -> None:
+    """반환 DataFrame 컬럼/dir 부호 검증."""
+    df = _zigzag_ohlc([100, 110, 100, 110, 100], between=5)
+    pivots = detect_pivots(df, length=4)
+    assert list(pivots.columns) == ["bar_idx", "value", "dir"]
+    assert pivots["dir"].isin((-1, 1)).all()
+
+
+def test_detect_pivots_alternating_direction() -> None:
+    """ZigZag 데이터에서 피벗 방향이 교대로 나옴 (high → low → high → ...)."""
+    df = _zigzag_ohlc([100, 110, 100, 110, 100, 110], between=5)
+    pivots = detect_pivots(df, length=4)
+    # 같은 방향 연속이 없어야 함
+    dirs = pivots["dir"].tolist()
+    for i in range(len(dirs) - 1):
+        assert dirs[i] != dirs[i + 1]
+
+
+def test_detect_pivots_invalid_length_raises() -> None:
+    df = _zigzag_ohlc([100, 110], between=5)
+    with pytest.raises(ValueError):
+        detect_pivots(df, length=1)
+
+
+def test_detect_pivots_missing_columns_raises() -> None:
+    df = pd.DataFrame({"close": [100.0] * 30})
+    with pytest.raises(ValueError):
+        detect_pivots(df)
+
+
+def test_harmonic_returns_none_when_no_pattern() -> None:
+    """랜덤성 데이터에서 패턴 없으면 None."""
+    df = _zigzag_ohlc([100, 110], between=15)
+    assert harmonic_pattern(df) is None
+
+
+def test_harmonic_detects_bullish_bat() -> None:
+    """Bullish Bat 정확 검출 (XAB≈0.5, XAD≈0.866, BCD≈2.4, AB=CD≈1.23)."""
+    # X=100(low), A=120(high), B=110(low), C=115(high), D=102.7(low), E=104(high) 더미
+    pts = [105, 100, 120, 110, 115, 102.7, 104]
+    df = _zigzag_ohlc(pts, between=10)
+    match = harmonic_pattern(df, pivot_length=5, tolerance=0.10)
+    assert match is not None
+    assert match.name == "bat"
+    assert match.direction == "long"
+    assert match.x == pytest.approx(99.9, abs=0.5)
+    assert match.a == pytest.approx(120.1, abs=0.5)
+    # SL = A - 1.13 × |XA| = 120.1 - 1.13 × 20.2 = 97.274
+    assert match.sl_price == pytest.approx(97.27, abs=0.5)
+
+
+def test_harmonic_detects_bearish_bat() -> None:
+    """Bearish Bat: 방향 반전 (X=high, A=low, B=high, C=low, D=high)."""
+    # 가격 거꾸로 (X=120 high → A=100 low → B=110 high → C=105 low → D=117.3 high)
+    pts = [115, 120, 100, 110, 105, 117.3, 116]
+    df = _zigzag_ohlc(pts, between=10)
+    match = harmonic_pattern(df, pivot_length=5, tolerance=0.10)
+    assert match is not None
+    assert match.name == "bat"
+    assert match.direction == "short"
+
+
+def test_harmonic_detects_bullish_butterfly() -> None:
+    """Bullish Butterfly (XAB≈0.786, XAD≈1.179~1.272, BCD≈2.0, AB=CD≈1.0)."""
+    # X=100, A=120 (XA=20), B=120-0.786×20=104.28, C=B+0.5×AB=112.14
+    # AB=CD 옵션 1.0 충족 위해 CD=AB=15.72 → D=C-15.72=96.42
+    # BCD = 15.72 / |C-B| = 15.72 / 7.86 = 2.0 (옵션 2.0 정확)
+    # XAD = (120-96.42)/20 = 1.179 (target 1.272 ± 10% = 1.145~1.399 OK)
+    pts = [110, 100, 120, 104.28, 112.14, 96.42, 98]
+    df = _zigzag_ohlc(pts, between=10)
+    match = harmonic_pattern(df, pivot_length=5, tolerance=0.10)
+    assert match is not None
+    assert match.name == "butterfly"
+    assert match.direction == "long"
+
+
+def test_harmonic_detects_bullish_gartley() -> None:
+    """Bullish Gartley (XAB≈0.618, XAD≈0.786)."""
+    # X=100, A=120 (XA=20), B=120-0.618×20=107.64, D=120-0.786×20=104.28
+    # C: 0.5 of AB → C=107.64+0.5×12.36=113.82
+    # CD=|D-C|=9.54, BC=|C-B|=6.18 → BCD=1.544 (옵션 1.618 ± 10% OK)
+    # AB=CD = 9.54/12.36 = 0.772 → 옵션 1.0 ± 10% (0.9~1.1) 매치 X, 1.27 매치 X
+    # → AB=CD 가 1.0 매치하도록 D 조정. CD=AB=12.36 → D=A-0.618×XA-12.36? 너무 깊음.
+    # Gartley AB=CD 1.0: D=A-XA×0.786=104.28, CD=12.36 필요 → C=D+12.36=116.64
+    # 그러면 ABC = (116.64-107.64)/12.36 = 0.728 (0.382~0.99 OK)
+    # BCD = (116.64-104.28)/(116.64-107.64) = 12.36/9.0 = 1.373 (옵션 1.272/1.414 ± 10% OK)
+    pts = [110, 100, 120, 107.64, 116.64, 104.28, 106]
+    df = _zigzag_ohlc(pts, between=10)
+    match = harmonic_pattern(df, pivot_length=5, tolerance=0.10)
+    assert match is not None
+    assert match.name == "gartley"
+    assert match.direction == "long"
+
+
+def test_harmonic_invalid_columns_raises() -> None:
+    df = pd.DataFrame({"close": [100.0] * 60})
+    with pytest.raises(ValueError):
+        harmonic_pattern(df)
+
+
+def test_harmonic_invalid_tolerance_raises() -> None:
+    df = _zigzag_ohlc([100, 110], between=10)
+    with pytest.raises(ValueError):
+        harmonic_pattern(df, tolerance=0)
+
+
+def test_harmonic_returns_none_with_few_pivots() -> None:
+    """피벗 6개 미만이면 None."""
+    df = _zigzag_ohlc([100, 110, 100], between=5)
+    assert harmonic_pattern(df, pivot_length=4) is None
+
+
+def test_harmonic_match_dataclass_immutable() -> None:
+    """HarmonicMatch 는 frozen dataclass."""
+    from dataclasses import FrozenInstanceError
+    match = HarmonicMatch(
+        name="bat", direction="long",
+        x=100, a=120, b=110, c=115, d=102.7,
+        x_bar=10, a_bar=20, b_bar=30, c_bar=40, d_bar=50,
+        xab=0.5, abc=0.5, bcd=2.4, xad=0.865,
+        sl_price=97.27, tp1_price=109.29, tp2_price=113.42,
+    )
+    with pytest.raises(FrozenInstanceError):
+        match.name = "crab"  # type: ignore[misc]

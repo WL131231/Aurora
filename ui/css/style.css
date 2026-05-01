@@ -974,7 +974,7 @@ input[type="range"].slider-input:disabled {
     opacity: 0;
 }
 
-/* 웹사이트 hero-title 스타일 그대로 차용 */
+/* 웹사이트 hero-title 스타일 차용 — glow 없이 깔끔하게 */
 .splash-text {
     font-family: var(--font-wordmark);
     font-weight: 500;
@@ -994,25 +994,16 @@ input[type="range"].slider-input:disabled {
     background-clip: text;
     -webkit-text-fill-color: transparent;
     color: transparent;
-    text-shadow: 0 0 60px rgba(255, 255, 255, 0.25);
-    /* 페이드 인 1.5s + 그라디언트 시프트 (1.5s 후 시작) */
+    /* 페이드 인 + 그라디언트 시프트 동시 진행 (delay 없음 → 끊김 없음) */
     animation:
-        splash-fade-in 1.5s cubic-bezier(0.22, 0.61, 0.36, 1) forwards,
-        splash-gradient-shift 8s ease-in-out infinite 1.5s;
+        splash-fade-in 2s ease-out forwards,
+        splash-gradient-shift 8s ease-in-out infinite;
     opacity: 0;
 }
 
 @keyframes splash-fade-in {
-    from {
-        opacity: 0;
-        transform: scale(0.95);
-        filter: blur(10px);
-    }
-    to {
-        opacity: 1;
-        transform: scale(1);
-        filter: blur(0);
-    }
+    from { opacity: 0; }
+    to   { opacity: 1; }
 }
 
 @keyframes splash-gradient-shift {

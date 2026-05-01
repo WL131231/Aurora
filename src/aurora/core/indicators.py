@@ -12,6 +12,16 @@
     - **RSI Divergence**: 단독 진입 가능 (Fixed) — 4 종류 검출
     - **Selectable**: BB / MA Cross / Harmonic / Ichimoku — 사용자 on/off
 
+⚠️ 두 종류의 피벗 검출 함수가 공존 — 알고리즘이 다르므로 혼동 주의:
+
+    | 함수 | 알고리즘 | 확정 시점 | 용도 |
+    |---|---|---|---|
+    | ``pivot_high`` / ``pivot_low`` | TradingView ``ta.pivothigh/low`` (좌우 lookback) | ``lb_right`` 봉 지연 | RSI Divergence (확정 피벗 비교) |
+    | ``detect_pivots`` | TradingView ``ta.highestbars/lowestbars == 0`` (좌측 lookback만) | 실시간 (단 마지막은 갱신 가능) | Harmonic XABCD (ZigZag 누적) |
+
+    - **lookback 양면**: ``pivot_*`` — 좌우 ``lb_left``/``lb_right`` 양쪽 봉이 후보보다 작아야 피벗 인정. 미래 봉 ``lb_right`` 만큼 기다려야 확정.
+    - **lookback 좌면만**: ``detect_pivots`` — 봉 ``t`` 가 좌측 ``length`` 윈도우 max/min 이면 피벗. 즉시 검출, 단 같은 방향 후속 피벗으로 갱신 가능.
+
 담당: 장수
 """
 

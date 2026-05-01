@@ -18,6 +18,7 @@ from aurora.core.indicators import (
     pivot_low,
     rsi,
     rsi_divergence,
+    volume_confirmation,
 )
 
 # ============================================================
@@ -626,3 +627,72 @@ def test_harmonic_match_dataclass_immutable() -> None:
     )
     with pytest.raises(FrozenInstanceError):
         match.name = "crab"  # type: ignore[misc]
+
+
+# ============================================================
+# Volume Confirmation
+# ============================================================
+
+
+def test_volume_confirmation_returns_bool_series() -> None:
+    """반환 dtype 은 bool, 길이는 입력과 동일."""
+    vol = pd.Series([100.0] * 30)
+    result = volume_confirmation(vol, period=10, multiplier=1.5)
+    assert len(result) == len(vol)
+    assert result.dtype == bool
+
+
+def test_volume_confirmation_initial_period_false() -> None:
+    """초기 (period - 1) 봉은 SMA NaN → False."""
+    vol = pd.Series([100.0] * 30)
+    result = volume_confirmation(vol, period=10, multiplier=1.5)
+    assert not result.iloc[:9].any()
+
+
+def test_volume_confirmation_constant_volume_never_confirms() -> None:
+    """일정 거래량 → 평균 = 자기 자신 → 1.5배 미달 → 모두 False."""
+    vol = pd.Series([100.0] * 30)
+    result = volume_confirmation(vol, period=10, multiplier=1.5)
+    assert not result.any()
+
+
+def test_volume_confirmation_spike_detected() -> None:
+    """평균 대비 명확히 큰 스파이크 → True."""
+    # 첫 20봉 거래량 100, 마지막 봉만 200 (= 평균 100 × 2)
+    vol = pd.Series([100.0] * 20 + [200.0])
+    result = volume_confirmation(vol, period=10, multiplier=1.5)
+    assert bool(result.iloc[-1])
+    # 이전 봉들은 평균이 100 이라 1.5×100=150 미달 → False
+    assert not result.iloc[19]
+
+
+def test_volume_confirmation_strong_spike_passes() -> None:
+    """평균 대비 명확히 큰 스파이크 (3배) → True.
+
+    Note:
+        rolling SMA 는 마지막 봉도 평균에 포함하므로, 임계 계산엔 이미
+        spike 가 포함된 평균이 쓰임. 따라서 ``multiplier × adjusted_avg``
+        보다 큰 값이 필요.
+    """
+    vol = pd.Series([100.0] * 20 + [300.0])  # 3배 spike → 충분히 통과
+    result = volume_confirmation(vol, period=10, multiplier=1.5)
+    assert bool(result.iloc[-1])
+
+
+def test_volume_confirmation_low_volume_fails() -> None:
+    """평균 미만이면 False (거래량 위축)."""
+    vol = pd.Series([100.0] * 20 + [50.0])  # 평균보다 작음
+    result = volume_confirmation(vol, period=10, multiplier=1.5)
+    assert not bool(result.iloc[-1])
+
+
+def test_volume_confirmation_invalid_period_raises() -> None:
+    with pytest.raises(ValueError):
+        volume_confirmation(pd.Series([1.0, 2.0]), period=0)
+
+
+def test_volume_confirmation_invalid_multiplier_raises() -> None:
+    with pytest.raises(ValueError):
+        volume_confirmation(pd.Series([1.0, 2.0]), multiplier=0)
+    with pytest.raises(ValueError):
+        volume_confirmation(pd.Series([1.0, 2.0]), multiplier=-0.5)

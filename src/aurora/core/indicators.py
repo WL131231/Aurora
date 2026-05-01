@@ -352,6 +352,46 @@ def ma_cross(close: pd.Series, fast: int = 50, slow: int = 200) -> pd.Series:
     return result
 
 
+def volume_confirmation(
+    volume: pd.Series,
+    period: int = 20,
+    multiplier: float = 1.5,
+) -> pd.Series:
+    """거래량 컨펌 검출 — 평균 대비 ``multiplier`` 배 이상이면 True.
+
+    EMA 보스 정책 (자료 인용):
+        - "거래량 없는 상승 = 수급 에너지 약한 상승" → 신뢰도 낮음
+        - "거래량 동반 = 진짜 의미 있는 상승" → 신뢰도 높음
+        - **상대적 증감** 중요 (절대값보다)
+
+    공식:
+        avg = SMA(volume, period)
+        confirmed[t] = volume[t] >= avg[t] × multiplier
+
+    초기 ``period - 1`` 봉은 SMA NaN → False (안전).
+
+    Args:
+        volume: 거래량 시리즈.
+        period: 평균 계산 기간 (기본 20).
+        multiplier: 평균 대비 배율 임계 (기본 1.5).
+
+    Returns:
+        bool 시리즈 (입력 인덱스 유지).
+
+    Raises:
+        ValueError: period < 1 또는 multiplier <= 0.
+    """
+    if period < 1:
+        raise ValueError(f"period 는 1 이상 (받은: {period})")
+    if multiplier <= 0:
+        raise ValueError(f"multiplier 는 양수여야 함 (받은: {multiplier})")
+
+    avg = volume.rolling(window=period, min_periods=period).mean()
+    threshold = avg * multiplier
+    # NaN 안전: avg 가 NaN 이면 False
+    return (volume >= threshold).fillna(False)
+
+
 def detect_pivots(
     ohlc: pd.DataFrame,
     length: int = 10,

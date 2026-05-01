@@ -16,7 +16,12 @@
 
     <link rel="stylesheet" href="css/style.css" />
 </head>
-<body class="font-sans bg-[#06060a] text-zinc-100 overflow-hidden h-screen">
+<body class="font-sans bg-[#06060a] text-zinc-100 overflow-hidden h-screen splash-active">
+
+    <!-- ===== 부팅 스플래시 (페이드 인 → 정지 → 페이드 아웃) ===== -->
+    <div id="splash" class="splash-overlay">
+        <h1 class="splash-text">AURORA</h1>
+    </div>
 
     <!-- ===== 배경 오로라 글로우 ===== -->
     <div class="aurora-stage">
@@ -26,7 +31,7 @@
         <div class="vignette"></div>
     </div>
 
-    <div class="relative z-10 flex h-screen">
+    <div class="main-shell relative z-10 flex h-screen">
 
         <!-- ─── 좌측 사이드바 ─────────────────────── -->
         <aside class="w-60 border-r border-white/5 bg-black/40 backdrop-blur-xl flex flex-col">

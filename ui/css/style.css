@@ -949,6 +949,87 @@ input[type="range"].slider-input:disabled {
 }
 
 /* ============================================================
+   스플래시 오버레이 (.exe 부팅 시 AURORA 페이드 인 → 대시보드)
+
+   타이밍:
+       0.0s       splash 보임 (opacity 0, blur 10px, scale 0.95)
+       0.0~1.5s   페이드 인 (opacity 1, blur 0, scale 1)
+       1.5~2.5s   정지 (그라디언트 시프트 진행)
+       2.5~3.3s   오버레이 페이드 아웃 (0.8s)
+       3.3s       오버레이 DOM 제거 → 메인 GUI 인터랙션 가능
+   ============================================================ */
+.splash-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;          /* 오버레이 위에서 클릭 의도 X */
+    transition: opacity 0.8s ease-out;
+}
+
+.splash-overlay.fade-out {
+    opacity: 0;
+}
+
+/* 웹사이트 hero-title 스타일 그대로 차용 */
+.splash-text {
+    font-family: var(--font-wordmark);
+    font-weight: 500;
+    font-size: clamp(4rem, 18vw, 14rem);
+    line-height: 1;
+    letter-spacing: -0.02em;
+    margin: 0;
+    background: linear-gradient(
+        135deg,
+        #000000 0%,
+        #ffffff 30%,
+        #ffffff 70%,
+        #000000 100%
+    );
+    background-size: 300% 300%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    text-shadow: 0 0 60px rgba(255, 255, 255, 0.25);
+    /* 페이드 인 1.5s + 그라디언트 시프트 (1.5s 후 시작) */
+    animation:
+        splash-fade-in 1.5s cubic-bezier(0.22, 0.61, 0.36, 1) forwards,
+        splash-gradient-shift 8s ease-in-out infinite 1.5s;
+    opacity: 0;
+}
+
+@keyframes splash-fade-in {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+        filter: blur(10px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+        filter: blur(0);
+    }
+}
+
+@keyframes splash-gradient-shift {
+    0%, 100% { background-position: 0% 50%; }
+    50%      { background-position: 100% 50%; }
+}
+
+/* 스플래시 보이는 동안 메인 사이드바/콘텐츠는 살짝 가려두기 (자연스러움) */
+.splash-active .main-shell {
+    opacity: 0;
+}
+
+.main-shell {
+    transition: opacity 0.6s ease-in 0.4s;
+}
+
+/* ============================================================
    스크롤바 (웹사이트와 동일)
    ============================================================ */
 ::-webkit-scrollbar {

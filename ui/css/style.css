@@ -463,6 +463,492 @@ body {
 }
 
 /* ============================================================
+   라디오 그룹 (낮음/보통/높음/최고 같은 단계 선택 — 게임 런처 스타일)
+   ============================================================ */
+.radio-group {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.radio-group input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.radio-group label {
+    flex: 1;
+    min-width: 5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.625rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.8125rem;
+    color: var(--text-2);
+    user-select: none;
+}
+
+.radio-group label::before {
+    content: "";
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 1px solid var(--text-3);
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+}
+
+.radio-group label:hover {
+    border-color: rgba(168, 85, 247, 0.4);
+    color: var(--text-1);
+}
+
+.radio-group input[type="radio"]:checked + label {
+    border-color: var(--aurora-purple);
+    background: rgba(168, 85, 247, 0.1);
+    color: var(--text-1);
+    box-shadow: 0 0 16px -4px rgba(168, 85, 247, 0.4);
+}
+
+.radio-group input[type="radio"]:checked + label::before {
+    background: linear-gradient(135deg, var(--aurora-purple), var(--aurora-cyan));
+    border-color: var(--aurora-purple);
+    box-shadow: inset 0 0 0 3px var(--bg);
+}
+
+.radio-group input[type="radio"]:disabled + label {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ============================================================
+   슬라이더 (range input — 그라디언트 트랙)
+   ============================================================ */
+.slider-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 1rem;
+    align-items: center;
+    padding: 0.5rem 0;
+}
+
+.slider-row label.slider-label {
+    font-size: 0.8125rem;
+    color: var(--text-2);
+    letter-spacing: 0.02em;
+}
+
+.slider-row .slider-value {
+    font-family: var(--font-display);
+    font-size: 0.875rem;
+    color: var(--aurora-purple);
+    min-width: 4rem;
+    text-align: right;
+}
+
+input[type="range"].slider-input {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(
+        to right,
+        var(--aurora-purple),
+        var(--aurora-indigo),
+        var(--aurora-cyan)
+    );
+    outline: none;
+    cursor: pointer;
+}
+
+input[type="range"].slider-input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--aurora-purple), var(--aurora-cyan));
+    border: 2px solid var(--bg-card);
+    cursor: pointer;
+    box-shadow: 0 0 12px -2px rgba(168, 85, 247, 0.6);
+    transition: transform 0.15s ease;
+}
+
+input[type="range"].slider-input::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+}
+
+input[type="range"].slider-input::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--aurora-purple), var(--aurora-cyan));
+    border: 2px solid var(--bg-card);
+    cursor: pointer;
+}
+
+input[type="range"].slider-input:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ============================================================
+   인풋 (text / password)
+   ============================================================ */
+.input-field {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-1);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    transition: all 0.2s ease;
+}
+
+.input-field::placeholder {
+    color: var(--text-4);
+}
+
+.input-field:focus {
+    outline: none;
+    border-color: var(--aurora-purple);
+    background: rgba(168, 85, 247, 0.04);
+    box-shadow: 0 0 16px -4px rgba(168, 85, 247, 0.4);
+}
+
+.input-field:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.input-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.input-label {
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: var(--text-3);
+    text-transform: uppercase;
+}
+
+/* ============================================================
+   드롭다운 (select)
+   ============================================================ */
+.select-field {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-1);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1L6 6L11 1' stroke='%23a855f7' stroke-width='1.5' fill='none'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    padding-right: 2.5rem;
+}
+
+.select-field:focus {
+    outline: none;
+    border-color: var(--aurora-purple);
+}
+
+.select-field option {
+    background: var(--bg-card);
+    color: var(--text-1);
+}
+
+/* ============================================================
+   버튼 variants (primary / danger / ghost)
+   ============================================================ */
+.btn {
+    padding: 0.75rem 1.75rem;
+    border-radius: 8px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--text-2);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.btn:hover {
+    border-color: var(--text-3);
+    color: var(--text-1);
+}
+
+.btn-primary {
+    border-color: rgba(168, 85, 247, 0.5);
+    color: #d8b4fe;
+    background: linear-gradient(135deg, rgba(168, 85, 247, 0.1), rgba(99, 102, 241, 0.1));
+}
+
+.btn-primary:hover {
+    border-color: var(--aurora-purple);
+    color: white;
+    box-shadow: 0 0 24px -8px rgba(168, 85, 247, 0.6);
+}
+
+.btn-danger {
+    border-color: rgba(244, 63, 94, 0.5);
+    color: #fb7185;
+}
+
+.btn-danger:hover {
+    border-color: rgba(244, 63, 94, 0.8);
+    color: white;
+    box-shadow: 0 0 24px -8px rgba(244, 63, 94, 0.4);
+}
+
+.btn-ghost {
+    border-color: transparent;
+    background: transparent;
+}
+
+.btn-ghost:hover {
+    border-color: var(--border);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* ============================================================
+   섹션 (View 안 sub-grouping)
+   ============================================================ */
+.section {
+    padding: 0 3rem 3rem;
+}
+
+.section-title {
+    font-family: var(--font-display);
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    color: var(--text-3);
+    text-transform: uppercase;
+    margin: 2rem 0 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+}
+
+.section-title::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right, var(--border), transparent);
+}
+
+/* ============================================================
+   페어 카드 (선택 가능한 카드 — BTC/ETH 같은)
+   ============================================================ */
+.pair-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 1rem;
+}
+
+.pair-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    background: rgba(255, 255, 255, 0.02);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.pair-card:hover {
+    border-color: rgba(168, 85, 247, 0.4);
+    background: rgba(168, 85, 247, 0.04);
+}
+
+.pair-card.selected {
+    border-color: var(--aurora-purple);
+    background: linear-gradient(135deg, rgba(168, 85, 247, 0.10), rgba(34, 211, 238, 0.06));
+    box-shadow: 0 0 20px -8px rgba(168, 85, 247, 0.5);
+}
+
+.pair-card .pair-symbol {
+    font-family: var(--font-wordmark);
+    font-weight: 500;
+    font-size: 1.125rem;
+    color: var(--text-1);
+    letter-spacing: 0.02em;
+}
+
+.pair-card .pair-meta {
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--text-3);
+}
+
+.pair-card.selected .pair-meta {
+    color: var(--aurora-cyan);
+}
+
+/* ============================================================
+   통계 카드 (백테스트 결과 등)
+   ============================================================ */
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+}
+
+.stat-card {
+    border: 1px solid var(--border-soft);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.stat-label {
+    font-size: 10px;
+    letter-spacing: 0.25em;
+    color: var(--text-3);
+    text-transform: uppercase;
+    margin-bottom: 0.625rem;
+}
+
+.stat-value {
+    font-family: var(--font-display);
+    font-size: 1.375rem;
+    font-weight: 300;
+    color: var(--text-1);
+    line-height: 1;
+}
+
+.stat-value.stat-positive { color: #4ade80; }
+.stat-value.stat-negative { color: #fb7185; }
+.stat-value.stat-aurora {
+    background: linear-gradient(135deg, var(--aurora-purple), var(--aurora-cyan));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+}
+
+/* ============================================================
+   포지션 테이블
+   ============================================================ */
+.pos-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+.pos-table th {
+    text-align: left;
+    padding: 0.75rem 1rem;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--text-3);
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+    font-weight: 400;
+}
+
+.pos-table td {
+    padding: 0.875rem 1rem;
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--text-2);
+}
+
+.pos-table .pos-empty {
+    text-align: center;
+    color: var(--text-4);
+    font-style: italic;
+    padding: 2.5rem;
+}
+
+.pos-direction-long { color: #4ade80; }
+.pos-direction-short { color: #fb7185; }
+
+/* ============================================================
+   진행 바 (백테스트 progress)
+   ============================================================ */
+.progress {
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--aurora-purple), var(--aurora-cyan));
+    width: 0%;
+    transition: width 0.3s ease;
+}
+
+/* ============================================================
+   체크박스 (필터 등)
+   ============================================================ */
+.checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.8125rem;
+    color: var(--text-2);
+}
+
+.checkbox-row input[type="checkbox"] {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    background: rgba(0, 0, 0, 0.3);
+    transition: all 0.15s ease;
+}
+
+.checkbox-row input[type="checkbox"]:checked {
+    background: linear-gradient(135deg, var(--aurora-purple), var(--aurora-cyan));
+    border-color: var(--aurora-purple);
+}
+
+.checkbox-row input[type="checkbox"]:checked::after {
+    content: "✓";
+    color: white;
+    font-size: 11px;
+    display: block;
+    text-align: center;
+    line-height: 14px;
+}
+
+/* ============================================================
    스크롤바 (웹사이트와 동일)
    ============================================================ */
 ::-webkit-scrollbar {

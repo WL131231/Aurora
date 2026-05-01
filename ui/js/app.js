@@ -1,7 +1,6 @@
-// Aurora GUI 진입점 — 라우팅 + 데이터 바인딩.
+// Aurora GUI 진입점 — 라우팅 + 데이터 바인딩 + UI 인터랙션.
 //
-// 단일 ``index.html`` 안의 6개 ``[data-view-content]`` 섹션을 JS로 토글.
-// 외부 라이브러리 없이 vanilla JS — Pywebview 환경에서 가벼움 우선.
+// vanilla JS — Pywebview 환경에서 가벼움 우선.
 //
 // 담당: 정용우
 
@@ -25,7 +24,100 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
 });
 
 // ============================================================
-// 2. 연결 상태 + 대시보드 메트릭 폴링
+// 2. 슬라이더 라이브 업데이트 (값 표시)
+// ============================================================
+
+function bindSlider(inputId, valueId, formatter = (v) => v) {
+    const input = document.getElementById(inputId);
+    const value = document.getElementById(valueId);
+    if (!input || !value) return;
+    const update = () => {
+        value.textContent = formatter(input.value);
+    };
+    input.addEventListener("input", update);
+    update();
+}
+
+bindSlider("vol-period", "vol-period-val", (v) => v);
+bindSlider("vol-mult", "vol-mult-val", (v) => `${parseFloat(v).toFixed(1)}×`);
+bindSlider("vol-boost", "vol-boost-val", (v) => `${parseFloat(v).toFixed(1)}×`);
+
+bindSlider("tp1", "tp1-val", (v) => `${v}%`);
+bindSlider("tp2", "tp2-val", (v) => `${v}%`);
+bindSlider("tp3", "tp3-val", (v) => `${v}%`);
+bindSlider("tp4", "tp4-val", (v) => `${v}%`);
+
+bindSlider("min-seed", "min-seed-val", (v) => `${v}%`);
+bindSlider("risk-pct", "risk-pct-val", (v) => `${parseFloat(v).toFixed(1)}%`);
+
+// ============================================================
+// 3. 레버리지 슬라이더 → 자동 SL/TP 계산 (risk.py 룰 동등)
+// ============================================================
+
+function slPctForLeverage(L) {
+    // src/aurora/core/risk.py 의 sl_pct_for_leverage 와 동일 공식.
+    if (L <= 37) return 2.0 + (L - 10) / 27.0;
+    return 0.08 * L;
+}
+
+function tpRangeForLeverage(L) {
+    const sl = slPctForLeverage(L);
+    if (L <= 37) return [sl + 0.8, sl + 1.8];
+    return [sl + 2.0, sl + 3.0];
+}
+
+const levInput = document.getElementById("lev");
+const levVal = document.getElementById("lev-val");
+const autoSlEl = document.getElementById("auto-sl");
+const autoTpEl = document.getElementById("auto-tp");
+
+function updateLevDisplay() {
+    if (!levInput) return;
+    const L = parseInt(levInput.value, 10);
+    levVal.textContent = `${L}×`;
+    autoSlEl.textContent = `${slPctForLeverage(L).toFixed(2)}%`;
+    const [tpMin, tpMax] = tpRangeForLeverage(L);
+    autoTpEl.textContent = `${tpMin.toFixed(2)} ~ ${tpMax.toFixed(2)}%`;
+}
+
+if (levInput) {
+    levInput.addEventListener("input", updateLevDisplay);
+    updateLevDisplay();
+}
+
+// ============================================================
+// 4. TP 4단계 분할 합계 검증 (합 100 권장)
+// ============================================================
+
+const tpInputs = ["tp1", "tp2", "tp3", "tp4"].map((id) => document.getElementById(id));
+const tpSumEl = document.getElementById("tp-sum");
+
+function updateTpSum() {
+    if (!tpSumEl || tpInputs.some((i) => !i)) return;
+    const sum = tpInputs.reduce((acc, i) => acc + parseInt(i.value, 10), 0);
+    const color = sum === 100 ? "var(--aurora-purple)" : "#fbbf24";
+    tpSumEl.innerHTML = `합계: <span style="color: ${color}">${sum}%</span>`;
+}
+
+tpInputs.forEach((i) => i?.addEventListener("input", updateTpSum));
+updateTpSum();
+
+// ============================================================
+// 5. 페어 카드 토글 (선택 / 해제)
+// ============================================================
+
+document.querySelectorAll(".pair-card").forEach((card) => {
+    card.addEventListener("click", () => {
+        card.classList.toggle("selected");
+        const meta = card.querySelector(".pair-meta");
+        if (meta) {
+            meta.textContent = card.classList.contains("selected") ? "SELECTED" : "—";
+        }
+    });
+});
+
+// ============================================================
+// 6. 연결 상태 + 대시보드 메트릭 폴링
 // ============================================================
 
 async function refreshDashboard() {
@@ -60,7 +152,7 @@ async function refreshDashboard() {
 }
 
 // ============================================================
-// 3. 전략 / 지표 토글 (use_* 4개)
+// 7. 전략 / 지표 토글 (use_* 4개)
 // ============================================================
 
 async function loadConfigToToggles() {
@@ -71,7 +163,7 @@ async function loadConfigToToggles() {
             if (key in cfg) input.checked = !!cfg[key];
         });
     } catch (_) {
-        // 미연결 시 무시 — 토글 모두 false 상태로 둠
+        /* 미연결 시 토글은 false 유지 */
     }
 }
 
@@ -95,7 +187,7 @@ document.getElementById("btn-save-config")?.addEventListener("click", async () =
 });
 
 // ============================================================
-// 4. 봇 시작 / 중지 버튼
+// 8. 봇 시작 / 중지 버튼
 // ============================================================
 
 document.getElementById("btn-start")?.addEventListener("click", async () => {
@@ -119,7 +211,46 @@ document.getElementById("btn-stop")?.addEventListener("click", async () => {
 });
 
 // ============================================================
-// 5. 초기 로드 + 폴링
+// 9. 거래소 연결 테스트 (stub)
+// ============================================================
+
+document.getElementById("btn-test-conn")?.addEventListener("click", async () => {
+    const msg = document.getElementById("conn-test-msg");
+    msg.textContent = "테스트 중...";
+    msg.style.color = "var(--aurora-purple)";
+    try {
+        const h = await Api.health();
+        msg.textContent = `✓ API 연결됨 (mode=${h.mode})`;
+        msg.style.color = "#4ade80";
+    } catch (e) {
+        msg.textContent = `✗ ${e.message}`;
+        msg.style.color = "#fb7185";
+    }
+});
+
+// ============================================================
+// 10. 백테스트 실행 (stub — 진행바 데모만)
+// ============================================================
+
+document.getElementById("btn-run-bt")?.addEventListener("click", () => {
+    const bar = document.getElementById("bt-progress");
+    const label = document.getElementById("bt-progress-label");
+    if (!bar || !label) return;
+    bar.style.width = "0%";
+    label.textContent = "실행 중... (stub demo)";
+    let p = 0;
+    const interval = setInterval(() => {
+        p += 5;
+        bar.style.width = `${p}%`;
+        if (p >= 100) {
+            clearInterval(interval);
+            label.textContent = "완료 (stub) — backtest 엔진 본 구현 후 실 결과 표시";
+        }
+    }, 100);
+});
+
+// ============================================================
+// 11. 초기 로드 + 폴링
 // ============================================================
 
 refreshDashboard();

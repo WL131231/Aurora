@@ -10,7 +10,14 @@ from enum import StrEnum
 
 import pandas as pd
 
-from aurora.core.indicators import bollinger_bands, ema, ma_cross, rsi, rsi_divergence
+from aurora.core.indicators import (
+    bollinger_bands,
+    ema,
+    ichimoku_cloud,
+    ma_cross,
+    rsi,
+    rsi_divergence,
+)
 
 # ============================================================
 # 공통 dataclass / enum
@@ -62,6 +69,16 @@ class StrategyConfig:
     ma_cross_fast: int = 50
     ma_cross_slow: int = 200
     """SMA 기간. 골크/데크 표준은 50/200."""
+
+    # Ichimoku Cloud (Selectable — 1H/2H/4H 멀티 TF, HTF 가중치 자동 적용)
+    ichimoku_conversion_period: int = 9
+    """Tenkan (Conversion Line) 기간. Span A 계산용 내부값."""
+    ichimoku_base_period: int = 26
+    """Kijun (Base Line) 기간. Span A 계산용 내부값."""
+    ichimoku_span_b_period: int = 52
+    """Leading Span B donchian 기간."""
+    ichimoku_displacement: int = 26
+    """forward shift 양 (트뷰 표준 26 → 실제 shift = 25봉)."""
 
 
 # ============================================================
@@ -365,6 +382,146 @@ def detect_ma_cross(
 
 
 # ============================================================
+# Selectable: Ichimoku Cloud (1H/2H/4H, HTF 가중치 자동 적용)
+# ============================================================
+
+ICHIMOKU_TIMEFRAMES: tuple[str, ...] = ("1H", "2H", "4H")
+
+
+def detect_ichimoku_signal(
+    df_by_tf: dict[str, pd.DataFrame],
+    config: StrategyConfig,
+) -> list[EntrySignal]:
+    """이치모쿠 구름대 진입 — 스팬 터치 (멀티 TF, HTF 가중치 자동 적용).
+
+    진입 룰 (마지막 봉 기준):
+        - 가격이 **구름 위**에서 상단 스팬(=cloud_upper) 터치 → LONG (지지)
+        - 가격이 **구름 아래**에서 하단 스팬(=cloud_lower) 터치 → SHORT (저항)
+        - 가격이 **구름 안** → 무신호
+
+    터치 판정:
+        long  = (last_close > cloud_upper) and (last_low  <= cloud_upper)
+        short = (last_close < cloud_lower) and (last_high >= cloud_lower)
+
+    HTF 가중치 (1H=2, 2H=3, 4H=5) 는 ``signal.compose_entry`` 가 자동 적용.
+
+    Args:
+        df_by_tf: TF 별 OHLC DataFrame (high/low/close 컬럼).
+        config: 전략 설정 (ichimoku_* 파라미터).
+
+    Returns:
+        ``EntrySignal`` 리스트 (TF 별로 0~1 개).
+    """
+    signals: list[EntrySignal] = []
+
+    for tf in ICHIMOKU_TIMEFRAMES:
+        df = df_by_tf.get(tf)
+        if df is None or df.empty:
+            continue
+        if not {"high", "low", "close"}.issubset(df.columns):
+            continue
+
+        try:
+            cloud = ichimoku_cloud(
+                df,
+                conversion_period=config.ichimoku_conversion_period,
+                base_period=config.ichimoku_base_period,
+                span_b_period=config.ichimoku_span_b_period,
+                displacement=config.ichimoku_displacement,
+            )
+        except ValueError:
+            continue
+
+        last_upper = cloud["cloud_upper"].iloc[-1]
+        last_lower = cloud["cloud_lower"].iloc[-1]
+        if pd.isna(last_upper) or pd.isna(last_lower):
+            continue
+
+        last_close = float(df["close"].iloc[-1])
+        last_high = float(df["high"].iloc[-1])
+        last_low = float(df["low"].iloc[-1])
+        upper_f = float(last_upper)
+        lower_f = float(last_lower)
+
+        # 가격이 구름 위 + 상단 스팬 터치 → LONG
+        if last_close > upper_f and last_low <= upper_f:
+            signals.append(EntrySignal(
+                direction=Direction.LONG,
+                timeframe=tf,
+                source="ichimoku_cloud_upper",
+                strength=1.0,
+                note=f"이치모쿠 구름 상단 지지 ({tf}, "
+                     f"low={last_low:.4f}≤upper={upper_f:.4f}<close={last_close:.4f})",
+            ))
+        # 가격이 구름 아래 + 하단 스팬 터치 → SHORT
+        elif last_close < lower_f and last_high >= lower_f:
+            signals.append(EntrySignal(
+                direction=Direction.SHORT,
+                timeframe=tf,
+                source="ichimoku_cloud_lower",
+                strength=1.0,
+                note=f"이치모쿠 구름 하단 저항 ({tf}, "
+                     f"close={last_close:.4f}<lower={lower_f:.4f}≤high={last_high:.4f})",
+            ))
+
+    return signals
+
+
+def detect_ichimoku_exit(
+    df: pd.DataFrame,
+    position_direction: Direction,
+    config: StrategyConfig,
+) -> bool:
+    """이치모쿠 청산 — 진입한 구름 면 종가 이탈 시 True.
+
+    청산 룰 (마지막 봉 종가 기준):
+        - 롱 보유 중: ``close < cloud_upper`` → True (구름 안/아래로 마감 = 손절)
+        - 숏 보유 중: ``close > cloud_lower`` → True (구름 안/위로 마감 = 손절)
+
+    Note:
+        이 함수는 "구름대 이탈 마감" 트리거만 검출. 레버리지 SL 캡
+        (``risk.sl_pct_for_leverage``) 은 상위 청산 레이어에서 별도 적용한다.
+        우선순위: SL 캡 > 구름대 이탈 (캡 도달 시 즉시 손절, 캡 미도달이면 이 함수 평가).
+
+    Args:
+        df: 단일 TF OHLC DataFrame (high/low/close 컬럼).
+        position_direction: 현재 포지션 방향.
+        config: 전략 설정 (ichimoku_* 파라미터).
+
+    Returns:
+        구름대 이탈 마감이 발생했으면 True.
+    """
+    if df is None or df.empty:
+        return False
+    if not {"high", "low", "close"}.issubset(df.columns):
+        return False
+
+    try:
+        cloud = ichimoku_cloud(
+            df,
+            conversion_period=config.ichimoku_conversion_period,
+            base_period=config.ichimoku_base_period,
+            span_b_period=config.ichimoku_span_b_period,
+            displacement=config.ichimoku_displacement,
+        )
+    except ValueError:
+        return False
+
+    last_close = df["close"].iloc[-1]
+    last_upper = cloud["cloud_upper"].iloc[-1]
+    last_lower = cloud["cloud_lower"].iloc[-1]
+    if pd.isna(last_close) or pd.isna(last_upper) or pd.isna(last_lower):
+        return False
+
+    last_close_f = float(last_close)
+    if position_direction == Direction.LONG:
+        return last_close_f < float(last_upper)
+    if position_direction == Direction.SHORT:
+        return last_close_f > float(last_lower)
+    return False
+
+
+# ============================================================
 # Selectable 지표 라우터 (사용자 on/off)
 # ============================================================
 
@@ -394,6 +551,9 @@ def evaluate_selectable(
     if config.use_ma_cross:
         signals.extend(detect_ma_cross(df_by_tf, config))
 
-    # TODO(장수): Harmonic, Ichimoku 추가 (별도 PR)
+    if config.use_ichimoku:
+        signals.extend(detect_ichimoku_signal(df_by_tf, config))
+
+    # TODO(장수): Harmonic 추가 (별도 PR)
 
     return signals

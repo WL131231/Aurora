@@ -9,6 +9,7 @@ import pytest
 from aurora.core.indicators import (
     bollinger_bands,
     ema,
+    ichimoku_cloud,
     ma_cross,
     pivot_high,
     pivot_low,
@@ -335,3 +336,140 @@ def test_ma_cross_fast_ge_slow_raises() -> None:
         ma_cross(pd.Series([1.0] * 50), fast=10, slow=10)
     with pytest.raises(ValueError):
         ma_cross(pd.Series([1.0] * 50), fast=20, slow=10)
+
+
+# ============================================================
+# Ichimoku Cloud
+# ============================================================
+
+
+def _make_ohlc(closes: list[float], spread: float = 0.5) -> pd.DataFrame:
+    """high = close + spread / low = close - spread 의 단순 OHLC 생성."""
+    close = pd.Series(closes)
+    return pd.DataFrame({
+        "open": close,
+        "high": close + spread,
+        "low": close - spread,
+        "close": close,
+    })
+
+
+def test_ichimoku_columns_and_length() -> None:
+    """결과 컬럼은 span_a/span_b/cloud_upper/cloud_lower, 길이는 입력과 동일."""
+    df = _make_ohlc([100.0 + i for i in range(120)])
+    result = ichimoku_cloud(df)
+    assert list(result.columns) == ["span_a", "span_b", "cloud_upper", "cloud_lower"]
+    assert len(result) == len(df)
+
+
+def test_ichimoku_initial_nan_until_warmup() -> None:
+    """초기 (span_b_period + displacement - 2) 봉은 NaN — 기본값 52 + 26 - 2 = 76."""
+    df = _make_ohlc([100.0 + i * 0.1 for i in range(120)])
+    result = ichimoku_cloud(df)
+    # 76번째 인덱스 이전은 모두 NaN
+    assert result["span_b"].iloc[:76].isna().all()
+    # 76번째 봉부터는 NaN 아님
+    assert not pd.isna(result["span_b"].iloc[76])
+
+
+def test_ichimoku_span_a_is_avg_of_tenkan_kijun_shifted() -> None:
+    """Span A = (Tenkan + Kijun) / 2 를 25봉 forward shift."""
+    closes = [100.0 + i * 0.5 for i in range(120)]
+    df = _make_ohlc(closes, spread=0.5)
+    result = ichimoku_cloud(df)
+
+    # Tenkan/Kijun 직접 계산 (donchian)
+    high = df["high"]
+    low = df["low"]
+    tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2.0
+    kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2.0
+    expected_lead_a = (tenkan + kijun) / 2.0
+    expected_span_a = expected_lead_a.shift(25)
+
+    pd.testing.assert_series_equal(
+        result["span_a"], expected_span_a, check_names=False
+    )
+
+
+def test_ichimoku_span_b_is_donchian52_shifted() -> None:
+    """Span B = donchian(52) 를 25봉 forward shift."""
+    closes = [100.0 + (i % 10) for i in range(120)]
+    df = _make_ohlc(closes, spread=1.0)
+    result = ichimoku_cloud(df)
+
+    high = df["high"]
+    low = df["low"]
+    expected_lead_b = (high.rolling(52).max() + low.rolling(52).min()) / 2.0
+    expected_span_b = expected_lead_b.shift(25)
+
+    pd.testing.assert_series_equal(
+        result["span_b"], expected_span_b, check_names=False
+    )
+
+
+def test_ichimoku_cloud_upper_lower_relation() -> None:
+    """cloud_upper >= cloud_lower (NaN 제외)."""
+    rng = np.random.RandomState(42)
+    closes = list(rng.randn(120).cumsum() + 100)
+    df = _make_ohlc(closes, spread=1.0)
+    result = ichimoku_cloud(df)
+    valid = result.dropna()
+    assert (valid["cloud_upper"] >= valid["cloud_lower"]).all()
+
+
+def test_ichimoku_cloud_upper_is_max_of_spans() -> None:
+    """cloud_upper = max(span_a, span_b), cloud_lower = min(span_a, span_b)."""
+    rng = np.random.RandomState(7)
+    closes = list(rng.randn(120).cumsum() + 100)
+    df = _make_ohlc(closes, spread=0.5)
+    result = ichimoku_cloud(df).dropna()
+
+    pair_max = result[["span_a", "span_b"]].max(axis=1)
+    pair_min = result[["span_a", "span_b"]].min(axis=1)
+    pd.testing.assert_series_equal(result["cloud_upper"], pair_max, check_names=False)
+    pd.testing.assert_series_equal(result["cloud_lower"], pair_min, check_names=False)
+
+
+def test_ichimoku_constant_price_flat_cloud() -> None:
+    """일정 가격이면 span_a == span_b → 두께 0."""
+    df = _make_ohlc([100.0] * 120, spread=0.0)
+    result = ichimoku_cloud(df).dropna()
+    pd.testing.assert_series_equal(result["span_a"], result["span_b"], check_names=False)
+    assert (result["cloud_upper"] - result["cloud_lower"]).abs().max() == pytest.approx(0.0)
+
+
+def test_ichimoku_custom_periods() -> None:
+    """커스텀 기간 파라미터 동작 (warmup 길이 변화)."""
+    df = _make_ohlc([100.0 + i * 0.1 for i in range(60)])
+    result = ichimoku_cloud(
+        df,
+        conversion_period=5,
+        base_period=10,
+        span_b_period=20,
+        displacement=10,
+    )
+    # warmup = span_b_period + displacement - 2 = 20 + 10 - 2 = 28
+    assert result["span_b"].iloc[:28].isna().all()
+    assert not pd.isna(result["span_b"].iloc[28])
+
+
+def test_ichimoku_missing_columns_raises() -> None:
+    df = pd.DataFrame({"close": [100.0] * 60})
+    with pytest.raises(ValueError):
+        ichimoku_cloud(df)
+
+
+def test_ichimoku_invalid_periods_raises() -> None:
+    df = _make_ohlc([100.0] * 60)
+    with pytest.raises(ValueError):
+        ichimoku_cloud(df, conversion_period=0)
+    with pytest.raises(ValueError):
+        ichimoku_cloud(df, base_period=0)
+    with pytest.raises(ValueError):
+        ichimoku_cloud(df, span_b_period=0)
+
+
+def test_ichimoku_invalid_displacement_raises() -> None:
+    df = _make_ohlc([100.0] * 60)
+    with pytest.raises(ValueError):
+        ichimoku_cloud(df, displacement=0)

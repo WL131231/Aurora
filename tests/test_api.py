@@ -9,10 +9,12 @@ stub 단계라 응답 구조와 status code 위주로 확인. ``/start`` / ``/st
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
-from aurora.interfaces import api
+from aurora.interfaces import api, config_store
 from aurora.interfaces.api import create_app
 
 
@@ -20,6 +22,12 @@ from aurora.interfaces.api import create_app
 def _reset_bot_running() -> None:
     """모듈 레벨 ``_bot_running`` 플래그를 매 테스트 시작 전 False 로 초기화."""
     api._bot_running = False
+
+
+@pytest.fixture(autouse=True)
+def _isolated_config_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``config_store._config_path`` 를 tmp_path 하위로 교체해 진짜 홈 디렉토리 격리."""
+    monkeypatch.setattr(config_store, "_config_path", lambda: tmp_path / ".aurora" / "config.json")
 
 
 def _client() -> TestClient:

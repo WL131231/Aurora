@@ -29,6 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from aurora.config import settings
+from aurora.interfaces import config_store
 
 # ============================================================
 # Pydantic 모델 (요청/응답 스키마)
@@ -157,17 +158,16 @@ def create_app() -> FastAPI:
 
     @app.get("/config", response_model=ConfigDTO)
     async def get_config() -> ConfigDTO:
-        """현재 사용자 전략 설정 조회."""
-        # TODO(정용우): 영구 저장소(JSON 또는 SQLite) 에서 ConfigDTO 읽기.
-        return ConfigDTO()
+        """현재 사용자 전략 설정 조회 — 파일 없으면 ConfigDTO 기본값."""
+        raw = config_store.load()
+        if not raw:
+            return ConfigDTO()
+        return ConfigDTO(**raw)
 
     @app.post("/config", response_model=ConfigDTO)
     async def update_config(config: ConfigDTO) -> ConfigDTO:
-        """사용자 전략 설정 갱신."""
-        # TODO(정용우):
-        #   1. 입력 검증 (leverage 10~50 범위 등)
-        #   2. 영구 저장소에 저장
-        #   3. 봇 인스턴스의 StrategyConfig 핫 리로드 또는 재시작 안내
+        """사용자 전략 설정 갱신 — 영구 저장."""
+        config_store.save(config.model_dump())
         return config
 
     # ───── 제어 (Start/Stop) ────────────────────────

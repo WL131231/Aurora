@@ -1,8 +1,7 @@
 """interfaces.api 단위 테스트 — FastAPI TestClient 로 엔드포인트 골격 검증.
 
 stub 단계라 응답 구조와 status code 위주로 확인. ``/start`` / ``/stop`` 은
-모듈 레벨 ``_bot_running`` 플래그 토글 동작이므로 각 테스트 시작 전 fixture 로
-초기화하여 격리.
+BotInstance 싱글톤을 제어하므로 각 테스트 시작 전 reset_for_test() 로 격리.
 
 담당: 정용우
 """
@@ -14,14 +13,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from aurora.interfaces import api, config_store, log_buffer
+from aurora.interfaces import bot_instance, config_store, log_buffer
 from aurora.interfaces.api import create_app
 
 
 @pytest.fixture(autouse=True)
-def _reset_bot_running() -> None:
-    """모듈 레벨 ``_bot_running`` 플래그를 매 테스트 시작 전 False 로 초기화."""
-    api._bot_running = False
+def _reset_bot_instance() -> None:
+    """BotInstance 싱글톤을 매 테스트 시작 전 초기화."""
+    bot_instance.reset_for_test()
 
 
 @pytest.fixture(autouse=True)
@@ -116,7 +115,7 @@ def test_post_config_echoes_input() -> None:
 
 
 # ============================================================
-# 제어 (start/stop) — _bot_running 토글 동작
+# 제어 (start/stop) — BotInstance lifecycle
 # ============================================================
 
 

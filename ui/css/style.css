@@ -439,6 +439,73 @@ body {
 }
 
 /* ============================================================
+   숫자 폰트 (mono) — JetBrains Mono
+   ============================================================ */
+.mono {
+    font-family: "JetBrains Mono", "Consolas", monospace;
+}
+
+/* ============================================================
+   Status badge — running / stopped / error
+   ============================================================ */
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+}
+.status-badge::before {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.badge-running { color: #22d3ee; }
+.badge-running::before { background: #22d3ee; box-shadow: 0 0 6px #22d3ee; }
+.badge-stopped { color: rgba(255,255,255,0.5); }
+.badge-stopped::before { background: rgba(255,255,255,0.25); }
+.badge-error { color: #fb7185; }
+.badge-error::before { background: #fb7185; box-shadow: 0 0 6px #fb7185; }
+
+/* ============================================================
+   Mode pill — PAPER / DEMO / LIVE
+   ============================================================ */
+.mode-pill {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    border: 1px solid rgba(255,255,255,0.15);
+    color: rgba(255,255,255,0.6);
+    background: rgba(255,255,255,0.06);
+}
+
+/* ============================================================
+   제어 버튼 인라인 메시지
+   ============================================================ */
+.ctrl-msg {
+    font-size: 0.75rem;
+    margin-top: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.ctrl-msg-close {
+    cursor: pointer;
+    opacity: 0.7;
+    font-size: 0.85rem;
+    line-height: 1;
+}
+.ctrl-msg-close:hover { opacity: 1; }
+
+/* ============================================================
    로그 박스
    ============================================================ */
 .log-box {

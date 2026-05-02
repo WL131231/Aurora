@@ -11,7 +11,7 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,500;0,6..96,700&family=Space+Grotesk:wght@300;400;500;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,500;0,6..96,700&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@300;400;500;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
 
     <link rel="stylesheet" href="css/style.css" />
@@ -104,31 +104,32 @@
                     <div class="grid grid-cols-4 gap-4">
                         <div class="metric-card">
                             <div class="metric-label">상태</div>
-                            <div id="m-status" class="metric-value">로딩 중</div>
+                            <div id="m-status" class="status-badge badge-stopped">중지</div>
                             <div class="metric-line"></div>
                         </div>
                         <div class="metric-card">
                             <div class="metric-label">모드</div>
-                            <div id="m-mode" class="metric-value">—</div>
+                            <div><span id="m-mode" class="mode-pill">—</span></div>
                             <div class="metric-line"></div>
                         </div>
                         <div class="metric-card">
-                            <div class="metric-label">포지션</div>
-                            <div id="m-positions" class="metric-value">0</div>
+                            <div class="metric-label">열린 포지션</div>
+                            <div id="m-positions" class="metric-value mono">0</div>
                             <div class="metric-line"></div>
                         </div>
                         <div class="metric-card">
                             <div class="metric-label">오늘 수익</div>
-                            <div class="metric-value" style="color: var(--text-3)">—</div>
+                            <div class="metric-value mono" style="color: var(--text-3)">—</div>
                             <div class="metric-line"></div>
                         </div>
                     </div>
 
                     <div class="section-title">자본금</div>
                     <div class="metric-card">
-                        <div class="metric-label">현재 자본금 (USD)</div>
-                        <div id="m-equity" class="metric-value text-3xl">—</div>
+                        <div class="metric-label">현재 자본금 (USDT)</div>
+                        <div id="m-equity" class="metric-value mono text-3xl">—</div>
                         <p class="text-xs text-zinc-500 mt-3">거래소 어댑터 미연결 — exchange 본 구현 후 표시</p>
+                        <p class="text-xs text-zinc-600 mt-1">마지막 업데이트: <span id="m-last-update">—</span></p>
                     </div>
 
                     <div class="section-title">제어</div>
@@ -137,7 +138,7 @@
                         <button id="btn-stop" class="btn btn-danger">■ 봇 중지</button>
                         <button class="btn btn-ghost" disabled>↻ 재시작 (구현 예정)</button>
                     </div>
-                    <p id="ctrl-msg" class="text-xs mt-2" style="min-height:1em"></p>
+                    <div id="ctrl-msg" class="ctrl-msg" style="min-height:1.5em"></div>
 
                     <div class="section-title">열린 포지션</div>
                     <div class="metric-card" style="padding: 0">

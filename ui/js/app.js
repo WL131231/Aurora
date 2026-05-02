@@ -147,55 +147,77 @@ document.querySelectorAll(".pair-card").forEach((card) => {
 // 6. 연결 상태 + 대시보드 메트릭 폴링
 // ============================================================
 
+// UTC ISO → KST 표시 (Aurora 정책)
+function toKstString(isoStr) {
+    return new Date(isoStr).toLocaleString("ko-KR", {
+        timeZone: "Asia/Seoul", hour12: false,
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit",
+    });
+}
+
+function _setStatusBadge(el, running, backendDown) {
+    el.className = "status-badge " +
+        (backendDown ? "badge-error" : running ? "badge-running" : "badge-stopped");
+    el.textContent = backendDown ? "연결 끊김" : running ? "실행 중" : "중지";
+}
+
+function _setButtons(btnStart, btnStop, running, backendDown) {
+    if (!btnStart || !btnStop) return;
+    if (backendDown) { btnStart.disabled = true; btnStop.disabled = true; return; }
+    btnStart.disabled = running;
+    btnStop.disabled = !running;
+}
+
 async function refreshDashboard() {
-    const connDot = document.getElementById("conn-dot");
+    const connDot   = document.getElementById("conn-dot");
     const connLabel = document.getElementById("conn-label");
     const modeLabel = document.getElementById("mode-label");
-    const btnStart = document.getElementById("btn-start");
-    const btnStop = document.getElementById("btn-stop");
+    const btnStart  = document.getElementById("btn-start");
+    const btnStop   = document.getElementById("btn-stop");
+    const mStatus   = document.getElementById("m-status");
 
     try {
         const s = await Api.status();
+
         connDot.style.background = "#22d3ee";
-        connDot.style.boxShadow = "0 0 8px #22d3ee";
+        connDot.style.boxShadow  = "0 0 8px #22d3ee";
         connLabel.textContent = "CONNECTED";
 
-        modeLabel.textContent = (s.mode || "—").toUpperCase();
-        document.getElementById("m-mode").textContent = (s.mode || "—").toUpperCase();
-        document.getElementById("m-status").textContent = s.running ? "실행 중" : "중지";
-        document.getElementById("m-status").style.color = s.running
-            ? "#22d3ee"
-            : "rgba(255,255,255,0.7)";
+        const mode = (s.mode || "").toUpperCase();
+        modeLabel.textContent = mode;
+        document.getElementById("m-mode").textContent = mode;
+
+        _setStatusBadge(mStatus, s.running, false);
+
         document.getElementById("m-positions").textContent = String(s.open_positions ?? 0);
         document.getElementById("m-equity").textContent =
-            s.equity_usd === null || s.equity_usd === undefined
-                ? "—"
-                : `$ ${s.equity_usd.toFixed(2)}`;
+            s.equity_usd == null ? "—"
+                : s.equity_usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-        // 봇 상태에 따라 버튼 활성/비활성
-        if (btnStart) btnStart.disabled = s.running;
-        if (btnStop) btnStop.disabled = !s.running;
-    } catch (e) {
+        const lu = document.getElementById("m-last-update");
+        if (lu) lu.textContent = toKstString(new Date().toISOString()) + " KST";
+
+        _setButtons(btnStart, btnStop, s.running, false);
+    } catch (_) {
         connDot.style.background = "#fb7185";
-        connDot.style.boxShadow = "0 0 8px #fb7185";
+        connDot.style.boxShadow  = "0 0 8px #fb7185";
         connLabel.textContent = "DISCONNECTED";
-        document.getElementById("m-status").textContent = "API 미연결";
-        document.getElementById("m-status").style.color = "#fb7185";
-        if (btnStart) btnStart.disabled = false;
-        if (btnStop) btnStop.disabled = true;
+        _setStatusBadge(mStatus, false, true);
+        _setButtons(btnStart, btnStop, false, true);
     }
 }
 
-// 제어 버튼 인라인 피드백 (alert 대신)
+// 제어 버튼 인라인 피드백 — success: 3초, error: 5초 + × 닫기
 function showCtrlMsg(text, ok) {
     const el = document.getElementById("ctrl-msg");
     if (!el) return;
-    el.textContent = text;
-    el.style.color = ok ? "#22d3ee" : "#fb7185";
     clearTimeout(el._t);
-    el._t = setTimeout(() => {
-        el.textContent = "";
-    }, 3000);
+    const delay = ok ? 3000 : 5000;
+    el.innerHTML =
+        `<span style="color:${ok ? "#22d3ee" : "#fb7185"}">${text}</span>` +
+        (ok ? "" : ` <span class="ctrl-msg-close" onclick="this.parentElement.innerHTML=''">×</span>`);
+    el._t = setTimeout(() => { el.innerHTML = ""; }, delay);
 }
 
 // ============================================================
@@ -238,22 +260,36 @@ document.getElementById("btn-save-config")?.addEventListener("click", async () =
 // ============================================================
 
 document.getElementById("btn-start")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-start");
+    const stop = document.getElementById("btn-stop");
+    const orig = btn.textContent;
+    btn.disabled = true; stop.disabled = true;
+    btn.textContent = "시작 중...";
     try {
         const r = await Api.startBot();
         showCtrlMsg(r.success ? "▶ 봇 시작됨" : `시작 실패: ${r.message}`, r.success);
-        refreshDashboard();
     } catch (e) {
         showCtrlMsg(`API 오류: ${e.message}`, false);
+    } finally {
+        btn.textContent = orig;
+        refreshDashboard();
     }
 });
 
 document.getElementById("btn-stop")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-stop");
+    const start = document.getElementById("btn-start");
+    const orig = btn.textContent;
+    btn.disabled = true; start.disabled = true;
+    btn.textContent = "중지 중...";
     try {
         const r = await Api.stopBot();
         showCtrlMsg(r.success ? "■ 봇 중지됨" : `중지 실패: ${r.message}`, r.success);
-        refreshDashboard();
     } catch (e) {
         showCtrlMsg(`API 오류: ${e.message}`, false);
+    } finally {
+        btn.textContent = orig;
+        refreshDashboard();
     }
 });
 
@@ -303,5 +339,5 @@ document.getElementById("btn-run-bt")?.addEventListener("click", () => {
 refreshDashboard();
 loadConfigToToggles();
 
-// 5초 주기 대시보드 폴링 (TODO 정용우: WebSocket /ws/live 로 전환)
-setInterval(refreshDashboard, 5000);
+// 15초 주기 대시보드 폴링 (봇 상태 자주 안 바뀜, /start /stop 직후엔 즉시 fetch)
+setInterval(refreshDashboard, 15000);

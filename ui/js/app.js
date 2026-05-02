@@ -151,6 +151,8 @@ async function refreshDashboard() {
     const connDot = document.getElementById("conn-dot");
     const connLabel = document.getElementById("conn-label");
     const modeLabel = document.getElementById("mode-label");
+    const btnStart = document.getElementById("btn-start");
+    const btnStop = document.getElementById("btn-stop");
 
     try {
         const s = await Api.status();
@@ -169,13 +171,31 @@ async function refreshDashboard() {
             s.equity_usd === null || s.equity_usd === undefined
                 ? "—"
                 : `$ ${s.equity_usd.toFixed(2)}`;
+
+        // 봇 상태에 따라 버튼 활성/비활성
+        if (btnStart) btnStart.disabled = s.running;
+        if (btnStop) btnStop.disabled = !s.running;
     } catch (e) {
         connDot.style.background = "#fb7185";
         connDot.style.boxShadow = "0 0 8px #fb7185";
         connLabel.textContent = "DISCONNECTED";
         document.getElementById("m-status").textContent = "API 미연결";
         document.getElementById("m-status").style.color = "#fb7185";
+        if (btnStart) btnStart.disabled = false;
+        if (btnStop) btnStop.disabled = true;
     }
+}
+
+// 제어 버튼 인라인 피드백 (alert 대신)
+function showCtrlMsg(text, ok) {
+    const el = document.getElementById("ctrl-msg");
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = ok ? "#22d3ee" : "#fb7185";
+    clearTimeout(el._t);
+    el._t = setTimeout(() => {
+        el.textContent = "";
+    }, 3000);
 }
 
 // ============================================================
@@ -220,20 +240,20 @@ document.getElementById("btn-save-config")?.addEventListener("click", async () =
 document.getElementById("btn-start")?.addEventListener("click", async () => {
     try {
         const r = await Api.startBot();
-        alert(r.success ? "봇 시작됨" : `시작 실패: ${r.message}`);
+        showCtrlMsg(r.success ? "▶ 봇 시작됨" : `시작 실패: ${r.message}`, r.success);
         refreshDashboard();
     } catch (e) {
-        alert(`API 오류: ${e.message}`);
+        showCtrlMsg(`API 오류: ${e.message}`, false);
     }
 });
 
 document.getElementById("btn-stop")?.addEventListener("click", async () => {
     try {
         const r = await Api.stopBot();
-        alert(r.success ? "봇 중지됨" : `중지 실패: ${r.message}`);
+        showCtrlMsg(r.success ? "■ 봇 중지됨" : `중지 실패: ${r.message}`, r.success);
         refreshDashboard();
     } catch (e) {
-        alert(`API 오류: ${e.message}`);
+        showCtrlMsg(`API 오류: ${e.message}`, false);
     }
 });
 

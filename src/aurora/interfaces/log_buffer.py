@@ -4,30 +4,49 @@
 - logging.Handler 를 상속한 BufferHandler 로 root logger 에 등록되면
   봇 전체에서 발생하는 log record 가 자동으로 적재됨.
 - thread-safe: deque.append 는 GIL 보호. Lock 불필요.
+- broadcaster: api.py 가 set_broadcaster() 로 콜백 등록 → 새 record 마다 ws push.
 
 담당: 정용우
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import deque
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 _BUFFER_SIZE = 1000
 _buffer: deque[dict] = deque(maxlen=_BUFFER_SIZE)
+_broadcaster: Callable[[dict], Awaitable[None]] | None = None
+
+
+def set_broadcaster(fn: Callable[[dict], Awaitable[None]]) -> None:
+    """api.py 가 broadcast_log 함수를 등록 — emit 시 자동 호출."""
+    global _broadcaster
+    _broadcaster = fn
 
 
 class BufferHandler(logging.Handler):
     """logging.Handler — 모든 log record 를 _buffer 에 dict 형태로 push."""
 
     def emit(self, record: logging.LogRecord) -> None:
-        _buffer.append({
+        item = {
             "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
-        })
+        }
+        _buffer.append(item)
+        # broadcaster 등록 + event loop 실행 중이면 비동기 push
+        if _broadcaster:
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(_broadcaster(item))
+            except RuntimeError:
+                pass  # event loop 없음 (테스트 등)
 
 
 def install() -> None:

@@ -202,6 +202,34 @@ def test_logs_returns_lines_with_limit() -> None:
 
 
 # ============================================================
+# WebSocket /ws/live
+# ============================================================
+
+
+def test_ws_live_connects_and_receives_catchup() -> None:
+    """/ws/live 연결 직후 최근 로그 catch-up 메시지 수신."""
+    log_buffer.install()
+    import logging
+    logging.getLogger("test.ws").info("ws catchup msg")
+
+    with _client().websocket_connect("/ws/live") as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "log"
+        assert msg["data"]["message"] == "ws catchup msg"
+        assert "ts" in msg["data"]
+        assert "level" in msg["data"]
+        assert "logger" in msg["data"]
+
+
+def test_ws_live_empty_buffer_no_catchup() -> None:
+    """버퍼가 비어있으면 catch-up 메시지 없이 연결만 유지."""
+    client = _client()
+    with client.websocket_connect("/ws/live") as ws:
+        # 메시지 없으면 receive_json 은 blocking — close 로 확인
+        ws.close()
+
+
+# ============================================================
 # CORS (Pywebview file:// origin 호환)
 # ============================================================
 

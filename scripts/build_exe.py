@@ -60,6 +60,13 @@ def main() -> int:
         "--hidden-import", "uvicorn.protocols.websockets.auto",
         "--hidden-import", "uvicorn.lifespan",
         "--hidden-import", "uvicorn.lifespan.on",
+        # 봇 런타임에는 안 쓰이는 백테스트/데이터 수집 의존성 — .exe 사이즈 폭증 방지.
+        # PR-3 (BacktestEngine) 가 aurora.backtest.* 에서 이 모듈들 import 시
+        # PyInstaller 가 import 트리에 포함시키는데, 봇 GUI 는 backtest 모듈을
+        # 사용하지 않으므로 수십 MB 불필요 의존성을 빼낸다.
+        "--exclude-module", "pyarrow",          # parquet 엔진 (50 MB+) — fetch_ohlcv 전용
+        "--exclude-module", "tenacity",         # retry/backoff — fetch_ohlcv 전용
+        "--exclude-module", "aurora.backtest",  # 백테스트 모듈 (분석 도구)
         "--clean",
         "--noconfirm",
     ]

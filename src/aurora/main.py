@@ -14,10 +14,12 @@
 from __future__ import annotations
 
 from aurora.config import settings
+from aurora.interfaces import log_buffer
 
 
 def main() -> None:
     """진입점 — 추후 D 멤버가 interfaces 모듈과 연결."""
+    log_buffer.install()
     # TODO(D): interfaces.webview.launch() 호출 + API 서버 + Telegram 동시 기동
     print(f"Aurora v0.1.0 — run_mode={settings.run_mode}")
     print("(아직 구현되지 않음)")

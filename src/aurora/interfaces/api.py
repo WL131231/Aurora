@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -199,7 +199,34 @@ def create_app() -> FastAPI:
         """최근 로그 라인 조회 (단순 폴링용 — 실시간은 ``/ws/live``)."""
         return {"lines": log_buffer.get_recent(limit), "limit": limit}
 
-    # TODO(정용우): WebSocket /ws/live — 실시간 차트/로그 push (python-telegram-bot
-    # / FastAPI websocket route 패턴). 로그 라인 + 새 신호 발생 시 broadcast.
+    # ───── WebSocket 실시간 push ────────────────────
+
+    _ws_clients: set[WebSocket] = set()
+
+    async def broadcast_log(record: dict) -> None:
+        """새 log record 발생 시 모든 연결된 클라이언트에 push."""
+        dead = []
+        for ws in _ws_clients:
+            try:
+                await ws.send_json({"type": "log", "data": record})
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            _ws_clients.discard(ws)
+
+    log_buffer.set_broadcaster(broadcast_log)
+
+    @app.websocket("/ws/live")
+    async def ws_live(websocket: WebSocket) -> None:
+        """실시간 로그 broadcast — 연결 직후 최근 50줄 catch-up 후 신규 record push."""
+        await websocket.accept()
+        _ws_clients.add(websocket)
+        try:
+            for line in log_buffer.get_recent(50):
+                await websocket.send_json({"type": "log", "data": line})
+            while True:
+                await websocket.receive_text()  # 클라이언트 ping 수신 (keep-alive)
+        except WebSocketDisconnect:
+            _ws_clients.discard(websocket)
 
     return app

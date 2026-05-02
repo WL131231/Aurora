@@ -9,7 +9,7 @@
     - **Config**: ``GET /config``, ``POST /config``
     - **Positions**: ``GET /positions``
     - **제어**: ``POST /start``, ``POST /stop``
-    - **로그**: ``GET /logs`` (TODO)
+    - **로그**: ``GET /logs``
     - **WebSocket**: ``/ws/live`` (TODO — 실시간 차트/로그 push)
 
 CORS 정책:
@@ -29,7 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from aurora.config import settings
-from aurora.interfaces import config_store
+from aurora.interfaces import config_store, log_buffer
 
 # ============================================================
 # Pydantic 모델 (요청/응답 스키마)
@@ -197,8 +197,7 @@ def create_app() -> FastAPI:
     @app.get("/logs")
     async def get_logs(limit: int = 100) -> dict[str, Any]:
         """최근 로그 라인 조회 (단순 폴링용 — 실시간은 ``/ws/live``)."""
-        # TODO(정용우): 로그 핸들러(또는 ring buffer) 에서 최근 limit 줄 반환.
-        return {"lines": [], "limit": limit}
+        return {"lines": log_buffer.get_recent(limit), "limit": limit}
 
     # TODO(정용우): WebSocket /ws/live — 실시간 차트/로그 push (python-telegram-bot
     # / FastAPI websocket route 패턴). 로그 라인 + 새 신호 발생 시 broadcast.

@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from aurora.interfaces import api, config_store
+from aurora.interfaces import api, config_store, log_buffer
 from aurora.interfaces.api import create_app
 
 
@@ -22,6 +22,12 @@ from aurora.interfaces.api import create_app
 def _reset_bot_running() -> None:
     """모듈 레벨 ``_bot_running`` 플래그를 매 테스트 시작 전 False 로 초기화."""
     api._bot_running = False
+
+
+@pytest.fixture(autouse=True)
+def _reset_log_buffer() -> None:
+    """테스트 간 log buffer 격리 — 다른 테스트 파일의 잔여 로그 차단."""
+    log_buffer.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -184,6 +190,15 @@ def test_logs_custom_limit() -> None:
     r = _client().get("/logs?limit=50")
     assert r.status_code == 200
     assert r.json()["limit"] == 50
+
+
+def test_logs_returns_lines_with_limit() -> None:
+    r = _client().get("/logs?limit=50")
+    assert r.status_code == 200
+    body = r.json()
+    assert "lines" in body
+    assert body["limit"] == 50
+    assert isinstance(body["lines"], list)
 
 
 # ============================================================

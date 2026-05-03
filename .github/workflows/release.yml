@@ -66,7 +66,10 @@ jobs:
         run: |
           PY="${{ steps.setup.outputs.python-path }}"
           "$PY" -m pip install --upgrade pip
-          "$PY" -m pip install -r requirements.txt
+          # requirements-dev.txt = requirements.txt + pyinstaller / pytest / ruff
+          # (빌드는 PyInstaller 필요, generate_icon.py 는 Pillow 필요)
+          "$PY" -m pip install -r requirements-dev.txt
+          "$PY" -m pip install Pillow              # generate_icon.py 의 PIL (requirements-dev.txt 미포함, 빌드 한정)
           "$PY" -m pip install -e .
 
       # aiodns 는 Windows aiohttp DNS 충돌 (memory project_user_onboarding.md).

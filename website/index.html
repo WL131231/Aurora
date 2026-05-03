@@ -86,9 +86,8 @@
         </ul>
 
         <div class="flex items-center gap-4 text-[11px] tracking-[0.2em] text-zinc-400">
-            <!-- nav 우측 — 작은 Download 링크 (Hero CTA 와 별도, 진입 유도) -->
-            <a href="https://github.com/WL131231/Aurora/releases/latest"
-               target="_blank" rel="noopener noreferrer"
+            <!-- nav 우측 — 작은 Download 링크 (Hero CTA 영역으로 anchor 점프) -->
+            <a href="#download"
                class="nav-download-link hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-zinc-700 hover:border-purple-400 hover:text-white transition">
                 <span>↓</span>
                 <span>DOWNLOAD</span>
@@ -119,21 +118,36 @@
             </span>
         </p>
 
-        <!-- ===== Hero CTA — Download for Windows ===== -->
-        <!-- 부가 카드 위에 메인 CTA 버튼 (눈에 잘 띔). releases/latest 가 자동 latest -->
+        <!-- ===== Hero CTA — Direct download (OS auto-detect 권장) ===== -->
+        <!-- releases/latest/download/<file> 는 GitHub 직접 redirect → 클릭 즉시 다운로드 시작 -->
         <div id="download" class="mt-12 flex flex-col items-center gap-3">
-            <a href="https://github.com/WL131231/Aurora/releases/latest"
-               target="_blank" rel="noopener noreferrer"
-               class="hero-download-btn inline-flex items-center gap-3 px-8 py-4 rounded-xl text-sm tracking-[0.2em] font-medium">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="7 10 12 15 17 10"/>
-                    <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-                <span>DOWNLOAD FOR WINDOWS</span>
-            </a>
-            <p class="text-[11px] tracking-[0.2em] text-zinc-500">
-                v0.1.0 · Bybit Demo Trading 지원
+            <div class="flex flex-col sm:flex-row gap-3">
+                <!-- Windows 직접 다운로드 (Aurora-windows.exe) -->
+                <a href="https://github.com/WL131231/Aurora/releases/latest/download/Aurora-windows.exe"
+                   class="hero-download-btn inline-flex items-center gap-3 px-8 py-4 rounded-xl text-sm tracking-[0.2em] font-medium">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    <span>WINDOWS</span>
+                </a>
+                <!-- macOS 직접 다운로드 (Aurora-macOS.zip — .app 번들) -->
+                <a href="https://github.com/WL131231/Aurora/releases/latest/download/Aurora-macOS.zip"
+                   class="hero-download-btn inline-flex items-center gap-3 px-8 py-4 rounded-xl text-sm tracking-[0.2em] font-medium">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    <span>macOS</span>
+                </a>
+            </div>
+            <p class="text-[11px] tracking-[0.2em] text-zinc-500 mt-2">
+                v0.1.0 · Bybit Demo Trading · 클릭 즉시 다운로드
+            </p>
+            <p class="text-[10px] text-zinc-600">
+                first release 직후엔 latest 미존재 — releases 페이지 표시
             </p>
         </div>
 

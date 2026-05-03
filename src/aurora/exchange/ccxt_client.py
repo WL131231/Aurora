@@ -1,44 +1,162 @@
-"""ccxt 기반 통합 어댑터 — Bybit / OKX / Binance.
+"""ccxt 통합 어댑터 — Bybit Demo Trading 우선, 실거래·다른 거래소 확장 가능.
 
-ccxt가 거래소 차이를 흡수하므로 한 클래스로 멀티 거래소 지원.
+DESIGN.md §3.1 ~ §3.3 / §11 E-1 ~ E-14 정합:
+    - ccxt async 인스턴스 (httpx 기반)
+    - Bybit perpetual: ``defaultType='swap' + defaultSubType='linear'``
+    - clock skew: ``recvWindow=60000 + adjustForTimeDifference=True + load_time_difference()``
+    - Bybit Demo Trading: ``enableDemoTrading(True)`` (≠ testnet)
+    - paper 모드: place_order / set_leverage / cancel_all 가짜 응답 (fetch_* 는 실 호출 OK)
+    - tenacity retry: 5종 일시 장애만 재시도 (PR-2 #31 패턴 차용)
+    - timeframe 변환: ``aurora.backtest.tf.normalize_to_ccxt`` 단일 점
 
-담당: 팀원 B
+영역: ChoYoon (위임 받음 2026-05-03, 어댑터 PR 한정)
 """
 
 from __future__ import annotations
 
-from typing import Literal
+import logging
+import time
+from typing import Any, Literal
 
+import ccxt
+import ccxt.async_support as ccxt_async
 import pandas as pd
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
-from aurora.exchange.base import ExchangeClient, Order, Position
+from aurora.backtest.tf import normalize_to_ccxt
+from aurora.config import settings
+from aurora.exchange.base import Balance, Order, Position
+
+logger = logging.getLogger(__name__)
 
 
-class CcxtClient(ExchangeClient):
-    """ccxt 기반 거래소 어댑터.
+# tenacity retry — DESIGN.md §3.3 / E-12. PR-2 #31 _fetch_page 와 동일 정책.
+# 일시 네트워크/거래소 장애만 재시도. AuthError 등은 즉시 raise (재시도 무의미).
+_RETRY_TRANSIENT = retry(
+    retry=retry_if_exception_type((
+        ccxt.NetworkError,
+        ccxt.RequestTimeout,
+        ccxt.ExchangeNotAvailable,
+        ccxt.RateLimitExceeded,
+        ccxt.DDoSProtection,
+    )),
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=30),
+    reraise=True,
+)
+
+
+class CcxtClient:
+    """ccxt 기반 거래소 어댑터 — Bybit Demo Trading 우선.
+
+    호출자가 ``ExchangeClient`` Protocol 만 의존하도록 명시 상속 안 함
+    (structural typing). 본 클래스 메서드 시그니처가 Protocol 정합.
 
     Args:
-        exchange_id: "bybit" | "okx" | "binance"
-        api_key, api_secret: 거래소 API 키
-        passphrase: OKX 전용
-        testnet: 테스트넷 여부
+        exchange_id: 거래소 식별자 (``"bybit"`` / ``"okx"`` / ``"binance"``).
+        api_key: 거래소 API 키.
+        api_secret: 거래소 API 시크릿.
+        passphrase: OKX 전용 (다른 거래소는 빈 문자열).
+        demo: Demo Trading 모드 (Bybit 한정 — bybit.com Demo, **≠ testnet**).
+            기본 False (실거래 보호). 데모 진입 시 명시 ``demo=True``.
+
+    Lifecycle:
+        ccxt async 인스턴스는 내부 httpx 세션을 보유하므로 사용 종료 시
+        ``await client.close()`` 호출 필수 (asyncio 자원 누수 경고 방지).
+
+    Example:
+        >>> client = CcxtClient(
+        ...     exchange_id="bybit",
+        ...     api_key=settings.bybit_api_key,
+        ...     api_secret=settings.bybit_api_secret,
+        ...     demo=settings.bybit_demo,
+        ... )
+        >>> balance = await client.get_equity()
+        >>> await client.close()
     """
+
+    name: str
 
     def __init__(
         self,
-        exchange_id: Literal["bybit", "okx", "binance"],
-        api_key: str,
-        api_secret: str,
+        exchange_id: Literal["bybit", "okx", "binance"] = "bybit",
+        api_key: str = "",
+        api_secret: str = "",
         passphrase: str = "",
-        testnet: bool = False,
+        demo: bool = False,
     ) -> None:
         self.name = exchange_id
-        # TODO(B): ccxt.async_support 인스턴스 생성
-        # 거래소별 특이사항:
-        #   - Bybit: defaultType='swap' (USDT 무기한)
-        #   - OKX: passphrase 필수
-        #   - Binance: defaultType='future'
-        raise NotImplementedError
+        self._demo = demo
+
+        # ccxt 옵션 — DESIGN.md §3.1 검증된 조합 (2026-05-03)
+        options: dict[str, Any] = {
+            "defaultType": "swap",                  # Perpetual (vs spot)
+            "recvWindow": 60000,                    # Windows clock skew 허용 (60초)
+            "adjustForTimeDifference": True,        # 서버 시각 자동 보정
+        }
+        # Bybit perpetual = USDT-margined 명시 (USDC/inverse 분리, PR-2 #31 패턴)
+        if exchange_id == "bybit":
+            options["defaultSubType"] = "linear"
+
+        config: dict[str, Any] = {
+            "apiKey": api_key,
+            "secret": api_secret,
+            "enableRateLimit": True,                # ccxt 표준 — rate limit 자동 sleep
+            "options": options,
+        }
+        # OKX 만 passphrase 사용 (ccxt 가 ``password`` 키로 받음)
+        if exchange_id == "okx" and passphrase:
+            config["password"] = passphrase
+
+        # async ccxt 인스턴스 동적 생성
+        ex_class = getattr(ccxt_async, exchange_id)
+        self._ex = ex_class(config)
+
+        # Bybit Demo Trading 활성화 — DESIGN.md §3.1 / E-1
+        # (Demo URL = api-demo.{hostname}, ≠ testnet.bybit.com)
+        if demo and exchange_id == "bybit":
+            self._ex.enableDemoTrading(True)
+
+        # 시각 차이 보정은 첫 호출 시 lazy 적용 (constructor 는 sync)
+        self._initialized = False
+
+    async def _ensure_init(self) -> None:
+        """첫 호출 시 시각 차이 보정 (DESIGN.md §3.1).
+
+        lazy init 이유: constructor 가 sync 라 ``await load_time_difference()``
+        호출 불가. 첫 메서드 호출 시 1회 보정.
+        """
+        if not self._initialized:
+            await self._ex.load_time_difference()
+            self._initialized = True
+
+    async def close(self) -> None:
+        """ccxt async 인스턴스 정리 — httpx 세션 close.
+
+        호출 안 하면 asyncio 종료 시 ``Unclosed client session`` 경고.
+        BotInstance lifecycle 종료 시 (또는 main.py shutdown hook) 호출 필수.
+        """
+        await self._ex.close()
+
+    # ============================================================
+    # OHLCV — DESIGN.md §3.3 페이지네이션 정책 (PR-2 #31 차용)
+    # ============================================================
+
+    @_RETRY_TRANSIENT
+    async def _fetch_ohlcv_page(
+        self,
+        symbol: str,
+        ccxt_tf: str,
+        since_ms: int | None,
+        limit: int,
+    ) -> list[list[Any]]:
+        """단일 페이지 fetch (tenacity retry 적용)."""
+        return await self._ex.fetch_ohlcv(symbol, ccxt_tf, since=since_ms, limit=limit)
 
     async def fetch_ohlcv(
         self,
@@ -46,17 +164,120 @@ class CcxtClient(ExchangeClient):
         timeframe: str,
         limit: int = 500,
     ) -> pd.DataFrame:
-        """OHLCV 캔들 → DataFrame.
+        """최근 ``limit`` 봉 OHLCV 가져오기.
 
-        반환 컬럼: ['open', 'high', 'low', 'close', 'volume']
-        인덱스: pandas DatetimeIndex (UTC)
+        라이브 봇용 — ``since`` 미지정으로 최신 ``limit`` 봉만 한 번 호출.
+        과거 구간 백테스트 데이터 수집은 ``scripts/fetch_ohlcv.py`` 별도 스크립트
+        (페이지네이션 + parquet 저장).
+
+        Args:
+            symbol: ccxt 표준 (예: ``"BTC/USDT:USDT"`` for linear perpetual).
+            timeframe: Aurora 포맷 (예: ``"1H"``). ccxt 포맷으로 자동 변환.
+            limit: 봉 수 (기본 500, Bybit 최대 1000).
+
+        Returns:
+            DataFrame (DatetimeIndex UTC, columns=[open/high/low/close/volume]).
+            응답 비어있으면 빈 DataFrame.
         """
-        # TODO(B)
-        raise NotImplementedError
+        await self._ensure_init()
+        ccxt_tf = normalize_to_ccxt(timeframe)
+        page = await self._fetch_ohlcv_page(symbol, ccxt_tf, since_ms=None, limit=limit)
+        return self._page_to_df(page)
+
+    @staticmethod
+    def _page_to_df(page: list[list[Any]]) -> pd.DataFrame:
+        """ccxt OHLCV row list → Aurora 표준 DataFrame.
+
+        ccxt row: ``[ts_ms, open, high, low, close, volume]``.
+        반환 DataFrame: DatetimeIndex (UTC) + 5 컬럼 (timestamp_ms 컬럼 X).
+        """
+        if not page:
+            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+        df = pd.DataFrame(
+            page,
+            columns=["timestamp_ms", "open", "high", "low", "close", "volume"],
+        )
+        df.index = pd.to_datetime(df["timestamp_ms"], unit="ms", utc=True)
+        return df[["open", "high", "low", "close", "volume"]]
+
+    # ============================================================
+    # Position / Balance
+    # ============================================================
 
     async def fetch_position(self, symbol: str) -> Position | None:
-        # TODO(B)
-        raise NotImplementedError
+        """단일 페어 포지션 조회 — open contract 있으면 반환, 없으면 None.
+
+        paper 모드 = 항상 None (실 호출 X — DESIGN.md §3.2).
+        """
+        if settings.run_mode == "paper":
+            return None
+        await self._ensure_init()
+        positions = await self._ex.fetch_positions([symbol])
+        for raw in positions:
+            if (raw.get("contracts") or 0) > 0:
+                return self._parse_position(raw)
+        return None
+
+    async def get_positions(self) -> list[Position]:
+        """모든 페어 포지션 — 대시보드 / multi-pair 운영용.
+
+        contracts > 0 만 필터 (close 된 포지션 row 가 응답에 섞이는 케이스 방어).
+        paper 모드 = 빈 리스트.
+        """
+        if settings.run_mode == "paper":
+            return []
+        await self._ensure_init()
+        positions = await self._ex.fetch_positions()
+        return [
+            self._parse_position(raw)
+            for raw in positions
+            if (raw.get("contracts") or 0) > 0
+        ]
+
+    async def get_equity(self) -> Balance:
+        """계정 자본금 (USDT 단일 자산, Phase 1).
+
+        paper 모드도 실 fetch_balance 호출 (시드 검증 자유롭게 — DESIGN.md §3.2).
+        다중 자산은 Phase 3 확장.
+        """
+        await self._ensure_init()
+        balance = await self._ex.fetch_balance()
+        usdt = balance.get("USDT", {})
+        return Balance(
+            total_usd=float(usdt.get("total") or 0),
+            free_usd=float(usdt.get("free") or 0),
+            used_usd=float(usdt.get("used") or 0),
+        )
+
+    @staticmethod
+    def _parse_position(raw: dict[str, Any]) -> Position:
+        """ccxt position dict → Aurora Position dataclass.
+
+        ccxt 표준 필드 매핑 (None 안전 처리):
+            - side: "long" / "short"
+            - contracts: 수량 (float)
+            - entryPrice / leverage / unrealizedPnl
+            - marginMode: "isolated" / "cross"
+        """
+        side_raw = raw.get("side", "long")
+        side: Literal["long", "short"] = "short" if side_raw == "short" else "long"
+        margin_raw = raw.get("marginMode", "isolated")
+        margin_mode: Literal["isolated", "cross"] = (
+            "cross" if margin_raw == "cross" else "isolated"
+        )
+        return Position(
+            symbol=str(raw.get("symbol") or ""),
+            side=side,
+            qty=float(raw.get("contracts") or 0),
+            entry_price=float(raw.get("entryPrice") or 0),
+            leverage=int(raw.get("leverage") or 1),
+            unrealized_pnl=float(raw.get("unrealizedPnl") or 0),
+            margin_mode=margin_mode,
+        )
+
+    # ============================================================
+    # Order / Leverage / Cancel
+    # ============================================================
 
     async def place_order(
         self,
@@ -66,13 +287,68 @@ class CcxtClient(ExchangeClient):
         price: float | None = None,
         reduce_only: bool = False,
     ) -> Order:
-        # TODO(B): paper 모드에서는 실제 호출 없이 가짜 Order 반환
-        raise NotImplementedError
+        """주문 전송 — ``price=None`` 이면 시장가, 아니면 지정가.
+
+        paper 모드 = 가짜 Order 반환 (실 호출 X). DESIGN.md §3.2 / E-3.
+        """
+        if settings.run_mode == "paper":
+            return self._fake_order(symbol, side, qty, price)
+        await self._ensure_init()
+        order_type = "market" if price is None else "limit"
+        params: dict[str, Any] = {"reduceOnly": True} if reduce_only else {}
+        raw = await self._ex.create_order(symbol, order_type, side, qty, price, params)
+        return self._parse_order(raw, symbol, side, qty, price)
 
     async def set_leverage(self, symbol: str, leverage: int) -> None:
-        # TODO(B)
-        raise NotImplementedError
+        """레버리지 설정 — paper 모드는 noop (로깅만)."""
+        if settings.run_mode == "paper":
+            logger.info("paper mode: set_leverage(%s, %d) skipped", symbol, leverage)
+            return
+        await self._ensure_init()
+        # ccxt 시그니처: set_leverage(leverage, symbol) — 인자 순서 반대 주의
+        await self._ex.set_leverage(leverage, symbol)
 
     async def cancel_all(self, symbol: str) -> None:
-        # TODO(B)
-        raise NotImplementedError
+        """전체 주문 취소 (해당 페어). paper 모드는 noop."""
+        if settings.run_mode == "paper":
+            return
+        await self._ensure_init()
+        await self._ex.cancel_all_orders(symbol)
+
+    @staticmethod
+    def _parse_order(
+        raw: dict[str, Any],
+        symbol: str,
+        side: Literal["buy", "sell"],
+        qty: float,
+        price: float | None,
+    ) -> Order:
+        """ccxt order dict → Aurora Order dataclass."""
+        return Order(
+            order_id=str(raw.get("id") or ""),
+            symbol=str(raw.get("symbol") or symbol),
+            side=side,
+            qty=float(raw.get("amount") or qty),
+            price=float(raw["price"]) if raw.get("price") is not None else price,
+            status=str(raw.get("status") or ""),
+            timestamp_ms=int(raw.get("timestamp") or 0),
+        )
+
+    @staticmethod
+    def _fake_order(
+        symbol: str,
+        side: Literal["buy", "sell"],
+        qty: float,
+        price: float | None,
+    ) -> Order:
+        """paper 모드용 가짜 Order — 거래소 호출 없이 즉시 'filled' 응답."""
+        ts_ms = int(time.time() * 1000)
+        return Order(
+            order_id=f"paper-{ts_ms}",
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            price=price,
+            status="filled",
+            timestamp_ms=ts_ms,
+        )

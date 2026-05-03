@@ -1,0 +1,411 @@
+"""engine.py 단위 테스트 — 22 함수 / 23 collected (DESIGN.md §6.2 + §11 D-1~D-26 정합).
+
+mock 0 — 결정론적 합성 입력만 사용. 외부 네트워크 X.
+
+BacktestConfig + Position dataclass + BacktestEngine ``__init__`` / ``step()`` /
+``run()`` + 헬퍼 9 개 (``_to_record_direction`` / ``_open`` / ``_close`` /
+``_partial_close`` / ``_check_exits`` / ``_update_peak`` / ``_check_max_dd`` /
+``_tick_pause`` / ``_force_close_at_end``) 단위 회귀. 0 거래 / sl_distance=0 /
+clamp / 가드 분기 모두 caplog 또는 직접 assertion 으로 검증.
+
+sanity 22 inline (단계 1·2·3) → 정식 pytest 변환. DESIGN §8 본문 매핑.
+
+담당: ChoYoon
+"""
+
+from __future__ import annotations
+
+import logging
+
+import pandas as pd
+import pytest
+
+from aurora.backtest.engine import BacktestConfig, BacktestEngine
+from aurora.core.risk import (
+    PositionSize,
+    RiskPlan,
+    TpSlConfig,
+    TpSlMode,
+    TrailingMode,
+    build_risk_plan,
+)
+from aurora.core.strategy import StrategyConfig
+
+# ============================================================
+# 헬퍼 — fast 인스턴스 생성 (test_stats.py / test_replay.py 패턴 정합)
+# ============================================================
+
+
+def _make_synthetic_1m_df(
+    start_ms: int = 1_700_000_000_000, n: int = 5, price: float = 100.0,
+) -> pd.DataFrame:
+    """평탄 OHLCV 1m DataFrame — 신호 비유발 (EMA 터치 X 보장).
+
+    DatetimeIndex (ms epoch 기반) — ``BacktestEngine.run()`` 입력 정합.
+    """
+    idx = pd.DatetimeIndex(
+        [pd.Timestamp(start_ms + i * 60_000, unit="ms") for i in range(n)],
+    )
+    return pd.DataFrame(
+        {"open": price, "high": price, "low": price, "close": price, "volume": 1.0},
+        index=idx,
+    )
+
+
+def _open_long(
+    engine: BacktestEngine, entry: float = 100.0,
+    ts_ms: int = 1_700_000_000_000,
+) -> None:
+    """LONG 포지션 진입 헬퍼 — ``build_risk_plan`` + ``_open``."""
+    plan = build_risk_plan(
+        entry_price=entry, direction="long", leverage=engine.config.leverage,
+        equity_usd=engine.balance, config=engine._risk_config,
+        risk_pct=engine.config.risk_pct,
+    )
+    engine._open(plan=plan, ts_ms=ts_ms)
+
+
+def _open_short(
+    engine: BacktestEngine, entry: float = 100.0,
+    ts_ms: int = 1_700_000_000_000,
+) -> None:
+    """SHORT 포지션 진입 헬퍼 — clamp 활성 케이스 (raw_pct < -1) 검증용."""
+    plan = build_risk_plan(
+        entry_price=entry, direction="short", leverage=engine.config.leverage,
+        equity_usd=engine.balance, config=engine._risk_config,
+        risk_pct=engine.config.risk_pct,
+    )
+    engine._open(plan=plan, ts_ms=ts_ms)
+
+
+def _open_with_zero_sl(
+    engine: BacktestEngine, entry: float = 100.0,
+    ts_ms: int = 1_700_000_000_000,
+) -> None:
+    """``sl_price = entry_price`` 인 ``RiskPlan`` 직접 박음 — sl_distance=0 fallback 검증.
+
+    ``build_risk_plan`` 경유 X — ``calc_position_size`` 가 ``sl_distance_pct=0``
+    검증에서 ``ValueError`` 발생. RiskPlan 직접 구성으로 우회.
+    """
+    plan = RiskPlan(
+        entry_price=entry, direction="long", leverage=10,
+        position=PositionSize(
+            notional_usd=40_000.0, margin_usd=4_000.0, coin_amount=400.0,
+        ),
+        tp_prices=[entry * 1.01, entry * 1.02, entry * 1.03, entry * 1.04],
+        sl_price=entry,                                # sl_distance=0 인위 트리거
+        trailing_mode=TrailingMode.OFF,
+    )
+    engine._open(plan=plan, ts_ms=ts_ms)
+
+
+# ============================================================
+# Group A — dataclass + __init__ (3)
+# ============================================================
+
+
+def test_backtest_config_defaults() -> None:
+    """``BacktestConfig`` 디폴트 — D-8 사용자 노출 + replay 차용 가드 임계값 정합."""
+    cfg = BacktestConfig()
+    assert cfg.symbol == "BTCUSDT"
+    assert cfg.timeframes == ["1H", "2H", "4H", "1D", "1W"]
+    assert cfg.initial_capital == 10_000.0
+    assert cfg.leverage == 10
+    assert cfg.risk_pct == 0.01
+    assert cfg.max_dd_stop_pct == 0.15
+    assert cfg.consec_sl_pause_threshold == 2
+    assert cfg.consec_sl_pause_minutes == 1440
+    assert cfg.risk_config is None
+    assert cfg.strategy_config is None
+
+
+def test_engine_init_auto_risk_config_leverage_10() -> None:
+    """``__init__`` 자동 산출 — leverage=10 → sl=2.0, tps=[2.8, 3.13.., 3.46.., 3.8] (D-3)."""
+    engine = BacktestEngine(BacktestConfig(leverage=10))
+    cfg = engine._risk_config
+    assert cfg.mode == TpSlMode.FIXED_PCT
+    assert cfg.fixed_sl_pct == pytest.approx(2.0)
+    expected_tps = [2.8, 2.8 + 1.0 / 3.0, 2.8 + 2.0 / 3.0, 3.8]
+    assert cfg.fixed_tp_pcts == pytest.approx(expected_tps)
+
+
+def test_engine_init_explicit_risk_config_passthrough_no_mutate() -> None:
+    """명시 ``risk_config`` → ``self._risk_config`` 동일 인스턴스 + config 보존 (Q2 불변성)."""
+    explicit = TpSlConfig(mode=TpSlMode.MANUAL, manual_sl_pct=1.5)
+    cfg = BacktestConfig(risk_config=explicit)
+    engine = BacktestEngine(cfg)
+    assert engine._risk_config is explicit                  # id 정합
+    assert cfg.risk_config is explicit                      # 외부 인스턴스 mutate X
+
+
+# ============================================================
+# Group B — 헬퍼 단위 (8)
+# ============================================================
+
+
+def test_to_record_direction_normalization() -> None:
+    """direction 격리 — 'long'/'LONG'/'Long' → 'LONG' (D-19 cost.Direction Literal)."""
+    engine = BacktestEngine(BacktestConfig())
+    assert engine._to_record_direction("long") == "LONG"
+    assert engine._to_record_direction("LONG") == "LONG"
+    assert engine._to_record_direction("Long") == "LONG"
+    assert engine._to_record_direction("short") == "SHORT"
+    assert engine._to_record_direction("SHORT") == "SHORT"
+    assert engine._to_record_direction("sHoRt") == "SHORT"
+
+
+def test_to_record_direction_invalid_raises() -> None:
+    """direction 불정 입력 → ``ValueError`` + 한국어 메시지."""
+    engine = BacktestEngine(BacktestConfig())
+    with pytest.raises(ValueError, match="잘못된 direction"):
+        engine._to_record_direction("buy")
+    with pytest.raises(ValueError, match="잘못된 direction"):
+        engine._to_record_direction("")
+
+
+def test_open_guards_double_position() -> None:
+    """이미 보유 중 ``_open`` → ``RuntimeError`` (D-20 페어당 1 포지션 정책)."""
+    engine = BacktestEngine(BacktestConfig())
+    _open_long(engine, entry=100.0, ts_ms=1_700_000_000_000)
+    plan2 = build_risk_plan(
+        entry_price=101.0, direction="long", leverage=10,
+        equity_usd=engine.balance, config=engine._risk_config, risk_pct=0.01,
+    )
+    with pytest.raises(RuntimeError, match="이미 보유 포지션"):
+        engine._open(plan=plan2, ts_ms=1_700_000_001_000)
+
+
+def test_close_tp4_resets_consec_sl() -> None:
+    """``_close(reason='TP4')`` → ``consec_sl`` reset (D-2 익절 카테고리)."""
+    engine = BacktestEngine(BacktestConfig())
+    engine.consec_sl = 1
+    _open_long(engine, entry=100.0)
+    engine._last_high = 104.0
+    engine._last_low = 100.0
+    engine._last_close = 104.0
+    trade = engine._close(fill=104.0, ts_ms=1_700_000_010_000, reason="TP4")
+    assert engine.consec_sl == 0
+    assert engine.position is None
+    assert trade.direction == "LONG"
+    assert engine.trades == [trade]
+
+
+def test_close_sl_pause_triggered_at_threshold() -> None:
+    """``_close(reason='SL')`` consec_sl threshold 도달 → ``pause_bars`` 발동 (D-2)."""
+    cfg = BacktestConfig(consec_sl_pause_threshold=2, consec_sl_pause_minutes=1440)
+    engine = BacktestEngine(cfg)
+    engine.consec_sl = 1                                    # threshold-1
+    _open_long(engine, entry=100.0)
+    engine._last_high = 100.0
+    engine._last_low = 98.0
+    engine._last_close = 98.0
+    engine._close(fill=98.0, ts_ms=1_700_000_010_000, reason="SL")
+    assert engine.pause_bars == 1440
+    assert engine.consec_sl == 0
+
+
+def test_close_reverse_keeps_consec_sl_count() -> None:
+    """``_close(reason='REVERSE')`` → ``consec_sl`` 유지 (D-2 봇 능동 카테고리)."""
+    engine = BacktestEngine(BacktestConfig())
+    engine.consec_sl = 1
+    _open_long(engine, entry=100.0)
+    engine._last_high = 100.0
+    engine._last_low = 99.0
+    engine._last_close = 99.0
+    engine._close(fill=99.0, ts_ms=1_700_000_010_000, reason="REVERSE")
+    assert engine.consec_sl == 1                            # 유지 (D-2)
+
+
+def test_partial_close_idx_out_of_range_raises() -> None:
+    """``_partial_close(idx >= 3)`` → ``ValueError`` (TP4 = ``_close`` 책임, D-21)."""
+    engine = BacktestEngine(BacktestConfig())
+    _open_long(engine, entry=100.0)
+    engine._last_high = 103.0
+    engine._last_low = 100.0
+    engine._last_close = 103.0
+    with pytest.raises(ValueError, match=r"TP4 \(idx=3\)"):
+        engine._partial_close(idx=3, fill=103.0, ts_ms=1_700_000_010_000)
+
+
+def test_check_exits_long_gap_fill_unfavorable_sl() -> None:
+    """LONG gap-fill — open(<SL) 통과 시 fill = min(open, SL_price) (replay L443-445)."""
+    engine = BacktestEngine(BacktestConfig())
+    _open_long(engine, entry=100.0)
+    sl_price = engine.position.plan.sl_price                # ≈ 98 (sl 2%)
+    # 1m bar: open 이 SL 아래로 통과 + low 더 하락 (gap-fill 시나리오)
+    open_ = sl_price - 1.0
+    low = sl_price - 3.0
+    high = sl_price - 0.5
+    close = sl_price - 1.0
+    engine._last_high = high
+    engine._last_low = low
+    engine._last_close = close
+    trade = engine._check_exits(
+        ts_ms=1_700_000_010_000, open_=open_, high=high, low=low, close=close,
+    )
+    assert trade is not None
+    # gap-fill 적용 → exit_price 가 SL 보다 명확히 아래 (open 부근 + slip)
+    assert trade.exit_price < sl_price - 0.5
+    assert engine.position is None
+
+
+# ============================================================
+# Group C — 가드 + step() (6)
+# ============================================================
+
+
+def test_step_no_closed_tf_early_return() -> None:
+    """5 분 1m df → 1H 닫힘 X → balance 불변 + position None (DESIGN §6.2 step 5)."""
+    engine = BacktestEngine(BacktestConfig())
+    df = _make_synthetic_1m_df(n=5)
+    trades = engine.run(df)
+    assert engine.balance == 10_000.0
+    assert engine.position is None
+    assert trades == []
+
+
+def test_step_pause_guard_skips_entry() -> None:
+    """``pause_bars > 0`` → 진입 skip + ``_tick_pause`` 자연 감소 (1m unit)."""
+    engine = BacktestEngine(BacktestConfig())
+    engine.pause_bars = 100
+    df = _make_synthetic_1m_df(n=10)
+    engine.run(df)
+    assert engine.position is None
+    assert engine.balance == 10_000.0
+    assert engine.pause_bars == 90                          # 10 회 _tick_pause
+
+
+def test_step_stopped_guard_skips_entry() -> None:
+    """``stopped=True`` → 진입 skip (영구 정지 가드, _check_max_dd 동기)."""
+    engine = BacktestEngine(BacktestConfig())
+    engine.stopped = True
+    df = _make_synthetic_1m_df(n=10)
+    engine.run(df)
+    assert engine.position is None
+    assert engine.balance == 10_000.0
+
+
+def test_step_atr_mode_no_4h_closed_skips_entry() -> None:
+    """ATR 모드 + 4H 미닫힘 → 진입 skip (D-4 정합, ``build_risk_plan(atr=None)`` 호출 X)."""
+    atr_cfg = TpSlConfig(mode=TpSlMode.ATR, atr_sl_multiplier=1.5)
+    cfg = BacktestConfig(risk_config=atr_cfg)
+    engine = BacktestEngine(cfg)
+    df = _make_synthetic_1m_df(n=10)                        # 1H / 4H 모두 미닫힘
+    engine.run(df)
+    assert engine.position is None
+    assert engine._risk_config.mode == TpSlMode.ATR
+
+
+def test_check_max_dd_permanent_stop_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """시드 -15% 도달 → ``stopped=True`` + WARNING 1 회 (중복 호출 시 추가 X)."""
+    engine = BacktestEngine(
+        BacktestConfig(initial_capital=10_000.0, max_dd_stop_pct=0.15),
+    )
+    engine.balance = 8_500.0                                # 시드 -15% 정확히
+    caplog.set_level(logging.WARNING, logger="aurora.backtest.engine")
+    assert engine._check_max_dd() is True
+    assert engine.stopped is True
+    assert len(caplog.records) == 1
+    assert "MDD" in caplog.records[0].message
+    # 두 번째 호출 → 추가 로그 X (가드: not self.stopped)
+    engine._check_max_dd()
+    assert len(caplog.records) == 1
+
+
+def test_tick_pause_decrements_above_zero() -> None:
+    """``pause_bars`` 0 에서 정지 (음수 X). 매 1m 호출 docstring contract 정합."""
+    engine = BacktestEngine(BacktestConfig())
+    engine.pause_bars = 2
+    engine._tick_pause()
+    assert engine.pause_bars == 1
+    engine._tick_pause()
+    assert engine.pause_bars == 0
+    engine._tick_pause()                                    # 0 에서 추가 호출
+    assert engine.pause_bars == 0                           # 음수 X
+
+
+# ============================================================
+# Group D — run() 통합 (2)
+# ============================================================
+
+
+def test_run_empty_dataframe_returns_empty_trades() -> None:
+    """0 봉 df → ``trades=[]`` + balance 불변 + force_close skip (last_ts=0 가드)."""
+    engine = BacktestEngine(BacktestConfig())
+    empty = pd.DataFrame(
+        columns=["open", "high", "low", "close", "volume"],
+        index=pd.DatetimeIndex([]),
+    )
+    trades = engine.run(empty)
+    assert trades == []
+    assert engine.balance == 10_000.0
+    assert engine.position is None
+
+
+def test_run_force_close_at_end_keeps_consec_sl() -> None:
+    """마지막 봉 보유 → FORCE_END trade + ``consec_sl`` 유지 (D-2 봇 능동, D-25)."""
+    engine = BacktestEngine(BacktestConfig())
+    engine.consec_sl = 2                                    # 임의 카운트
+    _open_long(engine, entry=100.0, ts_ms=1_699_999_999_000)
+    df = _make_synthetic_1m_df(n=5)
+    engine.run(df)
+    assert engine.position is None
+    assert len(engine.trades) == 1
+    assert engine.consec_sl == 2                            # 유지 (D-2)
+
+
+# ============================================================
+# Group E — edge / regression (3 함수, 4 collected)
+# ============================================================
+
+
+def test_close_sl_distance_zero_warns_caplog(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """``sl_distance=0`` RiskPlan → ``r_multiple=0.0`` fallback + WARNING 1 회."""
+    engine = BacktestEngine(BacktestConfig())
+    _open_with_zero_sl(engine, entry=100.0)
+    engine._last_high = 100.0
+    engine._last_low = 100.0
+    engine._last_close = 100.0
+    caplog.set_level(logging.WARNING, logger="aurora.backtest.engine")
+    trade = engine._close(fill=100.0, ts_ms=1_700_000_010_000, reason="SL")
+    assert trade.r_multiple == 0.0
+    assert any("sl_distance=0" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.parametrize(
+    ("raw_pct", "expected_pnl_lo", "expected_pnl_hi"),
+    [
+        (-0.90, -3.62, -3.58),                              # baseline [12] clamp 미발동
+        (-1.50, -4.001, -3.999),                            # baseline [13] clamp 발동 (-4.0)
+    ],
+)
+def test_close_clamp_at_extreme_drop(
+    raw_pct: float, expected_pnl_lo: float, expected_pnl_hi: float,
+) -> None:
+    """clamp 한도 = ``-size_pct × leverage``. ``|raw_pct| ≥ 1.0`` 일 때만 발동.
+
+    SHORT 사용 — LONG 은 raw_pct<-1 시 fill 음수 필요 (가격 무효). SHORT 면
+    fill > entry × 2 로 자연 양수 (entry=100, raw=-1.5 → fill=250).
+    """
+    engine = BacktestEngine(BacktestConfig(leverage=10))
+    _open_short(engine, entry=100.0)
+    # SHORT: raw_pnl_pct = (entry - exit)/entry. raw_pct<0 → exit > entry.
+    fill = 100.0 * (1.0 - raw_pct)
+    engine._last_high = fill
+    engine._last_low = 100.0
+    engine._last_close = fill
+    trade = engine._close(fill=fill, ts_ms=1_700_000_010_000, reason="SL")
+    assert expected_pnl_lo <= trade.pnl <= expected_pnl_hi
+
+
+def test_engine_init_explicit_strategy_config_passthrough() -> None:
+    """명시 ``strategy_config`` → ``self._strategy_config`` 동일 인스턴스 + config 보존."""
+    custom = StrategyConfig(use_bollinger=True, ema_periods=(50, 100))
+    cfg = BacktestConfig(strategy_config=custom)
+    engine = BacktestEngine(cfg)
+    assert engine._strategy_config is custom
+    assert cfg.strategy_config is custom

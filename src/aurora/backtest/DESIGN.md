@@ -680,19 +680,61 @@ raise ValueError(
 
 ---
 
-## 8. 테스트 케이스 spec (TBD)
+## 8. 테스트 케이스 spec — `tests/test_engine.py` (Group 3, 2026-05-03)
 
-PR-1 테스트(13개) + PR-2 테스트(18개)와 같은 mock 기반 결정론적 검증. 외부 네트워크 X.
+PR-1 13 개 / PR-2 18 개 / Stage 1A 14 개 / Stage 1B 32 개 (cost 16 + stats 16) 패턴 정합. mock 0 / 합성 OHLCV / 결정론적 / 외부 네트워크 X.
 
-**예상 테스트 그룹** (예정):
-- BacktestEngine.run() 기본 흐름
-- 수수료/슬리피지 적용 정확성
-- 진입·청산 정확성 (TP/SL/추매)
-- 통계 집계 정확성 (승률, MDD, Sharpe, equity curve)
-- 엣지 (빈 데이터, 단일 봉, 너무 짧은 기간)
-- 차용 코드 발췌 부분 회귀 보호
+**총 22 함수 / 23 collected** (E2 parametrize 2 분기). pytest baseline 385 → 408.
 
-상세는 발췌 진행하며 보강.
+### 8.1 케이스 그룹 (5)
+
+| 그룹 | 케이스 수 | 책임 |
+|---|---:|---|
+| A. dataclass + `__init__` | 3 | `BacktestConfig` 디폴트 / `risk_config` 자동 산출 / 명시 입력 불변성 (Q2) |
+| B. 헬퍼 단위 | 8 | direction 격리 / `_open` 가드 / `_close` reason 분기 / `_partial_close` 분기 / `_check_exits` gap-fill |
+| C. 가드 + `step()` | 6 | early return / pause / stopped / ATR 4H 가드 / MDD 영구 정지 / `_tick_pause` 단방향 |
+| D. `run()` 통합 | 2 | 0 봉 / FORCE_END |
+| E. edge / regression | 3 (4 collected) | sl_distance=0 / clamp parametrize / `strategy_config` 명시 |
+| **합계** | **22 (23 collected)** | — |
+
+### 8.2 결정 (D-N) ↔ 케이스 매핑
+
+| 결정 | 케이스 | 비고 |
+|---|---|---|
+| D-1 (min_seed_pct=0.40) | 간접 (B 그룹 — _open / _close margin/equity 16% 증폭 시나리오) | 본질 통합 검증은 후속 통합 PR |
+| D-2 (consec_sl 카운트 분기) | B4 (TP4 reset) / B5 (SL pause 발동) / B6 (REVERSE 유지) / D2 (FORCE_END 유지) | 7 reason 매핑 표 핵심 4 분기 검증 |
+| D-3 (등간격 분할) | A2 (auto risk_config tps=[2.8, 3.13.., 3.46.., 3.8]) | leverage=10 산식 정합 |
+| D-4 (ATR 4H 디폴트 + 가드) | C4 (ATR 모드 + 4H 미닫힘 → 진입 skip) | `build_risk_plan(atr=None)` ValueError 회피 가드 |
+| D-8 (risk_pct config 노출) | A1 (default 0.01) / E3 (custom strategy_config 보존) | — |
+| D-19 (direction 이중 표준 격리) | B1 (정상화) / B2 (불정 raise) | RecordDir Literal 정합 |
+| D-20 (페어당 1 포지션) | B3 (double _open RuntimeError) | — |
+| D-21 (tp_hits counter) | B7 (idx >= 3 reject) | TP4 = `_close` 책임 분리 |
+| D-22 (aggregator 신규 생성) | C1 (run 별 독립, 간접) | 멀티 호출 검증은 후속 통합 PR |
+| D-23 (equity_curve 사후 재계산) | 영역 외 (test_stats 커버) | — |
+| D-24 (REVERSE compose_exit) | B6 (단위) | step() 통합은 Stage 1D ETHUSDT sanity 또는 후속 PR (Q1) |
+| D-25 (reason 매핑 7 개) | B4 / B5 / B6 / D2 / E1 | TP4 / SL / REVERSE / FORCE_END / sl_distance=0 fallback |
+| D-26 (ts_ms 변환) | C1 / D2 (run loop 자연 검증) | `bar.name.value // 10**6` |
+
+### 8.3 sanity → pytest 변환 매핑 (단계 1·2·3 inline 22 → 정식 22)
+
+| sanity # | 정식 케이스 | 비고 |
+|---|---|---|
+| [1]-[11] (단계 1·2 _check_exits / _close 분기) | B4 / B5 / B7 / B8 통합 | 분기별 합본 |
+| [12] [13] clamp | E2 (parametrize 2) | SHORT 사용 (LONG 은 raw<-1 시 fill 음수 무효) |
+| [14] step early return | C1 | 동일 |
+| [15] _open size_pct | A2 (간접) + B3 (double 가드) | 분할 |
+| [16] REVERSE | B6 + signal/test_signal compose_exit | step() 통합은 후속 |
+| [17] [18] pause / stopped 가드 | C2 / C3 | 동일 |
+| [19] risk_config 자동 | A2 + A3 | 분할 (자동 산출 truth + 불변성 검증) |
+| [20] FORCE_END | D2 | 동일 |
+| [21] [22] ATR 모드 분기 | C4 | 합본 |
+
+### 8.4 커버리지 갭 (인지된 후속)
+
+- **REVERSE step() 통합** (Q1) — synthetic OHLCV + `ema_periods=(2,3)` 튜닝으로 EMA touch 반대 방향 신호 유발. step() REVERSE 분기 line coverage 는 Stage 1D ETHUSDT sanity 또는 후속 PR 자연 보강. B6 `_close(REVERSE)` 단위 + `test_signal.compose_exit` 기존 케이스로 의미 보존.
+- **멀티 trade end-to-end** (100~200 봉, 신호 발동) — 후속 통합 시나리오 PR. Group 3 범위는 단위 회귀 보호.
+- **regime breakdown** — D-5 (regime 분류 정책 PR-3 범위 외) 정합. `TradeRecord.regime` 필드는 박혀 있고 후속 PR 채움 자연.
+- **min_seed_pct=0.40 16% 증폭 시나리오** (D-1) — `risk_pct=0.01` 호출이 `min_seed_pct` 발동 시 실 손실 노출 16% 검증은 통합 시나리오 PR 자연 영역.
 
 ---
 
@@ -857,4 +899,5 @@ PR-3 description 본문에 박을 Decisions 항목 미리보기. 본 design doc 
 - 2026-05-02 (밤 갱신 #3): Aurora `core/risk.py` 정독 완료. §3.3 옵션 a 결정 검증 — 더 강해짐. **발견**: Aurora `calc_position_size`가 이미 R 기반 + 풀시드 + 최소 시드 강제(40%) 통합. 장수 명시한 두 모델 차이는 한 함수의 두 모드. Aurora 모델이 차용 코드보다 정교 → 차용 X 부분 추가 (SL/TP 그래디언트, 트레일링 5모드 등). 차용은 통계·시뮬 루프·수수료 모델만.
 - 2026-05-03 (오후): §3.1.1 시그니처 truth / §3.3.1 옵션 a 검증 + 신호↔리스크 독립 / §4 정독 확정 + ROI 17.3% / §5 모듈 spec + atr_wilder 위임 / §6 신설 (engine.step() 10단계) / 절번호 시프트 / §3.2 Bybit→Binance 정정.
 - 2026-05-03 (저녁, Stage 1C 단계 3): §6.2 8 단계 정정 (`strategy.evaluate` 통합 함수 부재 → `detect_ema_touch + detect_rsi_divergence + evaluate_selectable` 3 함수 합본 명시) / §9 BotInstance ↔ BacktestEngine 책임 경계 환기 추가 / §11 D-24 본문화 (REVERSE 분기 = `compose_exit` 활용).
-- 다음 보강 예정: §8 BacktestEngine 테스트 케이스 spec (시프트 후), §10 review 발송 준비 (시프트 후), §11 PR description Decisions 미리보기 (D-1~D-8 + D-4 보강), 동기화 매트릭스 별도 파일 신설.
+- 2026-05-03 (밤, Stage 1C Group 3): §8 본문화 — `tests/test_engine.py` 22 함수 / 23 collected (5 그룹 A~E + D-N 매핑 + sanity → pytest 변환 + 커버리지 갭). pytest baseline 385 → 408.
+- 다음 보강 예정: §10 review 발송 준비 (시프트 후), §11 PR description Decisions 미리보기 (D-1~D-8 + D-4 보강), 동기화 매트릭스 별도 파일 신설.

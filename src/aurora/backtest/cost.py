@@ -12,6 +12,7 @@ slip/cost helper 함수를 한곳에 모음. 수치는 ``replay_engine.py`` (Bin
 
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 # ============================================================
@@ -23,6 +24,10 @@ TAKER_FEE_PCT      = 0.0004    # taker (시장가 체결 즉시)
 SLIP_NORMAL_PCT    = 0.0002    # 평상시 슬리피지 (변동성 봉 아닐 때)
 SLIP_VOLATILE_PCT  = 0.0005    # 변동성 봉 슬리피지 (시장가 lookahead 위험 차단)
 VOLATILE_THRESHOLD = 0.005     # (high - low) / close > 0.5% 면 변동성 봉 판정
+
+
+# 모듈 logger — 비정상 봉 등 비치명 경고용 (D-11 caveat)
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -52,9 +57,14 @@ def slip_pct(candle_high: float, candle_low: float, candle_close: float) -> floa
 
     Returns:
         슬리피지 비율 (``SLIP_NORMAL_PCT`` 또는 ``SLIP_VOLATILE_PCT``).
+        비정상 봉 (close ≤ 0) 시 WARNING 로그 발생 후 NORMAL slip fallback.
     """
     # close 비정상 봉은 변동성 판정 스킵 → 평상 슬립 (replay_engine 패턴)
     if candle_close <= 0:
+        logger.warning(
+            "close 비정상 봉 발견 (close=%s) — NORMAL slip fallback",
+            candle_close,
+        )
         return SLIP_NORMAL_PCT
     rng = (candle_high - candle_low) / candle_close
     if rng > VOLATILE_THRESHOLD:
@@ -84,7 +94,10 @@ def apply_slippage(
 
     Returns:
         슬리피지 적용된 실제 체결가.
+        잘못된 direction/side 시 AssertionError (Python -O 모드 시 자동 제거).
     """
+    assert direction in ("LONG", "SHORT"), f"잘못된 direction: {direction!r}"
+    assert side in ("entry", "exit"), f"잘못된 side: {side!r}"
     # Why: LONG entry 와 SHORT exit 는 가격 상승이 불리 (사거나 환매하므로 비싸게)
     unfavorable_up = (direction == "LONG" and side == "entry") or \
                      (direction == "SHORT" and side == "exit")

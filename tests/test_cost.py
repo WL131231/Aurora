@@ -7,6 +7,8 @@ mock 0 — 결정론적 합성 입력만 사용. 외부 네트워크 X.
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from aurora.backtest.cost import (
@@ -47,14 +49,26 @@ def test_slip_pct_boundary_strict_gt():
     assert slip_pct(100.25, 99.75, 100.0) == SLIP_NORMAL_PCT
 
 
-def test_slip_pct_close_zero_fallback():
-    """close == 0 비정상 봉 — 보수적 NORMAL fallback (replay_engine L536 패턴)."""
+def test_slip_pct_close_zero_fallback(caplog):
+    """close == 0 비정상 봉 — 보수적 NORMAL fallback + WARNING 로그 발생.
+
+    D-11 caveat 회귀 보호: silent fallback 가시성 확보 (replay_engine L536 패턴 + 로그).
+    """
+    caplog.set_level(logging.WARNING, logger="aurora.backtest.cost")
     assert slip_pct(100.0, 99.0, 0.0) == SLIP_NORMAL_PCT
+    assert len(caplog.records) == 1
+    assert "close 비정상" in caplog.records[0].message
 
 
-def test_slip_pct_close_negative_fallback():
-    """close < 0 (방어) — ``<= 0`` 가드 자연 통과해 NORMAL fallback."""
+def test_slip_pct_close_negative_fallback(caplog):
+    """close < 0 (방어) — ``<= 0`` 가드 자연 통과해 NORMAL fallback + WARNING 로그.
+
+    D-11 caveat 회귀 보호: 음수 close 도 가시성 확보.
+    """
+    caplog.set_level(logging.WARNING, logger="aurora.backtest.cost")
     assert slip_pct(100.0, 99.0, -1.0) == SLIP_NORMAL_PCT
+    assert len(caplog.records) == 1
+    assert "close 비정상" in caplog.records[0].message
 
 
 # ============================================================

@@ -92,6 +92,11 @@ class ConfigDTO(BaseModel):
     # 멀티 TF 셋 — 전략 평가용. EMA 480 안정 warmup + RSI Div 1H 고정 정합
     timeframes: list[str] = ["15m", "1H", "4H"]
 
+    # ===== 팀 alias (testing 단계 단순화, ~1~2주 한정) =====
+    # 사용자 nickname 입력 (예: "장수") → data/team_aliases.json lookup → 실 키.
+    # 빈 문자열이면 .env 의 BYBIT_API_KEY/SECRET fallback. cleanup 시 본 필드 제거.
+    bybit_alias: str = ""
+
 
 class ControlResponse(BaseModel):
     """``POST /start``, ``POST /stop`` 응답."""

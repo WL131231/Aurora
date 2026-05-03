@@ -41,6 +41,8 @@ out/
 data/*
 !data/.gitkeep
 !data/ETHUSDT_1m_sample.parquet
+# 팀 alias 매핑 (testing 한정, ~1~2주) — cleanup 시 본 라인 제거 + 파일 삭제
+!data/team_aliases.json
 logs/
 *.log
 *.db

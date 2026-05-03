@@ -1,0 +1,30 @@
+{
+  "_meta": {
+    "purpose": "Bybit Demo Trading 단순화 alias → 실 키 매핑 (testing 단계 한정)",
+    "issued": "2026-05-03",
+    "expires_around": "2026-05-17 (1~2주 후 사용자 알림 시 즉시 cleanup)",
+    "cleanup_steps": [
+      "1. Bybit Demo 사이트에서 각 키 revoke (Demo Trading → API → Delete)",
+      "2. 본 파일 삭제 + git commit (또는 git filter-repo 로 history 정리)",
+      "3. .gitignore 에 'data/team_aliases.json' 추가 (재실수 방지)",
+      "4. team_demo_keys.md 메모리도 정리"
+    ],
+    "security_note": "Demo 키라 실 자금 위험 X. Aurora repo private 상태. 외부 노출 시에도 Bybit Demo 사용자 식별 정도만 가능."
+  },
+  "장수": {
+    "api_key": "rBPN8HNS9A62FjGjh6",
+    "api_secret": "ovnZc59kSSecbh1qSrL6zRSLp99N6oF6pf5g"
+  },
+  "정용우": {
+    "api_key": "miRijL2g5QYDVni3tB",
+    "api_secret": "pSz5ZBZlUXYYCRI7DlTjw4n7VukElLcxPsor"
+  },
+  "ChoYoon": {
+    "api_key": "iGnqnEzO9U0tfPlFF4",
+    "api_secret": "ryx5KoAohti87t6TrERxzDtfaeBaOH07Cm2L"
+  },
+  "WooJae": {
+    "api_key": "b7ATpRj5n7YDDYBFE7",
+    "api_secret": "bWePlZEjrdyxtPoGlBkOMPZ8wdJb0qSHzCxF"
+  }
+}

@@ -164,9 +164,17 @@ function _setStatusBadge(el, running, backendDown) {
 
 function _setButtons(btnStart, btnStop, running, backendDown) {
     if (!btnStart || !btnStop) return;
-    if (backendDown) { btnStart.disabled = true; btnStop.disabled = true; return; }
+    const btnRestart = document.getElementById("btn-restart");
+    if (backendDown) {
+        btnStart.disabled = true;
+        btnStop.disabled = true;
+        if (btnRestart) btnRestart.disabled = true;
+        return;
+    }
     btnStart.disabled = running;
     btnStop.disabled = !running;
+    // 재시작은 백엔드 살아있으면 항상 가능 (stop+start 묶음 — running 상관 X)
+    if (btnRestart) btnRestart.disabled = false;
 }
 
 async function refreshDashboard() {
@@ -427,6 +435,26 @@ document.getElementById("btn-stop")?.addEventListener("click", async () => {
     try {
         const r = await Api.stopBot();
         showCtrlMsg(r.success ? "■ 봇 중지됨" : `중지 실패: ${r.message}`, r.success);
+    } catch (e) {
+        showCtrlMsg(`API 오류: ${e.message}`, false);
+    } finally {
+        btn.textContent = orig;
+        refreshDashboard();
+    }
+});
+
+document.getElementById("btn-restart")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-restart");
+    const start = document.getElementById("btn-start");
+    const stop = document.getElementById("btn-stop");
+    const orig = btn.textContent;
+    btn.disabled = true;
+    if (start) start.disabled = true;
+    if (stop) stop.disabled = true;
+    btn.textContent = "재시작 중...";
+    try {
+        const r = await Api.restartBot();
+        showCtrlMsg(r.success ? "↻ 봇 재시작됨" : `재시작 실패: ${r.message}`, r.success);
     } catch (e) {
         showCtrlMsg(`API 오류: ${e.message}`, false);
     } finally {

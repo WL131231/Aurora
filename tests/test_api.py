@@ -269,6 +269,34 @@ def test_stop_bot_when_already_stopped_returns_failure() -> None:
     assert body["message"] == "이미 중지됨"
 
 
+def test_restart_bot_from_running_state() -> None:
+    """실행 중 상태에서 ``/restart`` 호출 시 stop + start 통합 → running=True 유지."""
+    client = _client()
+    client.post("/start")  # 실행 상태 진입
+
+    r = client.post("/restart")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is True
+    assert body["message"] == "봇 재시작됨"
+
+    # 재시작 후 running=True 유지 (stop 후 다시 start)
+    s = client.get("/status")
+    assert s.json()["running"] is True
+
+
+def test_restart_bot_from_stopped_state() -> None:
+    """중지 상태에서 ``/restart`` 호출 시 stop 단계 skip → start 만."""
+    client = _client()  # 초기 상태 = 중지
+
+    r = client.post("/restart")
+    assert r.status_code == 200
+    assert r.json()["success"] is True
+
+    s = client.get("/status")
+    assert s.json()["running"] is True
+
+
 # ============================================================
 # Logs
 # ============================================================

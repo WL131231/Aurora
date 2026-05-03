@@ -523,32 +523,11 @@ const Logs = (() => {
         // 버튼들
         $("log-refresh")?.addEventListener("click", () => pollOnce(200));
         $("log-clear")?.addEventListener("click", () => {
-            // Why: 화면(DOM) 만 비우고 buffer 는 유지. 새로고침/다운로드 시 복원 가능 + 새 record 계속 push.
+            // Why: 화면(DOM) 만 비우고 buffer 는 유지. 새로고침 시 복원 가능 + 새 record 계속 push.
             Array.from(box.querySelectorAll(".log-line")).forEach((el) => el.remove());
             const empty = $empty();
             if (empty) empty.style.display = "block";
             setStatus(`화면 비움 (버퍼 ${buffer.length}줄 유지)`, true);
-        });
-        $("log-download")?.addEventListener("click", () => {
-            // 다운로드는 buffer 전체 (필터 무시) — 운영 분석 시 누락 방지.
-            if (buffer.length === 0) {
-                setStatus("다운로드할 로그 없음", false);
-                return;
-            }
-            const text = buffer.map((r) =>
-                `${toKstString(r.ts)} [${r.level}] ${r.logger || ""}: ${r.message}`
-            ).join("\n");
-            const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `aurora_logs_${Date.now()}.txt`;
-            // Pywebview/일부 webview 환경에서 a 가 DOM 에 부착 안 되면 click() 무시되는 케이스 있음.
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
-            setStatus(`다운로드: ${buffer.length}줄`, true);
         });
 
         // 초기 catch-up: /logs 폴링으로 최근 100 줄 가져오고, 자동 토글 켜져있으면 LIVE 시작.

@@ -224,24 +224,72 @@ function showCtrlMsg(text, ok) {
 // 7. 전략 / 지표 토글 (use_* 4개)
 // ============================================================
 
+// data-config 속성을 가진 입력 type 별 적용/수집 (checkbox / radio / range / number / text/select)
+function _applyConfigValue(input, val) {
+    if (val === undefined || val === null) return;
+    if (input.type === "checkbox") {
+        input.checked = !!val;
+    } else if (input.type === "radio") {
+        // 같은 name 라디오 그룹 — value 매칭되는 것만 checked
+        input.checked = (input.value === String(val));
+    } else if (input.type === "range" || input.type === "number") {
+        input.value = String(val);
+        // 슬라이더 표시값 (lev-val 등) 갱신 트리거
+        input.dispatchEvent(new Event("input"));
+    } else {
+        input.value = String(val);
+    }
+}
+
+function _collectConfigValue(input) {
+    if (input.type === "checkbox") return !!input.checked;
+    if (input.type === "radio") return input.checked ? input.value : undefined;
+    if (input.type === "range" || input.type === "number") return parseFloat(input.value);
+    return input.value;
+}
+
 async function loadConfigToToggles() {
     try {
         const cfg = await Api.getConfig();
+        // 1. data-config 속성 모든 입력 — checkbox / radio / range / number 포괄
         document.querySelectorAll("[data-config]").forEach((input) => {
             const key = input.dataset.config;
-            if (key in cfg) input.checked = !!cfg[key];
+            if (key in cfg) _applyConfigValue(input, cfg[key]);
         });
+        // 2. 페어 카드 — primary_symbol 와 매칭 (예: "BTC/USDT:USDT" → "BTC/USDT")
+        const primary = cfg.primary_symbol;
+        if (primary) {
+            const pairKey = primary.split(":")[0];  // ":USDT" suffix 제거
+            document.querySelectorAll(".pair-card").forEach((card) => {
+                const isSelected = card.dataset.pair === pairKey;
+                card.classList.toggle("selected", isSelected);
+                const meta = card.querySelector(".pair-meta");
+                if (meta) meta.textContent = isSelected ? "SELECTED" : "—";
+            });
+        }
     } catch (_) {
-        /* 미연결 시 토글은 false 유지 */
+        /* 미연결 시 default 유지 */
     }
 }
 
 document.getElementById("btn-save-config")?.addEventListener("click", async () => {
     const msg = document.getElementById("config-msg");
     const cfg = {};
+
+    // 1. data-config 속성 모든 입력 수집
+    // Why: radio 는 group 내 unchecked 항목도 순회되니 undefined 인 것만 skip
     document.querySelectorAll("[data-config]").forEach((input) => {
-        cfg[input.dataset.config] = !!input.checked;
+        const val = _collectConfigValue(input);
+        if (val !== undefined) cfg[input.dataset.config] = val;
     });
+
+    // 2. 페어 카드 — 첫 selected 를 primary_symbol 로 (Phase 1 = 단일 페어 매매)
+    const firstSelected = document.querySelector(".pair-card.selected");
+    if (firstSelected) {
+        // ccxt linear perpetual 표준: "BTC/USDT" → "BTC/USDT:USDT"
+        cfg.primary_symbol = `${firstSelected.dataset.pair}:USDT`;
+    }
+
     try {
         await Api.updateConfig(cfg);
         msg.textContent = "✓ 저장됨";

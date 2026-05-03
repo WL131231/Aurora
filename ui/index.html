@@ -187,31 +187,44 @@
                         <label for="ex-other">기타</label>
                     </div>
 
-                    <!-- ===== Testing 단계 단순화 — alias 입력 (장수/정용우/ChoYoon/WooJae) ===== -->
-                    <!-- Why: data/team_aliases.json 매핑 → 사용자는 nickname 만 입력. cleanup 시 본 섹션 제거. -->
-                    <div class="section-title">팀 alias <span class="text-xs text-zinc-500">(testing — nickname 입력 시 자동 매핑)</span></div>
+                    <!-- ===== Alias 입력 (등록된 nickname / 팀 alias) ===== -->
+                    <!-- 매핑: 1) data/team_aliases.json (팀, repo) 2) config_store.user_aliases (외부 사용자, PC) -->
+                    <div class="section-title">Alias <span class="text-xs text-zinc-500">(nickname 입력 시 자동 매핑)</span></div>
                     <div class="input-row">
-                        <label class="input-label">Alias</label>
+                        <label class="input-label">Nickname</label>
                         <input type="text" class="input-field" id="bybit-alias"
-                               placeholder="예: 장수 / 정용우 / ChoYoon / WooJae"
+                               placeholder="등록된 nickname 입력"
                                data-config="bybit_alias" />
                     </div>
                     <p class="text-xs text-zinc-500 mt-2">
-                        ⚠ Testing 한정 (~1~2주). cleanup 후엔 alias 제거 + 본인 키 직접 입력으로 전환.
+                        ⚠ Testing 한정. nickname 미등록 시 아래 신규 등록 폼 사용.
                     </p>
 
-                    <div class="section-title">API 인증 <span class="text-xs text-zinc-500">(alias 미사용 시)</span></div>
+                    <!-- ===== 외부 사용자 등록 — API Key + Secret + Nickname ===== -->
+                    <!-- 첫 등록 후 본인 PC config_store 에 매핑 저장 → 다음부턴 위 alias input 만으로 매매 -->
+                    <div class="section-title">신규 등록 <span class="text-xs text-zinc-500">(외부 사용자 — Demo 키만 권장)</span></div>
                     <div class="grid grid-cols-2 gap-4">
                         <div class="input-row">
                             <label class="input-label">API Key</label>
-                            <input type="text" class="input-field" id="api-key" placeholder="ABCDEF1234..." />
+                            <input type="text" class="input-field" id="reg-api-key" placeholder="ABCDEF1234..." />
                         </div>
                         <div class="input-row">
                             <label class="input-label">API Secret</label>
-                            <input type="password" class="input-field" id="api-secret" placeholder="••••••••" />
+                            <input type="password" class="input-field" id="reg-api-secret" placeholder="••••••••" />
                         </div>
                     </div>
-                    <p class="text-xs text-zinc-500 mt-2">⚠ Secret 은 OS keyring 에 안전 저장 (TODO 정용우)</p>
+                    <div class="input-row" style="margin-top: 1rem">
+                        <label class="input-label">Nickname (이후 alias 로 사용)</label>
+                        <input type="text" class="input-field" id="reg-nickname" placeholder="예: 철수 / john / mytestbot" />
+                    </div>
+                    <div class="flex gap-3 items-center mt-3">
+                        <button class="btn btn-primary" id="btn-register-alias">▼ Nickname 등록</button>
+                        <span id="register-msg" class="text-xs text-zinc-500"></span>
+                    </div>
+                    <p class="text-xs text-zinc-500 mt-2">
+                        ⚠ Demo 키만 입력. 등록 시 본인 PC 의 ~/.aurora/config.json 에 평문 저장 (.gitignore 처리, repo X).
+                        실거래 키는 Phase 3 OS keyring 도입 후 사용.
+                    </p>
 
                     <div class="section-title">거래 페어</div>
                     <div class="pair-grid">

@@ -272,12 +272,66 @@ async function loadConfigToToggles() {
     }
 }
 
+// ===== 외부 사용자 alias 등록 =====
+// (API Key + Secret + Nickname) → config_store.user_aliases 에 저장 + bybit_alias 자동 set
+// → 다음 진입부턴 alias input 에 nickname 만 입력하면 됨.
+document.getElementById("btn-register-alias")?.addEventListener("click", async () => {
+    const msg = document.getElementById("register-msg");
+    const apiKey = document.getElementById("reg-api-key")?.value.trim();
+    const apiSecret = document.getElementById("reg-api-secret")?.value.trim();
+    const nickname = document.getElementById("reg-nickname")?.value.trim();
+
+    // 입력 검증 — 셋 중 하나라도 비어있으면 거부
+    if (!apiKey || !apiSecret || !nickname) {
+        msg.textContent = "API Key / Secret / Nickname 모두 입력 필요";
+        msg.style.color = "#fb7185";
+        setTimeout(() => { msg.textContent = ""; }, 3000);
+        return;
+    }
+
+    try {
+        // 현재 config 가져와서 user_aliases 에 추가 + bybit_alias 자동 set
+        const current = await Api.getConfig();
+        const userAliases = current.user_aliases || {};
+        userAliases[nickname] = { api_key: apiKey, api_secret: apiSecret };
+        const merged = {
+            ...current,
+            user_aliases: userAliases,
+            bybit_alias: nickname,    // 등록 즉시 활성 alias 로 set
+        };
+        await Api.updateConfig(merged);
+
+        // 상단 alias input 에 nickname 자동 채움
+        const aliasInput = document.getElementById("bybit-alias");
+        if (aliasInput) aliasInput.value = nickname;
+
+        // 등록 폼 초기화 — 키/시크릿 노출 시간 최소화
+        document.getElementById("reg-api-key").value = "";
+        document.getElementById("reg-api-secret").value = "";
+        document.getElementById("reg-nickname").value = "";
+
+        msg.textContent = `✓ '${nickname}' 등록 완료 — 이후 alias 입력만으로 매매 OK`;
+        msg.style.color = "#22d3ee";
+    } catch (e) {
+        msg.textContent = `등록 실패: ${e.message}`;
+        msg.style.color = "#fb7185";
+    }
+    setTimeout(() => { msg.textContent = ""; }, 5000);
+});
+
 document.getElementById("btn-save-config")?.addEventListener("click", async () => {
     const msg = document.getElementById("config-msg");
-    const cfg = {};
 
-    // 1. data-config 속성 모든 입력 수집
-    // Why: radio 는 group 내 unchecked 항목도 순회되니 undefined 인 것만 skip
+    // Why: 기존 config 를 base 로 merge — data-config 없는 필드 (user_aliases 등) 보존.
+    // 단순히 cfg = {} 로 시작하면 dict 필드가 빈 default 로 덮어써져 등록 데이터 사라짐.
+    let cfg = {};
+    try {
+        cfg = { ...(await Api.getConfig()) };
+    } catch (_) {
+        /* 첫 호출 또는 미연결 — 빈 dict 에서 시작 */
+    }
+
+    // 1. data-config 속성 모든 입력 수집 (override)
     document.querySelectorAll("[data-config]").forEach((input) => {
         const val = _collectConfigValue(input);
         if (val !== undefined) cfg[input.dataset.config] = val;

@@ -97,6 +97,13 @@ class ConfigDTO(BaseModel):
     # 빈 문자열이면 .env 의 BYBIT_API_KEY/SECRET fallback. cleanup 시 본 필드 제거.
     bybit_alias: str = ""
 
+    # ===== 외부 사용자 alias (testing 단계, PC 한정) =====
+    # 외부 사용자가 GUI 거래소 view 에서 (API Key + Secret + Nickname) 입력 → 본 dict 에 등록.
+    # config_store.json (.gitignore'd) 평문 저장 — localhost 통신만, repo commit X.
+    # Phase 3 보안 강화 = OS keyring 또는 별도 register endpoint 마스킹.
+    # 형식: {"nickname": {"api_key": "...", "api_secret": "..."}}
+    user_aliases: dict[str, dict[str, str]] = {}
+
 
 class ControlResponse(BaseModel):
     """``POST /start``, ``POST /stop`` 응답."""

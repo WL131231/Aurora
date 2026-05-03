@@ -82,6 +82,14 @@ class BotInstance:
         # configure(수동 inject)는 False 로 덮어 써서 mock 테스트가 영향 안 받게 함.
         self._auto_configured = False
 
+        # 외부 포지션 (사용자가 직접 거래소 화면에서 연 포지션) 감지 상태.
+        # Why: 사용자 수동 포지션이 마진 거의 다 잡고 있으면 Aurora 가 자기 포지션
+        # 없다고 판단하고 진입 시도 → InsufficientFunds 무한 루프 (v0.1.4 검증).
+        # Fix: 진입 직전 fetch_position 으로 거래소 측 포지션 확인 → 외부 포지션 있으면
+        # 진입 skip + 1회 WARNING (반복 로그 방지). 외부 포지션 사라지면 자동 reset.
+        self._external_position: bool = False
+        self._external_position_warned: bool = False
+
         self._symbol: str = _DEFAULT_SYMBOL
         self._timeframes: list[str] = list(_DEFAULT_TIMEFRAMES)
         self._strategy_config: StrategyConfig = StrategyConfig()
@@ -112,6 +120,14 @@ class BotInstance:
     def client(self) -> ExchangeClient | None:
         """어댑터 read-only 접근 — ``/status`` 의 ``get_equity()`` 등 외부 조회용."""
         return self._client
+
+    @property
+    def external_position_detected(self) -> bool:
+        """외부 포지션 (사용자가 거래소 화면에서 직접 연 포지션) 감지 여부.
+
+        True 면 Aurora 가 진입 skip 중. UI 알림 표시 / API 응답 노출용.
+        """
+        return self._external_position
 
     # ============================================================
     # configure — 외부 inject 또는 settings 기반 자동
@@ -360,9 +376,32 @@ class BotInstance:
         decision = compose_entry(signals)
 
         if not decision.enter or decision.direction is None:
+            # 진입 신호 없으면 외부 포지션 flag 도 reset (다음 진입 시 재평가 위해)
+            self._external_position = False
+            self._external_position_warned = False
             return
 
-        # 5. 진입 실행 — equity 조회 + RiskPlan 산출
+        # 5. 외부 포지션 detect — Aurora 가 자기 진입 기록 X 인데 거래소 측 보유 중이면
+        # 사용자가 직접 연 포지션. 마진 부족 + Aurora 진입 시도 → InsufficientFunds 루프
+        # 방지 위해 skip + 1회 WARNING.
+        external = await self._client.fetch_position(self._symbol)
+        if external is not None:
+            self._external_position = True
+            if not self._external_position_warned:
+                logger.warning(
+                    "외부 포지션 감지: %s %s qty=%.4f entry=%.2f — Aurora 진입 skip "
+                    "(사용자가 직접 청산하면 자동 매매 재개)",
+                    self._symbol, external.side, external.qty, external.entry_price,
+                )
+                self._external_position_warned = True
+            return
+        # 외부 포지션 사라짐 → flag reset + 진입 진행
+        if self._external_position:
+            logger.info("외부 포지션 사라짐 — Aurora 자동 매매 재개")
+            self._external_position = False
+            self._external_position_warned = False
+
+        # 6. 진입 실행 — equity 조회 + RiskPlan 산출
         balance = await self._client.get_equity()
         plan = build_risk_plan(
             entry_price=current_price,

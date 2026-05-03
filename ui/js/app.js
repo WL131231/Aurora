@@ -217,6 +217,10 @@ async function refreshDashboard() {
         const stub = document.getElementById("m-equity-stub");
         if (stub) stub.style.display = (s.equity_usd == null) ? "" : "none";
 
+        // 외부 포지션 알림 — bot.external_position_detected = true 일 때만 표시
+        const extAlert = document.getElementById("external-position-alert");
+        if (extAlert) extAlert.style.display = s.external_position ? "" : "none";
+
         const lu = document.getElementById("m-last-update");
         if (lu) lu.textContent = toKstString(new Date().toISOString()) + " KST";
 
@@ -249,11 +253,16 @@ async function refreshPositions() {
         return;
     }
     const fmtPrice = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const fmtPnl = (v) => {
-        const n = Number(v);
+    // 미실현 손익 표시 — ROI% (왼쪽) + USDT (오른쪽). ROI = pnl / initial_margin × 100
+    // initial_margin = (entry × qty) / leverage (cross margin 가정)
+    const fmtPnl = (p) => {
+        const n = Number(p.unrealized_pnl_usd);
         const sign = n >= 0 ? "+" : "";
         const color = n >= 0 ? "#34d399" : "#fb7185";
-        return `<span style="color:${color}">${sign}${n.toFixed(2)} USDT</span>`;
+        const margin = (Number(p.entry_price) * Number(p.quantity)) / Math.max(Number(p.leverage) || 1, 1);
+        const roi = margin > 0 ? (n / margin) * 100 : 0;
+        const roiSign = roi >= 0 ? "+" : "";
+        return `<span style="color:${color}">${roiSign}${roi.toFixed(2)}% &nbsp;&nbsp;${sign}${n.toFixed(2)} USDT</span>`;
     };
     tbody.innerHTML = positions.map(p => `
         <tr>
@@ -262,7 +271,7 @@ async function refreshPositions() {
             <td class="mono">${fmtPrice(p.entry_price)}</td>
             <td class="mono">${Number(p.quantity).toFixed(4)}</td>
             <td class="mono">${p.leverage}×</td>
-            <td class="mono">${fmtPnl(p.unrealized_pnl_usd)}</td>
+            <td class="mono">${fmtPnl(p)}</td>
         </tr>
     `).join("");
 }

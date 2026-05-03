@@ -56,6 +56,7 @@ class StatusResponse(BaseModel):
     mode: str
     open_positions: int
     equity_usd: float | None  # 거래소 미연결 시 None
+    external_position: bool = False  # 사용자가 직접 연 포지션 감지 (Aurora 진입 skip 중)
 
 
 class PositionDTO(BaseModel):
@@ -193,6 +194,7 @@ def create_app() -> FastAPI:
             mode=settings.run_mode,
             open_positions=open_count,
             equity_usd=equity,
+            external_position=bot.external_position_detected,
         )
 
     # ───── Positions ────────────────────────────────

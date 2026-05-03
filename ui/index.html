@@ -144,6 +144,11 @@
                     </div>
                     <div id="ctrl-msg" class="ctrl-msg" style="min-height:1.5em"></div>
 
+                    <div id="external-position-alert" class="metric-card" style="display:none; margin-top:1rem; border-color:rgba(251,191,36,0.4); background:rgba(251,191,36,0.05)">
+                        <div style="color:#fbbf24; font-weight:500; margin-bottom:0.25rem">⚠ 외부 포지션 감지</div>
+                        <p class="text-xs text-zinc-400">사용자가 거래소에서 직접 연 포지션 사용 중 — Aurora 진입 보류. 직접 청산하면 자동 매매 재개.</p>
+                    </div>
+
                     <div class="section-title">열린 포지션</div>
                     <div class="metric-card" style="padding: 0">
                         <table class="pos-table">
@@ -161,6 +166,39 @@
                                 <tr><td colspan="6" class="pos-empty">열린 포지션 없음</td></tr>
                             </tbody>
                         </table>
+                    </div>
+
+                    <div class="section-title">결과 통계</div>
+                    <div class="stat-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">총 거래</div>
+                            <div class="stat-value">—</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">승률</div>
+                            <div class="stat-value">—</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">누적 수익률</div>
+                            <div class="stat-value stat-aurora">—</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">최대 DD</div>
+                            <div class="stat-value">—</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">샤프 비율</div>
+                            <div class="stat-value">—</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">평균 보유</div>
+                            <div class="stat-value">—</div>
+                        </div>
+                    </div>
+
+                    <div class="section-title">결과 차트</div>
+                    <div class="metric-card" style="height: 300px; display:flex; align-items:center; justify-content:center">
+                        <p class="text-zinc-600 italic">차트 라이브러리 미통합 — 후속 PR (Lightweight Charts 권장)</p>
                     </div>
                 </div>
             </section>
@@ -289,7 +327,7 @@
                     <div class="section-title">Fixed 지표 (항상 ON)</div>
                     <div class="grid grid-cols-2 gap-4">
                         <div class="metric-card" style="opacity:0.85">
-                            <div class="metric-label">EMA 200 / 480</div>
+                            <div class="metric-label">EMA 멀티 TF</div>
                             <div class="text-sm text-zinc-300 mt-2">터치 ±0.3% + 거래량 동반 시 부스트</div>
                             <div class="metric-line"></div>
                         </div>
@@ -362,12 +400,6 @@
                         </div>
                         <input type="range" class="slider-input" id="vol-boost"
                             min="1.0" max="3.0" step="0.1" value="1.5" />
-                    </div>
-
-                    <div class="section-title">2,4,6,8 타점 매매 (BTC 전용 · 항상 ON)</div>
-                    <div class="metric-card">
-                        <p class="text-sm text-zinc-300">PDF "나뇨띠" 룰 — 1K 단위 가격 심리. 코드 상 항상 작동.</p>
-                        <p class="text-xs text-zinc-500 mt-2">상방 추세 → N.200~N.400 (저항=SHORT) / 하방 추세 → N.600~N.800 (지지=LONG)</p>
                     </div>
 
                     <div class="flex gap-3 mt-8">
@@ -554,39 +586,6 @@
                         <div class="progress-bar" id="bt-progress"></div>
                     </div>
                     <p class="text-xs text-zinc-500 mt-2" id="bt-progress-label">대기 중 (ChoYoon backtest 엔진 본 구현 후 활성화)</p>
-
-                    <div class="section-title">결과 통계</div>
-                    <div class="stat-grid">
-                        <div class="stat-card">
-                            <div class="stat-label">총 거래</div>
-                            <div class="stat-value">—</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-label">승률</div>
-                            <div class="stat-value">—</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-label">누적 수익률</div>
-                            <div class="stat-value stat-aurora">—</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-label">최대 DD</div>
-                            <div class="stat-value">—</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-label">샤프 비율</div>
-                            <div class="stat-value">—</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-label">평균 보유</div>
-                            <div class="stat-value">—</div>
-                        </div>
-                    </div>
-
-                    <div class="section-title">결과 차트</div>
-                    <div class="metric-card" style="height: 300px; display:flex; align-items:center; justify-content:center">
-                        <p class="text-zinc-600 italic">차트 라이브러리 미통합 — 후속 PR (Lightweight Charts 권장)</p>
-                    </div>
                 </div>
             </section>
 

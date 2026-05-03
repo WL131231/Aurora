@@ -74,9 +74,9 @@ def launch() -> None:
     webview.create_window(
         "Aurora",
         str(ui_path),
-        width=1280,
-        height=800,
-        min_size=(960, 600),
+        width=1280,                    # 일반 노트북 가로 기준 (FHD 1920 대비 보수적)
+        height=800,                    # 16:10 비율 — Status/Logs/Chart 동시 표시 충분
+        min_size=(960, 600),           # 차트 가독성 + 텍스트 잘림 방지 최소치
         resizable=True,
         background_color="#06060a",  # 웹사이트 배경과 동일 (로딩 깜빡임 방지)
     )

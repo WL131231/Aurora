@@ -601,8 +601,8 @@ _CCXT_TO_AURORA: dict[str, str] = {v: k for k, v in _AURORA_TO_CCXT.items()}
 | 분 단위 (`"1m"` 등) | ✅ 양쪽 함수 모두 idempotent |
 | 알려지지 않은 TF (`"30m"`, `"1Y"`) | ❌ ValueError |
 | 빈 문자열 `""` | ❌ ValueError ("빈 timeframe 입력") |
-| 공백 포함 (`" 1H "`, `"1 m"`) | ❌ ValueError (strip은 호출자 책임) |
-| `None` / 잘못된 타입 | ❌ TypeError (Python 표준) |
+| 공백 포함 (`" 1H "`, `"1 m"`, `"\t1H"`, `"1H\n"`) | ❌ ValueError (strip / escape 모두 호출자 책임) |
+| `None` / `60` / `1.5` / `list` / `tuple` / `set` 등 비-str | ❌ TypeError (Python 표준) |
 
 ### 7.5 에러 메시지 (한국어, Aurora 정책)
 
@@ -610,13 +610,15 @@ _CCXT_TO_AURORA: dict[str, str] = {v: k for k, v in _AURORA_TO_CCXT.items()}
 # normalize_to_ccxt 실패
 raise ValueError(
     f"지원하지 않는 timeframe: {tf!r}. "
-    f"Aurora 포맷만 허용: {sorted(_AURORA_TO_CCXT)}"
+    f"Aurora 포맷만 허용: {list(_AURORA_TO_CCXT)}"
 )
+# 출력 예: "지원하지 않는 timeframe: '30m'. Aurora 포맷만 허용:
+#         ['1m', '3m', '5m', '15m', '1H', '2H', '4H', '1D', '1W']" (insertion order = 시간 순)
 
 # normalize_to_aurora 실패
 raise ValueError(
     f"지원하지 않는 timeframe: {tf!r}. "
-    f"ccxt 포맷만 허용: {sorted(_CCXT_TO_AURORA)}"
+    f"ccxt 포맷만 허용: {list(_CCXT_TO_AURORA)}"
 )
 ```
 

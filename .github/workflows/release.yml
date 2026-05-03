@@ -56,6 +56,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # tag 에서 version 추출 → src/aurora/__init__.py 의 __version__ 갱신.
+      # Why: __version__ 이 소스에 hardcoded "0.1.0" 으로 박혀있으면 자동 업데이터가
+      # 자기 자신을 새 버전으로 오인 → .exe.new 무한 다운 + swap 루프 발생.
+      # 매 release 마다 PR 로 bumping 하지 않고 빌드 시점 자동 갱신.
+      - name: Bump __version__ from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF##*/v}"   # refs/tags/v0.1.4 → 0.1.4
+          echo "Bumping __version__ to $VERSION"
+          # sed -i 의 BSD/GNU 차이 회피 — backup 만든 후 삭제 (Windows runner 도 OK)
+          sed -i.bak 's/__version__ = ".*"/__version__ = "'"$VERSION"'"/' src/aurora/__init__.py
+          rm -f src/aurora/__init__.py.bak
+          echo "--- src/aurora/__init__.py ---"
+          cat src/aurora/__init__.py
+
       # setup-python 의 출력 path 를 명시 사용 — macOS PATH 우선순위 이슈 회피
       # (system Python 이 PATH 우선 잡혀 hostedtoolcache 의 PyInstaller 못 찾던 문제)
       - name: Setup Python 3.11

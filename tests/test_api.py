@@ -58,7 +58,9 @@ def test_health_response_shape() -> None:
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
-    assert body["version"] == "0.1.0"
+    # 빌드 시 release.yml 이 __version__ 갱신 — 정확한 값 X, 형식만 검증
+    assert isinstance(body["version"], str)
+    assert "." in body["version"]
     assert "mode" in body
 
 

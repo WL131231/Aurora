@@ -184,6 +184,7 @@ async function refreshDashboard() {
     const btnStart  = document.getElementById("btn-start");
     const btnStop   = document.getElementById("btn-stop");
     const mStatus   = document.getElementById("m-status");
+    const versionLabel = document.getElementById("version-label");
 
     try {
         const s = await Api.status();
@@ -195,6 +196,16 @@ async function refreshDashboard() {
         const mode = (s.mode || "").toUpperCase();
         modeLabel.textContent = mode;
         document.getElementById("m-mode").textContent = mode;
+
+        // 사이드바 footer version — / 엔드포인트 1회 호출, 시작 후 변경 X 라 캐싱
+        if (versionLabel && versionLabel.textContent === "v—") {
+            try {
+                const root = await Api.health();  // {status, version, mode}
+                versionLabel.textContent = "v" + root.version;
+            } catch (_) {
+                // 백엔드 응답 실패 시 그대로 v— 유지
+            }
+        }
 
         _setStatusBadge(mStatus, s.running, false);
 

@@ -30,6 +30,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from aurora import __version__
 from aurora.config import settings
 from aurora.interfaces import bot_instance, config_store, log_buffer
 
@@ -157,13 +158,13 @@ def create_app() -> FastAPI:
     @app.get("/")
     async def root() -> dict[str, str]:
         """기본 핑 엔드포인트."""
-        return {"name": "Aurora", "version": "0.1.0", "mode": settings.run_mode}
+        return {"name": "Aurora", "version": __version__, "mode": settings.run_mode}
 
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
         """헬스체크 — 봇 프로세스가 살아있고 응답 가능한지."""
         # TODO(정용우): 거래소 ping / DB 연결 등 실제 헬스 점검 추가.
-        return HealthResponse(status="ok", version="0.1.0", mode=settings.run_mode)
+        return HealthResponse(status="ok", version=__version__, mode=settings.run_mode)
 
     @app.get("/status", response_model=StatusResponse)
     async def status() -> StatusResponse:

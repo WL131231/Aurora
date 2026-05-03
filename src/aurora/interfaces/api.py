@@ -248,6 +248,19 @@ def create_app() -> FastAPI:
         await bot.stop()
         return ControlResponse(success=True, message="봇 중지됨")
 
+    @app.post("/restart", response_model=ControlResponse)
+    async def restart_bot() -> ControlResponse:
+        """봇 재시작 — stop + start 통합 (한 번 클릭으로 lifecycle 갱신).
+
+        PR #73 의 auto-reconfigure 와 결합 → 재시작 시 client/cache/executor 새로 만듦.
+        설정 변경 후 즉시 반영하고 싶을 때 (▶ ■ ▶ 두 번 클릭 대신 ↻ 한 번).
+        """
+        bot = bot_instance.get_instance()
+        if bot.running:
+            await bot.stop()
+        await bot.start()
+        return ControlResponse(success=True, message="봇 재시작됨")
+
     # ───── 로그 (단순 폴링) ─────────────────────────
 
     @app.get("/logs")

@@ -63,6 +63,7 @@ const updateConfig = (config) =>
 
 const startBot = () => _request("/start", { method: "POST" });
 const stopBot = () => _request("/stop", { method: "POST" });
+const restartBot = () => _request("/restart", { method: "POST" });
 
 // ─── 로그 ──────────────────────────────────────────
 
@@ -133,6 +134,7 @@ window.AuroraApi = {
     updateConfig,
     startBot,
     stopBot,
+    restartBot,
     getLogs,
     connectLiveLog,
 };

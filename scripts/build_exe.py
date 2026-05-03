@@ -65,7 +65,8 @@ def main() -> int:
         # PyInstaller 가 import 트리에 포함시키는데, 봇 GUI 는 backtest 모듈을
         # 사용하지 않으므로 수십 MB 불필요 의존성을 빼낸다.
         "--exclude-module", "pyarrow",          # parquet 엔진 (50 MB+) — fetch_ohlcv 전용
-        "--exclude-module", "tenacity",         # retry/backoff — fetch_ohlcv 전용
+        # tenacity: fetch_ohlcv (백테스트) + ccxt_client (라이브 어댑터, 2026-05) 양쪽 사용.
+        # 라이브 어댑터가 retry 사용하므로 봇 런타임에 필요 — exclude 해제 (DESIGN.md E-11).
         "--exclude-module", "aurora.backtest",  # 백테스트 모듈 (분석 도구)
         "--clean",
         "--noconfirm",

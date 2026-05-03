@@ -637,3 +637,10 @@ body {
 .nav-download-link:hover {
     background: rgba(168, 85, 247, 0.15);
 }
+
+/* #download anchor 점프 시 viewport 중앙쯤에 오도록 padding.
+   기본 동작 = anchor 가 viewport top 으로 → Hero 의 AURORA 타이포가 잘림.
+   scroll-margin-top 으로 여백 추가 → 클릭 시 Hero 전체 보이는 위치. */
+#download {
+    scroll-margin-top: 50vh;
+}

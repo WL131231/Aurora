@@ -24,6 +24,11 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 
+# GITHUB_TOKEN 권한 — Release 생성 + asset 첨부 시 contents: write 필수.
+# (default permissions 가 read-only 인 경우 'Resource not accessible by integration' 에러)
+permissions:
+  contents: write
+
 # Windows runner 의 cp1252 stdout 가 한글 인코딩 X → 전역 PYTHONIOENCODING=utf-8
 # (build_exe.py 의 한글 print 회피, 봇 런타임 한글 로그도 안전)
 env:

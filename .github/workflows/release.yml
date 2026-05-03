@@ -153,3 +153,37 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # UI 핫 업데이트용 별도 zip — .exe 와 분리, 빠른 빌드 (PR b: UI 핫 업데이트).
+  # webview 가 <exe_dir>/ui_override/ 우선 lookup, 없으면 _MEIPASS bundle fallback.
+  # /update/apply_ui 엔드포인트가 본 zip 다운 → 풀어서 GUI 즉시 갱신 (앱 종료 X).
+  build-ui:
+    name: Build UI zip (Aurora-ui.zip)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Aurora-ui.zip
+        shell: bash
+        run: |
+          # ui/ 폴더 통째 zip — index.html, css/, js/, favicon.svg 등 모두 포함
+          # 별도 manifest 파일 생성 X (단순화) — apply_ui_update 가 통째 swap
+          cd ui
+          zip -r ../Aurora-ui.zip . -x "*.DS_Store" "node_modules/*"
+          cd ..
+          echo "Aurora-ui.zip size: $(du -h Aurora-ui.zip | cut -f1)"
+
+      - name: Attach UI zip to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Aurora-ui.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

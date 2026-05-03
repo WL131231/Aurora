@@ -55,6 +55,12 @@ ASSET_NAME = {
     "Darwin": "Aurora-macOS.zip",  # 본 모듈 미지원 (자동 swap X)
 }
 
+# UI zip asset 이름 — OS 무관, .exe 와 별개 release artifact (PR b: UI 핫 업데이트)
+UI_ASSET_NAME = "Aurora-ui.zip"
+
+# UI override 디렉토리 이름 — .exe 옆에 풀어두면 webview 가 _MEIPASS 보다 우선 사용
+UI_OVERRIDE_DIR = "ui_override"
+
 
 # ============================================================
 # 내부 헬퍼
@@ -233,6 +239,69 @@ def download_update(asset_url: str, target: Path) -> bool:
                 target.unlink()
             except OSError:
                 pass
+        return False
+
+
+# ============================================================
+# UI 핫 업데이트 (PR b)
+# ============================================================
+#
+# 동작 흐름:
+#     1. /update/apply_ui POST → fetch_latest_release() → assets 에서 Aurora-ui.zip 찾기
+#     2. download_ui_zip() → 임시 zip 다운로드
+#     3. apply_ui_update() → <exe_dir>/ui_override/ 에 풀어둠 (기존 override 정리 후 swap)
+#     4. webview.py 의 _ui_index_path() 가 ui_override/ 우선 lookup → 새 GUI 즉시 로드
+#         (사용자는 location.reload() 만 하면 됨, 앱 종료 X)
+
+
+def find_ui_asset_url(release: dict) -> str | None:
+    """release dict 의 assets 에서 ``Aurora-ui.zip`` 의 ``browser_download_url`` 반환."""
+    for asset in release.get("assets", []):
+        if asset.get("name") == UI_ASSET_NAME:
+            url = asset.get("browser_download_url")
+            return str(url) if url else None
+    return None
+
+
+def apply_ui_update(zip_path: Path, exe_dir: Path) -> bool:
+    """UI zip 을 ``<exe_dir>/ui_override/`` 에 풀기 — 기존 override 정리 후 swap.
+
+    Args:
+        zip_path: 다운로드된 ``Aurora-ui.zip`` 임시 파일.
+        exe_dir: .exe 가 있는 디렉토리 (override 위치 기준).
+
+    Returns:
+        ``True`` 성공, ``False`` zip 손상·디렉토리 권한 에러.
+
+    Side effects:
+        - 기존 ``<exe_dir>/ui_override/`` 통째 삭제 후 새 zip 풀기.
+        - 처리 중 에러 시 부분 디렉토리 그대로 남을 수 있음 — 다음 실행 시 정리.
+    """
+    import shutil
+    import zipfile
+
+    target = exe_dir / UI_OVERRIDE_DIR
+    try:
+        # 기존 override 정리 (안전: 일부만 풀린 상태 방지)
+        if target.exists():
+            shutil.rmtree(target)
+        target.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            # zip slip 방지 — 모든 엔트리가 target 안에 있는지 검증
+            for name in zf.namelist():
+                resolved = (target / name).resolve()
+                if not str(resolved).startswith(str(target.resolve())):
+                    logger.warning("UI zip slip 의심 (skip): %s", name)
+                    return False
+            zf.extractall(target)
+        # zip 자체 정리 (다음 다운로드를 위해)
+        try:
+            zip_path.unlink()
+        except OSError:
+            pass
+        return True
+    except (zipfile.BadZipFile, OSError) as e:
+        logger.warning("UI 적용 실패: %s", e)
         return False
 
 

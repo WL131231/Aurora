@@ -23,6 +23,7 @@ CORS 정책:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -113,6 +114,18 @@ class ControlResponse(BaseModel):
 
     success: bool
     message: str
+
+
+class UiUpdateResponse(BaseModel):
+    """``POST /update/apply_ui`` — UI 핫 업데이트 결과.
+
+    success=True 시 클라이언트가 ``location.reload()`` 호출하면 새 GUI 적용됨
+    (앱 종료 X). version 은 다운로드한 release tag (예: ``"v0.1.2"``).
+    """
+
+    success: bool
+    message: str
+    version: str | None = None  # tag_name (성공 시)
 
 
 # ============================================================
@@ -211,6 +224,70 @@ def create_app() -> FastAPI:
             )
             for p in raw
         ]
+
+    # ───── UI 핫 업데이트 (PR b) ────────────────────
+
+    @app.post("/update/apply_ui", response_model=UiUpdateResponse)
+    async def apply_ui_update_endpoint() -> UiUpdateResponse:
+        """UI zip 최신 버전 다운로드 + ``ui_override/`` 에 풀기.
+
+        흐름:
+            1. GitHub Releases ``/latest`` 호출 → ``Aurora-ui.zip`` URL 찾기
+            2. 임시 파일에 다운로드
+            3. ``<exe_dir>/ui_override/`` 에 풀기 (기존 정리 후 swap)
+            4. 응답 반환 — 클라이언트가 ``location.reload()`` 호출하면 즉시 적용
+
+        dev/pytest 환경 (frozen=False) 에서는 exe_dir 없음 → 명시적 에러 응답.
+        """
+        import tempfile
+
+        from aurora import updater
+        from aurora.interfaces.webview import _exe_dir
+
+        exe_dir = _exe_dir()
+        if exe_dir is None:
+            return UiUpdateResponse(
+                success=False,
+                message="UI 핫 업데이트는 빌드된 .exe 환경에서만 동작 (dev 는 코드 직접 수정)",
+            )
+
+        release = updater.fetch_latest_release()
+        if release is None:
+            return UiUpdateResponse(
+                success=False,
+                message="GitHub Releases 조회 실패 (네트워크 또는 rate limit)",
+            )
+        tag = release.get("tag_name", "")
+        url = updater.find_ui_asset_url(release)
+        if url is None:
+            return UiUpdateResponse(
+                success=False,
+                message=f"release {tag} 에 {updater.UI_ASSET_NAME} asset 없음",
+                version=tag,
+            )
+
+        # 임시 zip 다운로드 (NamedTemporaryFile 은 Windows 에서 즉시 reuse 가 까다로워 manual)
+        with tempfile.TemporaryDirectory(prefix="aurora-ui-") as tmpdir:
+            tmp_zip = Path(tmpdir) / updater.UI_ASSET_NAME
+            if not updater.download_update(url, tmp_zip):
+                return UiUpdateResponse(
+                    success=False,
+                    message="UI zip 다운로드 실패",
+                    version=tag,
+                )
+            if not updater.apply_ui_update(tmp_zip, exe_dir):
+                return UiUpdateResponse(
+                    success=False,
+                    message="UI zip 적용 실패 (zip 손상 또는 권한 에러)",
+                    version=tag,
+                )
+
+        logger.info("UI 핫 업데이트 적용 완료: %s → %s/", tag, exe_dir / updater.UI_OVERRIDE_DIR)
+        return UiUpdateResponse(
+            success=True,
+            message="UI 갱신 완료 — 새로고침으로 즉시 적용됨",
+            version=tag,
+        )
 
     # ───── Config ───────────────────────────────────
 

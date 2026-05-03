@@ -75,6 +75,13 @@ class BotInstance:
         self._cache: MultiTfCache | None = None
         self._executor: Executor | None = None
 
+        # configure_from_settings 흔적 — stop 후 재 start 시 자동 reconfigure 트리거.
+        # Why: stop() 이 client/cache/executor 를 None 으로 정리 (ccxt session 누수 방지)
+        # 하므로, 사용자가 GUI ▶ 시작 → ■ 중지 → ▶ 시작 사이클 시 두 번째 start 가
+        # noop loop 로 진입해 포지션 표시가 사라지는 버그 fix.
+        # configure(수동 inject)는 False 로 덮어 써서 mock 테스트가 영향 안 받게 함.
+        self._auto_configured = False
+
         self._symbol: str = _DEFAULT_SYMBOL
         self._timeframes: list[str] = list(_DEFAULT_TIMEFRAMES)
         self._strategy_config: StrategyConfig = StrategyConfig()
@@ -140,6 +147,9 @@ class BotInstance:
             raise RuntimeError("BotInstance running 중 configure 불가 — stop 후 호출")
 
         self._client = client
+        # 수동 inject — auto-reconfigure 비활성. mock 테스트가 stop→start 시 새 ccxt
+        # 만들지 않게 보장 (configure_from_settings 가 다시 True 로 set).
+        self._auto_configured = False
         if symbol is not None:
             self._symbol = symbol
         if timeframes is not None:
@@ -217,6 +227,8 @@ class BotInstance:
             risk_pct=cfg.get("risk_pct", 0.01),
             full_seed=cfg.get("full_seed", False),
         )
+        # 자동 configure 흔적 — stop → start 사이클 시 재호출 트리거
+        self._auto_configured = True
 
     # ============================================================
     # lifecycle — start / stop
@@ -227,10 +239,23 @@ class BotInstance:
 
         호환성: 기존 PR-C 테스트는 configure 없이 start() 호출 → cache/executor
         생성 X, _run_loop 가 1초 sleep 만 (lifecycle flag 만 검증).
+
+        자동 reconfigure: ``configure_from_settings`` 으로 자동 configure 됐던 봇이
+        stop 으로 client 정리된 후 재 start 될 때 자동으로 재 configure 호출.
+        ``configure(수동 inject)`` 케이스는 영향 X.
         """
         if self._running:
             logger.warning("BotInstance.start: 이미 실행 중")
             return
+
+        # stop → start 사이클 후 client None + 자동 configure 이력 있으면 재호출
+        if self._client is None and self._auto_configured:
+            try:
+                self.configure_from_settings()
+                logger.info("BotInstance.start: auto-reconfigured (stop 후 재시작)")
+            except Exception as e:  # noqa: BLE001 — 실패해도 noop loop 로 진입
+                logger.warning("BotInstance.start: auto-reconfigure 실패 (%s) — noop", e)
+                self._auto_configured = False  # 다음 시도 안 함
 
         # configure 됐으면 어댑터 lazy 생성 + warmup
         if self._client is not None:

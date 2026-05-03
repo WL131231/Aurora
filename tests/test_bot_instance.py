@@ -180,6 +180,64 @@ async def test_stop_closes_client() -> None:
 
 
 @pytest.mark.asyncio
+async def test_manual_configure_no_auto_reconfigure_after_stop() -> None:
+    """수동 configure(mock inject) 한 봇은 stop 후 재 start 시 reconfigure 안 함.
+
+    Why: mock 환경에서 두 번째 start 가 configure_from_settings 부르면 실 ccxt
+    만들려 시도 → 테스트 격리 깨짐. 수동 inject 케이스는 _auto_configured=False.
+    """
+    bot = bot_instance.get_instance()
+    rows = _make_ohlcv_rows(start_ts_ms=1_700_000_000_000, count=5, tf_minutes=60)
+    client = _make_mock_client(ohlcv_rows=rows)
+    bot.configure(client=client, timeframes=["1H"])
+    await bot.start()
+    await bot.stop()
+    # 재 start — client 는 None 그대로 (mock 보존 X), reconfigure 호출 X
+    await bot.start()
+    assert bot._client is None  # 자동 reconfigure 트리거 안 됨
+    assert bot.running  # noop loop 로 진입 (lifecycle flag 만)
+    await bot.stop()
+
+
+@pytest.mark.asyncio
+async def test_auto_configure_reconfigures_on_restart(monkeypatch: pytest.MonkeyPatch) -> None:
+    """configure_from_settings 한 봇은 stop 후 재 start 시 자동 reconfigure.
+
+    실제 사용자 흐름 — main.py 가 configure_from_settings → 사용자 ▶ 시작 → ■ 중지
+    → ▶ 시작 사이클. 두 번째 start 가 client 다시 만들어야 포지션 표시 유지.
+    """
+    bot = bot_instance.get_instance()
+    rows = _make_ohlcv_rows(start_ts_ms=1_700_000_000_000, count=5, tf_minutes=60)
+
+    # configure_from_settings 가 호출되면 mock client inject (실 ccxt 안 만듦)
+    call_count = {"n": 0}
+
+    def fake_configure() -> None:
+        call_count["n"] += 1
+        client = _make_mock_client(ohlcv_rows=rows)
+        bot.configure(client=client, timeframes=["1H"])
+        bot._auto_configured = True  # 자동 configure 마커
+
+    fake_configure()  # 첫 호출 — main.py 가 한 자동 configure 흉내
+    await bot.start()
+    assert bot.running
+    assert call_count["n"] == 1
+
+    await bot.stop()
+    assert bot._client is None  # stop 이 정리
+
+    # start() 가 _auto_configured=True 보고 configure_from_settings 호출 시도.
+    # 본 테스트는 진짜 configure_from_settings 호출 — 그 안에서 settings.bybit_api_key
+    # 가 비어있어도 CcxtClient 생성 자체는 됨 (실 호출 시점에 에러).
+    # 핵심 검증 = client 가 None 아닌 상태로 복원됨.
+    monkeypatch.setattr(bot, "configure_from_settings", fake_configure)
+    await bot.start()
+    assert call_count["n"] == 2  # 자동 reconfigure 호출됨
+    assert bot._client is not None  # 새 mock client 복원
+    await bot.stop()
+
+
+@pytest.mark.asyncio
 async def test_step_noop_when_not_configured() -> None:
     """configure 없이 _step() 호출 — noop (예외 없음, fetch 0회)."""
     bot = bot_instance.get_instance()

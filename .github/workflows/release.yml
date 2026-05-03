@@ -1,0 +1,94 @@
+name: Release
+
+# tag push 시 Windows runner 에서 .exe 빌드 → GitHub Release 첨부.
+# 사용자는 releases 페이지에서 Aurora.exe 직접 다운로드.
+#
+# 사용법:
+#   git tag v0.1.0 && git push origin v0.1.0
+#   → Actions Release workflow 자동 실행 → GitHub Release 자동 생성 + .exe 첨부.
+#
+# 수동 실행 (workflow_dispatch):
+#   Actions 탭 → Release → Run workflow → tag 명 입력
+on:
+  push:
+    tags:
+      - 'v*'         # v0.1.0, v1.2.3 등 SemVer 패턴
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (예: v0.1.0)'
+        required: true
+        type: string
+
+# 같은 tag 에 새 push 들어오면 이전 빌드 취소
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Build Windows .exe
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      # aiodns 는 Windows 환경 DNS 충돌 (memory project_user_onboarding.md) — 빌드 시 제거
+      - name: Remove aiodns (Windows aiohttp DNS 호환)
+        run: pip uninstall -y aiodns
+        continue-on-error: true   # aiodns 없어도 OK (transitive dep)
+
+      - name: Generate app icon (assets/aurora.ico 없으면)
+        run: |
+          if (-not (Test-Path "assets/aurora.ico")) {
+              python scripts/generate_icon.py
+          }
+        shell: pwsh
+        continue-on-error: true   # icon 없어도 빌드 자체는 가능
+
+      - name: Build .exe (PyInstaller --onefile)
+        run: python scripts/build_exe.py --onefile
+
+      - name: Verify build artifact
+        run: |
+          if (-not (Test-Path "dist/Aurora.exe")) {
+              Write-Error "dist/Aurora.exe 생성 실패"
+              exit 1
+          }
+          $size = (Get-Item "dist/Aurora.exe").Length / 1MB
+          Write-Host "Aurora.exe 크기: $([math]::Round($size, 1)) MB"
+        shell: pwsh
+
+      - name: Upload artifact (workflow 결과로 다운로드 가능)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aurora-windows-exe
+          path: dist/Aurora.exe
+          retention-days: 30
+
+      - name: Create GitHub Release + attach .exe
+        # tag push 트리거일 때만 실행 (workflow_dispatch 는 artifact 만)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Aurora.exe
+          generate_release_notes: true   # commit 기반 자동 changelog
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

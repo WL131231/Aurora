@@ -741,15 +741,28 @@ PR-3 description 본문에 박을 Decisions 항목 미리보기. 본 design doc 
 
 **Reference**: §3.3.1 단락 2 (검증 예시 + 의도된 trade-off 본문).
 
-### D-2 ✅ consec_sl 카운트 정책 (BE / CLOUD_EXIT 카운트 유지)
+### D-2 ✅ consec_sl 카운트 정책 (SL 만 ++, TP reset, BE / REVERSE / FORCE_END 유지)
 
-**결정**: 연속 손절 (`consec_sl`) 카운트 시 Breakeven 청산 / Cloud_Exit 청산도 카운트 유지 (= SL 청산과 동일 취급).
+**결정**: 연속 손절 (`consec_sl`) 카운트 분기 — `SL` 만 ++, `TP1`~`TP4` reset, `BE` / `REVERSE` / `FORCE_END` 유지.
 
-**이유**: BE / Cloud 청산도 "trailing 보호 발동 후 강제 청산" 카테고리 — 진입 신호 약화의 신호. consec_sl pause 가드는 "손익비 저조 구간 회피" 정책이라 BE / Cloud 도 카운트가 정합. SL 청산만 카운트하면 trailing 발동 → 작은 손실 누적이 가드를 silent 우회하는 함정.
+**reason 매핑 표** (D-25 reason 7 개 정정 — `engine.py` `_close` / `_partial_close` 본 구현 동기, 2026-05-03 Stage 1C Group 2 단계 2):
 
-**차용 출처**: 본 정책은 replay_engine L994-1002 카운트 분기 그대로 차용 (`if SL: consec_sl++; elif TP1/TP2: reset, BE/CLOUD_EXIT 는 카운트 유지`). "trailing 보호 발동 후 강제 청산도 손익비 저조 신호" 해석에 부합.
+| Reason | consec_sl 카운트 | 분류 |
+|---|---|---|
+| TP1 ~ TP3 | reset (`_partial_close`) | 분할 익절 |
+| TP4 | reset (`_close`) | 마지막 익절 |
+| SL | ++ (임계 도달 시 `pause_bars` 발동) | 시장 강제 (가격 도달, 봇 수동 판단 X) |
+| BE | 유지 | 봇 능동 청산 (trailing 보호 발동) |
+| REVERSE | 유지 (잠정) | 봇 능동 청산 (`compose_exit` 트리거) |
+| FORCE_END | 유지 | 백테스트 강제 종료 (트레이딩 결과 X) |
 
-**Reference**: §6.2 7 단계 `_tick_pause` (현 design doc 본문엔 미상세 — `engine.py` 본 작업 시점에 구현 truth 로 박음).
+**이유**: SL 만 시장 강제, 그 외는 봇 능동 판단 — 본질 다름. SL 만 카운트 ↑. REVERSE 카운트 별개 추적은 후속 옵션 (손실 REVERSE 빈발 시 디버깅 사안).
+
+**차용 출처**: replay_engine L994-1002 카운트 분기 그대로 차용 (`if SL: consec_sl++; elif TP1/TP2: reset, BE/CLOUD_EXIT 는 카운트 유지`). Aurora reason 매핑은 7 개로 확장 (D-25): replay `CLOUD_EXIT` → `REVERSE` (`compose_exit` 트리거 활용), `FORCE_END` 신규 (백테스트 강제 종료, adaptive L376-391 차용).
+
+**1차 안 정정 (2026-05-03)**: 1차 안 "BE / Cloud 도 SL 과 동일 취급 (카운트 ++)" 은 `engine.py` 본 작업 시점 정정 — SL 만 시장 강제이고 BE / REVERSE 는 봇 능동 청산이라 본질 다름. trailing 보호 발동 후 강제 청산이라도 봇이 능동 결정 (trailing 모드 선택 자체가 사용자 정책). 1 차 안 우려 ("trailing 발동 → 작은 손실 누적이 가드 silent 우회") 는 별도 디버깅 옵션 (REVERSE 카운트 별개 추적) 으로 처리.
+
+**Reference**: §6.2 7 단계 `_tick_pause` + `engine.py` `_close` / `_partial_close` 본 구현 (Stage 1C Group 2 단계 2).
 
 ### D-3 ✅ fixed_tp_pcts 등간격 분할
 

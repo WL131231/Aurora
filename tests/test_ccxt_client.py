@@ -159,30 +159,41 @@ async def test_get_equity_handles_missing_usdt():
 
 @pytest.mark.asyncio
 async def test_get_positions_filters_zero_contracts():
-    """contracts=0 인 row 는 필터링 (close 된 포지션 응답 방어)."""
-    client = _make_client()
-    client._mock_ex.fetch_positions = AsyncMock(return_value=[  # type: ignore[attr-defined]
-        {"symbol": "BTC/USDT:USDT", "side": "long", "contracts": 0.5,
-         "entryPrice": 50000, "leverage": 10, "unrealizedPnl": 100, "marginMode": "isolated"},
-        {"symbol": "ETH/USDT:USDT", "side": "short", "contracts": 0,  # close 됨
-         "entryPrice": 0, "leverage": 1, "unrealizedPnl": 0, "marginMode": "isolated"},
-    ])
-    positions = await client.get_positions()
-    assert len(positions) == 1
-    assert positions[0].symbol == "BTC/USDT:USDT"
-    assert positions[0].side == "long"
-    assert positions[0].qty == 0.5
+    """contracts=0 인 row 는 필터링 (close 된 포지션 응답 방어).
+
+    Note: paper 모드는 빈 리스트 즉시 반환이므로 demo 모드 명시 필요
+    (CI 환경 .env 부재 → default "paper" 회귀 보호).
+    """
+    with patch("aurora.exchange.ccxt_client.settings") as mock_settings:
+        mock_settings.run_mode = "demo"
+        client = _make_client()
+        client._mock_ex.fetch_positions = AsyncMock(return_value=[  # type: ignore[attr-defined]
+            {"symbol": "BTC/USDT:USDT", "side": "long", "contracts": 0.5,
+             "entryPrice": 50000, "leverage": 10, "unrealizedPnl": 100, "marginMode": "isolated"},
+            {"symbol": "ETH/USDT:USDT", "side": "short", "contracts": 0,  # close 됨
+             "entryPrice": 0, "leverage": 1, "unrealizedPnl": 0, "marginMode": "isolated"},
+        ])
+        positions = await client.get_positions()
+        assert len(positions) == 1
+        assert positions[0].symbol == "BTC/USDT:USDT"
+        assert positions[0].side == "long"
+        assert positions[0].qty == 0.5
 
 
 @pytest.mark.asyncio
 async def test_fetch_position_returns_none_when_no_open():
-    """open contract 없으면 None."""
-    client = _make_client()
-    client._mock_ex.fetch_positions = AsyncMock(return_value=[  # type: ignore[attr-defined]
-        {"symbol": "BTC/USDT:USDT", "contracts": 0},
-    ])
-    pos = await client.fetch_position("BTC/USDT:USDT")
-    assert pos is None
+    """open contract 없으면 None — demo 모드 (실 fetch_positions 호출) 검증.
+
+    Note: paper 모드 None 반환은 별도 ``test_paper_mode_fetch_position_returns_none``.
+    """
+    with patch("aurora.exchange.ccxt_client.settings") as mock_settings:
+        mock_settings.run_mode = "demo"
+        client = _make_client()
+        client._mock_ex.fetch_positions = AsyncMock(return_value=[  # type: ignore[attr-defined]
+            {"symbol": "BTC/USDT:USDT", "contracts": 0},
+        ])
+        pos = await client.fetch_position("BTC/USDT:USDT")
+        assert pos is None
 
 
 # ============================================================

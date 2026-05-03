@@ -1,89 +1,137 @@
-"""PyInstaller 빌드 스크립트 — Aurora 를 단일 .exe 로 패키징.
+"""PyInstaller 빌드 스크립트 — Aurora 를 크로스플랫폼 단일 실행기로 패키징.
+
+지원 플랫폼:
+    - Windows: ``.exe`` (단일 파일 또는 폴더)
+    - macOS:   ``.app`` 번들 (zip 으로 배포)
+    - Linux:   ELF 단일 파일 (Phase 3 검토)
 
 사용법:
     # venv 활성화 후
-    python scripts/build_exe.py
-
-    # 또는 단일 파일 (.exe 한 개로 합침, 처음 실행 5-10초 unpack)
-    python scripts/build_exe.py --onefile
+    python scripts/build_exe.py             # 폴더 빌드 (기본)
+    python scripts/build_exe.py --onefile   # 단일 파일
 
 요구사항:
     pip install pyinstaller
 
-산출물 (기본 = 폴더 형태):
-    dist/Aurora/Aurora.exe    ← 더블클릭 실행
-    dist/Aurora/_internal/    ← 의존성 (이동 시 폴더째)
+산출물 (Windows):
+    --onefile X: dist/Aurora/Aurora.exe + _internal/ 폴더
+    --onefile O: dist/Aurora.exe (단일)
 
-산출물 (--onefile):
-    dist/Aurora.exe           ← 단일 파일, 다른 사람한테 줘도 됨
+산출물 (macOS):
+    dist/Aurora.app/ (번들)  ← 이걸 zip 으로 배포
+    --onefile 옵션 없이 자동 .app 생성 (--windowed 효과)
 
 진입점:
-    src/aurora/interfaces/webview.py — ``if __name__ == "__main__": launch()``
-    이 모듈이 직접 ``webview.launch()`` 호출 → Pywebview 윈도우 + FastAPI 통합 기동.
+    src/aurora/main.py — main() 호출 → bot_instance.configure_from_settings + webview.launch
 
 담당: 정용우 (interfaces 영역)
 """
 
 from __future__ import annotations
 
+import os
+import platform
 import subprocess
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# ============================================================
+# 플랫폼 감지 + 분기
+# ============================================================
+
+IS_WINDOWS = platform.system() == "Windows"
+IS_MACOS = platform.system() == "Darwin"
+IS_LINUX = platform.system() == "Linux"
+
+# PyInstaller --add-data separator: Windows ';' / Unix ':' (os.pathsep 자동 분기)
+DATA_SEP = os.pathsep
+
+# 플랫폼별 pywebview 백엔드 — PyInstaller 가 동적 import 못 잡으니 명시
+# Windows: EdgeChromium (winforms), macOS: WebKit (cocoa), Linux: GTK/QT
+PLATFORM_HIDDEN_IMPORTS = {
+    "Windows": ["webview.platforms.winforms"],
+    "Darwin":  ["webview.platforms.cocoa"],
+    "Linux":   ["webview.platforms.gtk", "webview.platforms.qt"],
+}
+
+# 플랫폼별 아이콘 파일 (assets/ 에 있으면 사용, 없으면 skip)
+PLATFORM_ICON = {
+    "Windows": "aurora.ico",
+    "Darwin":  "aurora.icns",
+    "Linux":   "aurora.png",
+}
+
 
 def main() -> int:
     """PyInstaller 호출."""
     onefile = "--onefile" in sys.argv
+    plat = platform.system()
 
-    # 진입점 = interfaces/webview.py (launch() 자동 호출)
-    entry = PROJECT_ROOT / "src" / "aurora" / "interfaces" / "webview.py"
+    # 진입점 = main.py (BotInstance auto-configure + webview.launch)
+    # webview.py 직접 entry 도 가능하지만 main.py 가 통합 hub (PR #48)
+    entry = PROJECT_ROOT / "src" / "aurora" / "main.py"
     ui_dir = PROJECT_ROOT / "ui"
-    icon_path = PROJECT_ROOT / "assets" / "aurora.ico"
+    data_dir = PROJECT_ROOT / "data"   # team_aliases.json 등 (PR #60)
+    assets_dir = PROJECT_ROOT / "assets"
 
-    cmd = [
+    cmd: list[str] = [
         sys.executable, "-m", "PyInstaller",
         "--name", "Aurora",
-        "--windowed",                          # 콘솔 창 안 뜸 (GUI only)
-        "--add-data", f"{ui_dir};ui",          # ui/ 폴더 번들링
-        "--paths", str(PROJECT_ROOT / "src"),  # aurora 패키지 import 경로
-        # PyInstaller 가 동적 import 못 잡는 모듈 명시 (pywebview 백엔드 등)
-        "--hidden-import", "webview.platforms.winforms",
-        "--hidden-import", "uvicorn.logging",
-        "--hidden-import", "uvicorn.loops",
-        "--hidden-import", "uvicorn.loops.auto",
-        "--hidden-import", "uvicorn.protocols",
-        "--hidden-import", "uvicorn.protocols.http",
-        "--hidden-import", "uvicorn.protocols.http.auto",
-        "--hidden-import", "uvicorn.protocols.websockets",
-        "--hidden-import", "uvicorn.protocols.websockets.auto",
-        "--hidden-import", "uvicorn.lifespan",
-        "--hidden-import", "uvicorn.lifespan.on",
-        # 봇 런타임에는 안 쓰이는 백테스트/데이터 수집 의존성 — .exe 사이즈 폭증 방지.
-        # PR-3 (BacktestEngine) 가 aurora.backtest.* 에서 이 모듈들 import 시
-        # PyInstaller 가 import 트리에 포함시키는데, 봇 GUI 는 backtest 모듈을
-        # 사용하지 않으므로 수십 MB 불필요 의존성을 빼낸다.
-        "--exclude-module", "pyarrow",          # parquet 엔진 (50 MB+) — fetch_ohlcv 전용
-        # tenacity: fetch_ohlcv (백테스트) + ccxt_client (라이브 어댑터, 2026-05) 양쪽 사용.
-        # 라이브 어댑터가 retry 사용하므로 봇 런타임에 필요 — exclude 해제 (DESIGN.md E-11).
-        "--exclude-module", "aurora.backtest",  # 백테스트 모듈 (분석 도구)
+        "--windowed",                           # GUI only (콘솔 창 X)
+        "--paths", str(PROJECT_ROOT / "src"),   # aurora 패키지 import 경로
+        # ui/ 데이터 번들 — PyInstaller 가 sys._MEIPASS 아래에 풀어둠
+        "--add-data", f"{ui_dir}{DATA_SEP}ui",
         "--clean",
         "--noconfirm",
     ]
 
-    # 앱 아이콘 (assets/aurora.ico) — generate_icon.py 로 생성
-    if icon_path.exists():
-        cmd.extend(["--icon", str(icon_path)])
-    else:
-        print(f"⚠ 아이콘 파일 없음: {icon_path}")
-        print("   먼저 실행: python scripts/generate_icon.py")
+    # data/team_aliases.json 등 매핑·샘플 (PR #60 testing 단계 한정)
+    if data_dir.exists():
+        cmd.extend(["--add-data", f"{data_dir}{DATA_SEP}data"])
 
+    # 플랫폼별 hidden imports
+    for module in PLATFORM_HIDDEN_IMPORTS.get(plat, []):
+        cmd.extend(["--hidden-import", module])
+
+    # uvicorn 동적 import 모듈 (cross-platform 공통)
+    for module in [
+        "uvicorn.logging",
+        "uvicorn.loops", "uvicorn.loops.auto",
+        "uvicorn.protocols",
+        "uvicorn.protocols.http", "uvicorn.protocols.http.auto",
+        "uvicorn.protocols.websockets", "uvicorn.protocols.websockets.auto",
+        "uvicorn.lifespan", "uvicorn.lifespan.on",
+    ]:
+        cmd.extend(["--hidden-import", module])
+
+    # 봇 런타임에 안 쓰이는 백테스트/데이터 수집 의존성 — .exe 사이즈 폭증 방지.
+    # tenacity 는 라이브 어댑터 (ccxt_client) 가 retry 사용 → exclude 풀림 (PR #53 E-11)
+    cmd.extend([
+        "--exclude-module", "pyarrow",          # parquet 엔진 (50 MB+) — fetch_ohlcv 전용
+        "--exclude-module", "aurora.backtest",  # 백테스트 모듈 (분석 도구)
+    ])
+
+    # 앱 아이콘 (플랫폼별)
+    icon_name = PLATFORM_ICON.get(plat)
+    if icon_name:
+        icon_path = assets_dir / icon_name
+        if icon_path.exists():
+            cmd.extend(["--icon", str(icon_path)])
+        else:
+            print(f"⚠ 아이콘 파일 없음: {icon_path} (skip)")
+            if IS_WINDOWS:
+                print("   생성 방법: python scripts/generate_icon.py")
+
+    # --onefile 옵션 (사용자 명시 시)
+    # macOS 는 --onefile 사용해도 .app 번들 생성됨 (PyInstaller 동작)
     if onefile:
         cmd.append("--onefile")
 
     cmd.append(str(entry))
 
+    print(f"플랫폼: {plat} ({sys.version})")
     print("실행:", " ".join(cmd))
     return subprocess.run(cmd, check=False).returncode
 

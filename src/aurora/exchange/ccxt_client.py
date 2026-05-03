@@ -300,13 +300,30 @@ class CcxtClient:
         return self._parse_order(raw, symbol, side, qty, price)
 
     async def set_leverage(self, symbol: str, leverage: int) -> None:
-        """레버리지 설정 — paper 모드는 noop (로깅만)."""
+        """레버리지 설정 — paper 모드는 noop (로깅만).
+
+        Idempotent 동작: Bybit 은 이미 같은 leverage 면 ``retCode 110043
+        "leverage not modified"`` 로 ``BadRequest`` raise. 매 진입마다 호출하는
+        패턴에서 비치명 에러라 catch + warn + return (silent OK).
+        다른 retCode 는 그대로 전파 (실 에러).
+        """
         if settings.run_mode == "paper":
             logger.info("paper mode: set_leverage(%s, %d) skipped", symbol, leverage)
             return
         await self._ensure_init()
-        # ccxt 시그니처: set_leverage(leverage, symbol) — 인자 순서 반대 주의
-        await self._ex.set_leverage(leverage, symbol)
+        try:
+            # ccxt 시그니처: set_leverage(leverage, symbol) — 인자 순서 반대 주의
+            await self._ex.set_leverage(leverage, symbol)
+        except ccxt.BadRequest as e:
+            # Why: Bybit retCode 110043 = 이미 같은 leverage. 봇 매 진입마다 호출하는
+            # 패턴에서 빈발 → silent OK. 다른 BadRequest 는 raise 보존.
+            if "110043" in str(e) or "leverage not modified" in str(e):
+                logger.debug(
+                    "set_leverage(%s, %d): already at this leverage (110043, idempotent)",
+                    symbol, leverage,
+                )
+                return
+            raise
 
     async def cancel_all(self, symbol: str) -> None:
         """전체 주문 취소 (해당 페어). paper 모드는 noop."""

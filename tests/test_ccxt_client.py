@@ -282,6 +282,43 @@ async def test_set_leverage_arg_order():
 
 
 @pytest.mark.asyncio
+async def test_set_leverage_idempotent_swallows_110043():
+    """Bybit retCode 110043 'leverage not modified' — silent OK (idempotent).
+
+    Why: 봇이 매 진입마다 set_leverage 호출 → 같은 leverage 면 빈발.
+    silent OK 안 하면 봇 진입 자체가 BadRequest 로 깨짐.
+    """
+    import ccxt as _ccxt
+    with patch("aurora.exchange.ccxt_client.settings") as mock_settings:
+        mock_settings.run_mode = "demo"
+        client = _make_client()
+        # set_leverage 가 retCode 110043 BadRequest raise 하도록 mock
+        client._mock_ex.set_leverage = AsyncMock(  # type: ignore[attr-defined]
+            side_effect=_ccxt.BadRequest(
+                'bybit {"retCode":110043,"retMsg":"leverage not modified"}',
+            ),
+        )
+        # 호출 자체는 raise X (silent OK)
+        await client.set_leverage("BTC/USDT:USDT", 10)
+
+
+@pytest.mark.asyncio
+async def test_set_leverage_other_badrequest_raises():
+    """다른 BadRequest (예: 110001 invalid leverage) — 그대로 raise (실 에러)."""
+    import ccxt as _ccxt
+    with patch("aurora.exchange.ccxt_client.settings") as mock_settings:
+        mock_settings.run_mode = "demo"
+        client = _make_client()
+        client._mock_ex.set_leverage = AsyncMock(  # type: ignore[attr-defined]
+            side_effect=_ccxt.BadRequest(
+                'bybit {"retCode":110001,"retMsg":"invalid leverage"}',
+            ),
+        )
+        with pytest.raises(_ccxt.BadRequest):
+            await client.set_leverage("BTC/USDT:USDT", 999)
+
+
+@pytest.mark.asyncio
 async def test_place_order_reduce_only_param():
     """reduce_only=True 시 ccxt params 에 reduceOnly=True 전달."""
     with patch("aurora.exchange.ccxt_client.settings") as mock_settings:

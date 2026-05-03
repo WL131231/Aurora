@@ -19,9 +19,35 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from aurora.backtest.cost import Direction, apply_costs, apply_slippage, slip_pct
+from aurora.backtest.cost import (
+    Direction as RecordDir,
+)
+from aurora.backtest.cost import (
+    apply_costs,
+    apply_slippage,
+    slip_pct,
+)
+from aurora.backtest.replay import MultiTfAggregator
 from aurora.backtest.stats import TradeRecord
-from aurora.core.risk import RiskPlan, TpSlConfig, update_trailing_sl
+from aurora.core.indicators import atr_wilder
+from aurora.core.risk import (
+    RiskPlan,
+    TpSlConfig,
+    TpSlMode,
+    build_risk_plan,
+    sl_pct_for_leverage,
+    tp_pct_range_for_leverage,
+    update_trailing_sl,
+)
+from aurora.core.signal import compose_entry, compose_exit
+from aurora.core.strategy import (
+    Direction,
+    EntrySignal,
+    StrategyConfig,
+    detect_ema_touch,
+    detect_rsi_divergence,
+    evaluate_selectable,
+)
 
 # 모듈 logger — 0 거래 / 영구 정지 / 강제 청산 등 비치명 경고용
 logger = logging.getLogger(__name__)
@@ -56,9 +82,14 @@ class BacktestConfig:
             의존 제거). pause 동안 진입 게이트 차단, 보유 포지션의 청산은 정상
             동작.
         risk_config: ``TpSlConfig`` (mode + tp/sl pcts + trailing). ``None`` 이면
-            ``run()`` 진입 시점에 ``sl_pct_for_leverage`` /
+            ``BacktestEngine.__init__`` 시점에 ``sl_pct_for_leverage`` /
             ``tp_pct_range_for_leverage`` 그래디언트 + D-3 등간격 분할로 자동
-            산출 (Group 2 에서 채움).
+            산출 → ``self._risk_config`` 박음 (config 인스턴스 mutate X — 외부
+            재사용 안전).
+        strategy_config: ``StrategyConfig`` (EMA / RSI Div / Selectable 지표
+            on/off + 파라미터). ``None`` 이면 ``__init__`` 시점에
+            ``StrategyConfig()`` 디폴트 (Fixed only) 자동 산출 → ``self.
+            _strategy_config`` 박음 (D-8 사용자 노출 패턴 정합).
     """
 
     symbol: str = "BTCUSDT"
@@ -71,7 +102,8 @@ class BacktestConfig:
     max_dd_stop_pct: float = 0.15     # 시드 -15% 영구 정지 (replay L44)
     consec_sl_pause_threshold: int = 2    # 연속 SL 2 회 (replay L49)
     consec_sl_pause_minutes: int = 1440   # 정지 24 h (replay L50, 단위 변환)
-    risk_config: TpSlConfig | None = None  # Group 2 자동 산출 분기
+    risk_config: TpSlConfig | None = None       # __init__ 자동 산출 분기
+    strategy_config: StrategyConfig | None = None  # __init__ 디폴트 자동
 
 
 # ============================================================
@@ -142,10 +174,41 @@ class BacktestEngine:
     def __init__(self, config: BacktestConfig) -> None:
         """엔진 초기화 — 시드 / 가드 카운터 / trade 누적 컨테이너.
 
+        ``risk_config`` / ``strategy_config`` 가 ``None`` 이면 본 시점에 자동
+        산출 → ``self._risk_config`` / ``self._strategy_config`` 박음. config
+        인스턴스는 mutate X (외부 재사용 안전, leverage 다른 두 엔진 같은
+        config 공유 가능).
+
         Args:
             config: 시뮬 파라미터 + 가드 임계값.
         """
         self.config = config
+
+        # risk_config 자동 산출 (D-3 등간격 + sl_pct_for_leverage / tp_pct_range)
+        # — config mutate X 보장 위해 self._risk_config 별도 박음.
+        if config.risk_config is not None:
+            self._risk_config: TpSlConfig = config.risk_config
+        else:
+            sl_pct = sl_pct_for_leverage(config.leverage)
+            tp_min, tp_max = tp_pct_range_for_leverage(config.leverage)
+            tp_range = tp_max - tp_min
+            fixed_tp_pcts = [
+                tp_min,
+                tp_min + tp_range / 3.0,
+                tp_min + 2.0 * tp_range / 3.0,
+                tp_max,                                  # D-3 등간격 4 분할
+            ]
+            self._risk_config = TpSlConfig(
+                mode=TpSlMode.FIXED_PCT,
+                fixed_tp_pcts=fixed_tp_pcts,
+                fixed_sl_pct=sl_pct,
+            )
+
+        # strategy_config 디폴트 — None 시 StrategyConfig() (Fixed only)
+        self._strategy_config: StrategyConfig = (
+            config.strategy_config if config.strategy_config is not None
+            else StrategyConfig()
+        )
 
         # 시드 추적 — peak_balance 는 _update_peak / _check_max_dd 에서 갱신
         self.balance: float = config.initial_capital
@@ -174,27 +237,166 @@ class BacktestEngine:
     def run(self, df_1m: pd.DataFrame) -> list[TradeRecord]:
         """1 분봉 ``DataFrame`` 통째 받아 시뮬 + trade 기록 반환.
 
+        ``MultiTfAggregator`` 신규 생성 (D-22 상태 격리, run 호출별 독립) +
+        매 1m 봉마다 ``self.step(bar, aggregator)`` 호출 + 마지막 봉 도달 시
+        보유 포지션 강제 청산 (``_force_close_at_end``).
+
         Args:
             df_1m: PR-2 산출 parquet 로드 결과. ``DatetimeIndex`` (ms epoch
                 기반) + OHLCV 컬럼. ``df_1m.iterrows()`` 자연 호출 가능 형태.
-                ``timestamp`` 변환은 진입점 1줄 (``ts_ms = int(bar_1m.name.value
-                // 10**6)``, D-26).
+                ``timestamp`` 변환은 ``step()`` 진입점 1 줄 (``ts_ms =
+                int(bar_1m.name.value // 10**6)``, D-26).
 
         Returns:
             ``TradeRecord`` 리스트 — ``stats.compute_session_stats`` 입력.
             0 거래 세션도 빈 리스트 정상 반환.
-
-        Raises:
-            NotImplementedError: Group 1 골격 단계. Group 2 본문 구현 후 제거.
         """
-        del df_1m  # Group 2 본문에서 활용 — 골격 단계 명시적 무시
-        raise NotImplementedError("Group 2 — step() 10 단계 본 구현 예정")
+        # aggregator 신규 생성 — run 별 독립 (D-22)
+        aggregator = MultiTfAggregator(timeframes=self.config.timeframes)
+
+        last_close = 0.0
+        last_ts = 0
+        for ts, bar in df_1m.iterrows():
+            self.step(bar, aggregator)
+            last_close = float(bar["close"])
+            last_ts = int(ts.value // 10**6)
+
+        # 마지막 봉 미청산 포지션 → FORCE_END 강제 청산 (adaptive L376-391)
+        if last_ts > 0:
+            self._force_close_at_end(last_close=last_close, last_ts=last_ts)
+
+        return self.trades
+
+    def step(self, bar_1m: pd.Series, aggregator: MultiTfAggregator) -> None:
+        """1 분봉 1 개 처리 — DESIGN.md §6.2 10 단계 흐름.
+
+        보유 분기 (트레일링 + SL/TP 체크 + high/low 갱신) → 닫힌 TF early
+        return → MDD 가드 → 신호 평가 (3 함수 합본) → REVERSE 분기 (D-24)
+        또는 신규 진입 (build_risk_plan + _open). pause 카운터는 본 메서드
+        진입점에서 매 1m 1 회 감소 (replay L347-348, 1m unit 정합).
+
+        Args:
+            bar_1m: 1 분봉 Series — ``.name`` = ``pd.Timestamp`` 인덱스 (ms
+                epoch 변환 가능), 컬럼 ``open/high/low/close`` (volume 옵션).
+            aggregator: ``run()`` 가 신규 생성한 ``MultiTfAggregator`` 인스턴스.
+                ``step()`` 별 인자 주입 — 단위 테스트 친화 + 상태 격리 (D-22).
+
+        Note:
+            동일 1m 에 close + open 금지 (D-20 단일 포지션 정책) — REVERSE
+            분기 후 즉시 return, 다음 1m 부터 신규 진입 가능. ATR 모드 + 4H
+            미닫힘 시 진입 skip (D-4 정합 — ``build_risk_plan(atr=None)`` 호출
+            시 ValueError 회피).
+        """
+        # 0a. _last_OHLC 갱신 — slip 산출 입력 (현재 봉 변동성 기준)
+        self._last_high = float(bar_1m["high"])
+        self._last_low = float(bar_1m["low"])
+        self._last_close = float(bar_1m["close"])
+        ts_ms = int(bar_1m.name.value // 10**6)            # D-26
+
+        # 0b. 매 1m 가드 — pause 카운터 1 감소 (replay L347-348, 1m unit 정합)
+        # Why: 닫힌 TF 분기 뒤로 옮기면 단위 의미 깨짐 (1H 닫힘 시만 감소 → 1440
+        #      이 60일이 됨). docstring contract "매 1 분봉 호출" 우선.
+        self._tick_pause()
+
+        # 1. aggregator step — 닫힘 dict
+        closed = aggregator.step(bar_1m)
+
+        # 2-4. 보유 포지션 분기 — 트레일링 갱신 + SL/TP 체크 + high/low 갱신
+        if self.position is not None:
+            p = self.position
+            # 2. 트레일링 SL 갱신 (5 모드 + OFF, 단방향 보장은 risk.py 내부)
+            p.current_sl = update_trailing_sl(
+                current_sl=p.current_sl,
+                plan=p.plan,
+                config=self._risk_config,
+                tp_hits=p.tp_hits,
+                highest_since_entry=p.highest_since_entry,
+                lowest_since_entry=p.lowest_since_entry,
+            )
+            # 3. SL/TP 도달 체크 + gap-fill (단계 1·2 _check_exits)
+            record = self._check_exits(
+                ts_ms=ts_ms,
+                open_=float(bar_1m["open"]),
+                high=self._last_high,
+                low=self._last_low,
+                close=self._last_close,
+            )
+            # 4. 청산 X 시 high/low 갱신 — 다음 봉 트레일링 입력
+            if record is None and self.position is not None:
+                self.position.highest_since_entry = max(
+                    self.position.highest_since_entry, self._last_high,
+                )
+                self.position.lowest_since_entry = min(
+                    self.position.lowest_since_entry, self._last_low,
+                )
+
+        # 5. 닫힌 TF 추출 — 어떤 TF 도 닫힘 X 면 신호 평가 skip (early return)
+        closed_tfs = [tf for tf, b in closed.items() if b is not None]
+        if not closed_tfs:
+            return
+
+        # 6. MDD 영구 정지 가드 (글로벌)
+        self._check_max_dd()
+
+        # 7. df_by_tf + signals — 3 함수 합본 (C1 정합, DESIGN §6.2 8 단계)
+        # core.strategy.evaluate() 통합 함수 부재 → detect_ema_touch +
+        # detect_rsi_divergence (1H) + evaluate_selectable 직접 호출.
+        df_by_tf = {tf: aggregator.get_df(tf) for tf in closed_tfs}
+        sc = self._strategy_config
+        signals: list[EntrySignal] = list(detect_ema_touch(df_by_tf, sc))
+        if "1H" in df_by_tf:
+            signals.extend(detect_rsi_divergence(df_by_tf["1H"], sc))
+        signals.extend(
+            evaluate_selectable(df_by_tf, sc, symbol=self.config.symbol),
+        )
+
+        # 8. 보유 중 분기 — REVERSE 체크 (D-24, compose_exit 활용)
+        # Why: signal.is_reverse_signal 부재 — compose_exit(direction, signals)
+        # 이 내부에서 compose_entry 호출 후 반대 방향 비교. 동일 1m close+open
+        # 금지 (D-20) → REVERSE 후 즉시 return.
+        if self.position is not None:
+            cur_dir = Direction(self.position.plan.direction)
+            if compose_exit(cur_dir, signals):
+                self._close(
+                    fill=self._last_close, ts_ms=ts_ms, reason="REVERSE",
+                )
+            return
+
+        # 9. 신규 진입 가드 — stopped (영구 정지) / pause_bars / decision
+        if self.stopped or self.pause_bars > 0:
+            return
+        decision = compose_entry(signals)
+        if not decision.enter or decision.direction is None:
+            return
+
+        # 10. ATR 모드 + 4H 미닫힘 → 진입 skip (D-4 정합, sanity [22])
+        cfg = self._risk_config
+        if cfg.mode == TpSlMode.ATR and "4H" not in df_by_tf:
+            return
+        atr_value = (
+            float(atr_wilder(df_by_tf["4H"]).iloc[-1])
+            if cfg.mode == TpSlMode.ATR else None
+        )
+
+        # 11. build_risk_plan + _open (1m close 진입, gap-fill X — Q4 잠정안)
+        plan = build_risk_plan(
+            entry_price=self._last_close,
+            direction=decision.direction.value,
+            leverage=self.config.leverage,
+            equity_usd=self.balance,
+            config=cfg,
+            atr=atr_value,
+            risk_pct=self.config.risk_pct,                 # D-8 사용자 노출
+            full_seed=False,
+            min_seed_pct=0.40,                             # D-1 정책
+        )
+        self._open(plan=plan, ts_ms=ts_ms)
 
     # ─────────────────────────────────────────────
     # 헬퍼 함수 — Group 2 본문 구현 자리 (시그니처만 박음)
     # ─────────────────────────────────────────────
 
-    def _to_record_direction(self, direction: str) -> Direction:
+    def _to_record_direction(self, direction: str) -> RecordDir:
         """direction 이중 표준 격리 — ``RiskPlan`` (소문자) → ``TradeRecord``
         (대문자) 변환을 1 곳에 격리 (D-19).
 
@@ -202,6 +404,11 @@ class BacktestEngine:
         ``cost.Direction Literal["LONG","SHORT"]`` 정합. ``cost`` / ``stats``
         Stage 1B 변경 X (회귀 비용 0). 본질 정합화는 후속 PR (장수 ping 답변
         후 결정).
+
+        Note:
+            cost.Direction (Literal) 은 본 모듈에서 ``RecordDir`` 로 alias —
+            ``core.strategy.Direction`` (StrEnum, signal 영역) 과 이름 충돌
+            회피.
         """
         # Why: Literal 반환 타입 narrowing 위해 if-elif-raise 패턴.
         # `return norm` (str) 은 mypy/pyright 가 좁혀주지 않음.
@@ -278,15 +485,13 @@ class BacktestEngine:
             생성된 ``TradeRecord`` (engine.trades 에도 append).
 
         Raises:
-            RuntimeError: 보유 포지션 X 또는 ``risk_config`` 미설정.
+            RuntimeError: 보유 포지션 없음 (``_check_exits`` / ``_force_close_at_end``
+                호출 가드 누락 신호).
         """
         if self.position is None:
             raise RuntimeError("청산할 포지션 없음 — _close 호출 가드 누락")
-        cfg = self.config.risk_config
-        if cfg is None:
-            raise RuntimeError(
-                "risk_config 미설정 — step() 진입점에서 build_risk_plan 호출 시 설정 필요",
-            )
+        # __init__ 시점 산출 보장 — None 가드 불필요 (CLAUDE.md trust internal guarantees)
+        cfg = self._risk_config
 
         p = self.position
         plan = p.plan
@@ -373,7 +578,7 @@ class BacktestEngine:
 
         Raises:
             ValueError: ``idx >= 3`` (TP4 는 ``_close`` 책임 — 호출자 분기 누락).
-            RuntimeError: ``self.position is None`` / ``risk_config is None``.
+            RuntimeError: 보유 포지션 없음 (``_check_exits`` 호출 가드 누락 신호).
         """
         if self.position is None:
             raise RuntimeError("부분 청산할 포지션 없음 — _partial_close 호출 가드 누락")
@@ -382,11 +587,8 @@ class BacktestEngine:
                 f"_partial_close idx={idx} 잘못 — TP4 (idx=3) 는 "
                 f"_close(reason='TP4') 책임",
             )
-        cfg = self.config.risk_config
-        if cfg is None:
-            raise RuntimeError(
-                "risk_config 미설정 — step() 진입점에서 build_risk_plan 호출 시 설정 필요",
-            )
+        # __init__ 시점 산출 보장 — None 가드 불필요 (CLAUDE.md trust internal guarantees)
+        cfg = self._risk_config
         p = self.position
         plan = p.plan
 

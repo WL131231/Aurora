@@ -488,8 +488,15 @@ def atr_wilder(df: pd.DataFrame, period: int = 14) -> pd.Series:
 7. _tick_pause()                           ← consec_sl pause_bars 카운터 감소
 
 8. df_by_tf = {tf: aggregator.get_df(tf) for tf in closed_tfs}
-   signals = strategy.evaluate(df_by_tf, config)
-                                           → list[EntrySignal]
+   signals = (
+       detect_ema_touch(df_by_tf, strategy_config)
+       + (detect_rsi_divergence(df_by_tf['1H'], strategy_config)
+          if '1H' in df_by_tf else [])
+       + evaluate_selectable(df_by_tf, strategy_config, symbol=config.symbol)
+   )                                       ← list[EntrySignal]
+                                           (core.strategy 통합 evaluate() 부재 →
+                                            3 함수 직접 호출 + concat. 통합 함수
+                                            추가는 장수 영역 후속 PR)
 
 9. decision = compose_entry(signals, threshold=DEFAULT_ENTRY_THRESHOLD)
                                            → CompositeDecision(enter, direction, score, ...)
@@ -696,6 +703,7 @@ PR-1 테스트(13개) + PR-2 테스트(18개)와 같은 mock 기반 결정론적
 - 추매 로직의 Aurora `core.strategy` 통합
 - 백테스트 결과 저장 형식 (parquet vs HTML 리포트 등)
 - 멀티 페어·멀티 기간 동시 백테스트 (현재는 단일 가정)
+- **BotInstance ↔ BacktestEngine 통합 점검 (step 재활용 가능성)** — `BotInstance._run_loop` (PR #57, 라이브 매매 루프) 와 `BacktestEngine.run()` (Stage 1C 단계 3, 백테스트 시뮬 루프) 가 별도 outer 루프. `step(bar_1m, aggregator)` 2-인자 시그니처는 라이브 어댑터 polling 결과 주입에도 자연 호환 (D-22 상태 격리 정합). 단계 3 시점엔 **BacktestEngine = 백테스트 전용 / BotInstance = 라이브 전용** 명확 분리 — step() 재활용은 후속 PR 자연 진화 여지로 보존. 장수 페이스 조율 답변 (2026-05-03) "step() 인터페이스가 자연스럽게 라이브 호환이면 충분" 정합.
 
 ---
 
@@ -825,6 +833,20 @@ PR-3 description 본문에 박을 Decisions 항목 미리보기. 본 design doc 
 
 **Reference**: §3.3.1 단락 3 (호출 패턴), §6.2 10-f.
 
+### D-24 ✅ REVERSE 분기 — `compose_exit` 활용 (signal.is_reverse_signal 부재)
+
+**결정**: `step()` 보유 중 분기에서 반대 방향 신호 감지 시 `_close(reason="REVERSE")` 호출. 판정은 `core.signal.compose_exit(current_direction, signals) -> bool` 활용.
+
+**이유**:
+- `core.signal` 에 `is_reverse_signal` 같은 별도 함수 부재 — `compose_exit` 가 동등 역할 (`compose_entry` 내부 호출 후 반대 방향 비교, `True` = 청산 신호).
+- `step()` 8 단계 (signals 평가) 결과를 1 회 더 활용 — 별도 신호 재평가 X (성능 + 일관성).
+- 동일 1m 에 close + open 금지 (D-20 단일 포지션 정책) — REVERSE 청산 후 즉시 `return`. 다음 1m 부터 신규 진입 가능.
+- consec_sl 카운트 분기 (D-2 매핑 표): REVERSE 는 봇 능동 청산 → 카운트 유지 (시장 강제 SL 과 본질 다름).
+
+**구현 위치**: `engine.py` `step()` 9 단계 (`compose_entry` 호출 직전, 보유 중 분기에서 early return).
+
+**Reference**: §6.2 step 8 (REVERSE 분기), §11 D-2 매핑 표 (REVERSE = 봇 능동 청산), `core.signal.compose_exit` (signal.py L133-144).
+
 ---
 
 ## 변경 이력
@@ -834,4 +856,5 @@ PR-3 description 본문에 박을 Decisions 항목 미리보기. 본 design doc 
 - 2026-05-02 (밤 갱신 #2): §6 timeframe normalizer 상세 설계 확정 — 옵션 A(함수 3개 분리), Strict 검증 정책, 14개 테스트 케이스 spec. design doc 골격 거의 완성.
 - 2026-05-02 (밤 갱신 #3): Aurora `core/risk.py` 정독 완료. §3.3 옵션 a 결정 검증 — 더 강해짐. **발견**: Aurora `calc_position_size`가 이미 R 기반 + 풀시드 + 최소 시드 강제(40%) 통합. 장수 명시한 두 모델 차이는 한 함수의 두 모드. Aurora 모델이 차용 코드보다 정교 → 차용 X 부분 추가 (SL/TP 그래디언트, 트레일링 5모드 등). 차용은 통계·시뮬 루프·수수료 모델만.
 - 2026-05-03 (오후): §3.1.1 시그니처 truth / §3.3.1 옵션 a 검증 + 신호↔리스크 독립 / §4 정독 확정 + ROI 17.3% / §5 모듈 spec + atr_wilder 위임 / §6 신설 (engine.step() 10단계) / 절번호 시프트 / §3.2 Bybit→Binance 정정.
+- 2026-05-03 (저녁, Stage 1C 단계 3): §6.2 8 단계 정정 (`strategy.evaluate` 통합 함수 부재 → `detect_ema_touch + detect_rsi_divergence + evaluate_selectable` 3 함수 합본 명시) / §9 BotInstance ↔ BacktestEngine 책임 경계 환기 추가 / §11 D-24 본문화 (REVERSE 분기 = `compose_exit` 활용).
 - 다음 보강 예정: §8 BacktestEngine 테스트 케이스 spec (시프트 후), §10 review 발송 준비 (시프트 후), §11 PR description Decisions 미리보기 (D-1~D-8 + D-4 보강), 동기화 매트릭스 별도 파일 신설.

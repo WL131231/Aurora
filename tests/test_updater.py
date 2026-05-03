@@ -124,3 +124,76 @@ def test_download_update_cleans_partial_on_failure(tmp_path):
     ):
         assert updater.download_update("https://example.com/x.exe", target) is False
     assert not target.exists()  # 부분 파일 정리됨
+
+
+# ============================================================
+# UI 핫 업데이트 (PR b)
+# ============================================================
+
+
+def test_find_ui_asset_url_returns_browser_download_url():
+    release = {
+        "tag_name": "v0.1.2",
+        "assets": [
+            {"name": "Aurora-windows.exe", "browser_download_url": "https://example.com/exe"},
+            {"name": "Aurora-ui.zip", "browser_download_url": "https://example.com/ui.zip"},
+        ],
+    }
+    assert updater.find_ui_asset_url(release) == "https://example.com/ui.zip"
+
+
+def test_find_ui_asset_url_returns_none_when_missing():
+    release = {"tag_name": "v0.1.2", "assets": [
+        {"name": "Aurora-windows.exe", "browser_download_url": "https://example.com/exe"},
+    ]}
+    assert updater.find_ui_asset_url(release) is None
+
+
+def test_apply_ui_update_extracts_zip(tmp_path):
+    """Aurora-ui.zip → <exe_dir>/ui_override/ 풀기 + 기존 정리."""
+    import zipfile
+
+    zip_path = tmp_path / "Aurora-ui.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("index.html", "<html>new</html>")
+        zf.writestr("js/app.js", "console.log('new');")
+
+    exe_dir = tmp_path / "exe"
+    exe_dir.mkdir()
+    # 기존 ui_override/ 잔재 시뮬
+    (exe_dir / "ui_override").mkdir()
+    (exe_dir / "ui_override" / "old.html").write_text("<html>old</html>")
+
+    assert updater.apply_ui_update(zip_path, exe_dir) is True
+
+    # 새 파일 확인
+    assert (exe_dir / "ui_override" / "index.html").read_text() == "<html>new</html>"
+    assert (exe_dir / "ui_override" / "js" / "app.js").read_text() == "console.log('new');"
+    # 기존 잔재 정리됨
+    assert not (exe_dir / "ui_override" / "old.html").exists()
+    # zip 자체도 정리
+    assert not zip_path.exists()
+
+
+def test_apply_ui_update_rejects_zip_slip(tmp_path):
+    """경로 traversal 방지 — ../ entry 거부."""
+    import zipfile
+
+    zip_path = tmp_path / "evil.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("../escape.txt", "pwned")
+
+    exe_dir = tmp_path / "exe"
+    exe_dir.mkdir()
+
+    assert updater.apply_ui_update(zip_path, exe_dir) is False
+    assert not (tmp_path / "escape.txt").exists()
+
+
+def test_apply_ui_update_rejects_corrupt_zip(tmp_path):
+    """손상된 zip → False 반환."""
+    bad_zip = tmp_path / "corrupt.zip"
+    bad_zip.write_bytes(b"not a real zip file")
+    exe_dir = tmp_path / "exe"
+    exe_dir.mkdir()
+    assert updater.apply_ui_update(bad_zip, exe_dir) is False

@@ -68,6 +68,10 @@ const stopBot = () => _request("/stop", { method: "POST" });
 
 const getLogs = (limit = 100) => _request(`/logs?limit=${limit}`);
 
+// ─── UI 핫 업데이트 (PR b) ────────────────────────
+
+const applyUiUpdate = () => _request("/update/apply_ui", { method: "POST" });
+
 // WebSocket 실시간 로그 — /ws/live 연결 헬퍼.
 //   handlers.onOpen():        연결 open 직후 (첫 메시지 도착 전 — UX 피드백용)
 //   handlers.onMessage(record): 새 record 수신 (record = {ts, level, logger, message})
@@ -135,4 +139,5 @@ window.AuroraApi = {
     stopBot,
     getLogs,
     connectLiveLog,
+    applyUiUpdate,
 };

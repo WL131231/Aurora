@@ -436,6 +436,45 @@ document.getElementById("btn-stop")?.addEventListener("click", async () => {
 });
 
 // ============================================================
+// 8b. UI 핫 업데이트 버튼 (PR b) — 사이드바 footer
+// ============================================================
+//
+// 흐름:
+//   1. 사용자 "🔄 UI 업데이트" 클릭
+//   2. POST /update/apply_ui → 백엔드가 GitHub Releases 에서 Aurora-ui.zip 다운 + ui_override/ 풀기
+//   3. 응답 success=true 면 짧은 메시지 표시 후 1.5s 뒤 location.reload() — 새 GUI 적용
+//   4. 실패 시 메시지만 표시 (앱 그대로)
+
+document.getElementById("btn-ui-update")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-ui-update");
+    const msgEl = document.getElementById("ui-update-msg");
+    if (!btn || !msgEl) return;
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "확인 중...";
+    msgEl.textContent = "";
+    try {
+        const r = await Api.applyUiUpdate();
+        if (r.success) {
+            msgEl.textContent = `✓ ${r.version || ""} 적용 — 새로고침 중...`;
+            msgEl.style.color = "#4ade80";
+            // 1.5s 후 페이지 새로고침 — webview 가 ui_override/ 우선 로드
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            msgEl.textContent = `✗ ${r.message}`;
+            msgEl.style.color = "#fb7185";
+            btn.textContent = orig;
+            btn.disabled = false;
+        }
+    } catch (e) {
+        msgEl.textContent = `✗ ${e.message}`;
+        msgEl.style.color = "#fb7185";
+        btn.textContent = orig;
+        btn.disabled = false;
+    }
+});
+
+// ============================================================
 // 9. 거래소 연결 테스트 (stub)
 // ============================================================
 

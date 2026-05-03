@@ -18,20 +18,43 @@ from aurora.config import settings
 from aurora.interfaces.api import create_app
 
 
-def _ui_index_path() -> Path:
-    """``ui/index.html`` 경로 해결 — 소스 트리 / PyInstaller 번들 모두 대응.
+def _exe_dir() -> Path | None:
+    """PyInstaller 환경에서 .exe 가 있는 디렉토리 — UI 핫 업데이트의 override 위치 기준.
 
-    PyInstaller 빌드 환경에서는 ``--add-data "ui;ui"`` 로 번들된 데이터가
-    ``sys._MEIPASS`` (런타임 임시 디렉토리) 아래에 풀린다. ``--onefile`` 모드는
-    실행 시마다, 폴더 모드는 ``_internal/`` 안에 유지.
+    ``sys.executable`` 은 .exe 파일 자체. 그 부모 디렉토리에 ``ui_override/`` 만들면
+    소스 트리 / _MEIPASS 보다 우선해서 로드됨.
+    dev/pytest 환경에서는 None (override 비활성화).
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    return Path(sys.executable).resolve().parent
+
+
+def _ui_index_path() -> Path:
+    """``ui/index.html`` 경로 해결 — override / 번들 / 소스 트리 우선순위.
+
+    Lookup 순서:
+        1. ``<exe_dir>/ui_override/index.html`` — 사용자 핫 업데이트 (PR b 추가).
+           ``/update/apply_ui`` 가 zip 풀어두는 위치. 있으면 즉시 반영.
+        2. ``sys._MEIPASS/ui/index.html`` — PyInstaller 번들 fallback.
+        3. ``<src 트리>/ui/index.html`` — dev 환경 (`python -m aurora.main`).
+
+    PyInstaller 환경에서는 ``--add-data "ui;ui"`` 로 번들된 데이터가
+    ``sys._MEIPASS`` (런타임 임시 디렉토리) 아래에 풀린다.
 
     Returns:
-        실제 ``index.html`` 파일 경로 (소스 트리든 번들이든).
+        실제 ``index.html`` 파일 경로 (override 우선).
     """
+    # 1순위: 사용자 핫 업데이트 override (.exe 옆 ui_override/)
+    exe_dir = _exe_dir()
+    if exe_dir is not None:
+        override = exe_dir / "ui_override" / "index.html"
+        if override.exists():
+            return override
+    # 2순위: PyInstaller 번들 (--add-data 결과)
     if hasattr(sys, "_MEIPASS"):
-        # PyInstaller 환경 (onefile / folder 모두 _MEIPASS 가짐)
         return Path(sys._MEIPASS) / "ui" / "index.html"  # type: ignore[attr-defined]
-    # 소스 트리: src/aurora/interfaces/webview.py 기준 ../../../ui/index.html
+    # 3순위: 소스 트리 (dev)
     return Path(__file__).resolve().parents[3] / "ui" / "index.html"
 
 

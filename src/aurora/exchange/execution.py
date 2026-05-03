@@ -80,6 +80,15 @@ class Executor:
         """현재 활성 포지션 보유 여부 — BotInstance 가 진입 중복 방지에 사용."""
         return self._plan is not None
 
+    def set_client(self, client: ExchangeClient) -> None:
+        """ccxt 세션 재주입 — BotInstance stop/start 사이클 시 사용.
+
+        Why: stop() 이 client.close() 호출하면 이전 async 세션이 죽지만, ``_plan``
+        등 포지션 state 는 보존되어야 자기 진입한 포지션을 잊지 않음.
+        새 client 만 갈아끼우면 SL/TP 트레일링 + 청산 호출 그대로 작동.
+        """
+        self._client = client
+
     @property
     def remaining_qty(self) -> float:
         """남은 포지션 수량 (분할 청산 후 잔여) — read-only."""

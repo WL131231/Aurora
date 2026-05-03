@@ -276,7 +276,16 @@ class BotInstance:
         # configure 됐으면 어댑터 lazy 생성 + warmup
         if self._client is not None:
             self._cache = MultiTfCache(self._client, self._symbol, self._timeframes)
-            self._executor = Executor(self._client, self._symbol, self._tpsl_config)
+            # Executor 가 이미 보존되어 있으면 새 client 만 주입 (포지션 state 살림).
+            # 처음 start 거나 reset_for_test 후엔 None → 신규 생성.
+            if self._executor is not None:
+                self._executor.set_client(self._client)
+                logger.info(
+                    "BotInstance.start: Executor state 보존 (has_position=%s) + client 재주입",
+                    self._executor.has_position,
+                )
+            else:
+                self._executor = Executor(self._client, self._symbol, self._tpsl_config)
             warmup_lookback = {
                 tf: _WARMUP_DEFAULTS.get(tf, 500) for tf in self._timeframes
             }
@@ -306,7 +315,11 @@ class BotInstance:
                 pass
             self._task = None
 
-        # client 정리 — async ccxt 세션 close
+        # client 정리 — async ccxt 세션만 close. Executor state (_plan / SL / TP)
+        # 는 보존하여 stop → start 사이클 시 자기 포지션을 잊지 않음.
+        # Why: 이전엔 stop 시 _executor=None 처리 → 재 start 시 새 Executor → _plan=None
+        # → has_position=False → 진입 시도 → InsufficientFunds 무한 루프 (v0.1.5 기록).
+        # Fix: Executor 보존, start 시 새 client 를 set_client 로 주입 (v0.1.6).
         if self._client is not None:
             try:
                 await self._client.close()
@@ -314,7 +327,7 @@ class BotInstance:
                 logger.exception("BotInstance.stop: client.close() 실패 (무시)")
             self._client = None
             self._cache = None
-            self._executor = None
+            # self._executor 는 보존 — 자기 포지션 (_plan) 살림
 
         logger.info("BotInstance: 중지")
 

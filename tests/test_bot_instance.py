@@ -166,7 +166,7 @@ async def test_start_with_configure_warmups_cache() -> None:
 
 @pytest.mark.asyncio
 async def test_stop_closes_client() -> None:
-    """stop → client.close() 호출 + 어댑터 None 으로 정리."""
+    """stop → client.close() + cache None 정리. Executor state 는 보존 (포지션 살림)."""
     bot = bot_instance.get_instance()
     rows = _make_ohlcv_rows(start_ts_ms=1_700_000_000_000, count=5, tf_minutes=60)
     client = _make_mock_client(ohlcv_rows=rows)
@@ -176,7 +176,47 @@ async def test_stop_closes_client() -> None:
     client.close.assert_called_once()
     assert bot._client is None
     assert bot._cache is None
-    assert bot._executor is None
+    # Executor 는 보존 — _plan 살리려고 (v0.1.6 Executor state 보존 fix).
+    # 자기 포지션 보유 중에 stop → start 시 has_position 유지가 정합.
+    assert bot._executor is not None
+
+
+@pytest.mark.asyncio
+async def test_stop_start_cycle_preserves_executor_position() -> None:
+    """stop → start 사이클 시 Executor._plan 보존 → has_position 유지.
+
+    v0.1.6 fix: 이전엔 stop 시 _executor=None → 재 start 시 새 Executor → _plan=None
+    → has_position=False → 진입 시도 → InsufficientFunds 무한 루프.
+    """
+    from aurora.core.risk import TpSlConfig, build_risk_plan
+
+    bot = bot_instance.get_instance()
+    rows = _make_ohlcv_rows(start_ts_ms=1_700_000_000_000, count=5, tf_minutes=60)
+    client = _make_mock_client(ohlcv_rows=rows)
+    bot.configure(client=client, timeframes=["1H"], tpsl_config=TpSlConfig())
+    await bot.start()
+
+    # Executor 에 가짜 포지션 직접 주입 — open_position 까지 안 가도 _plan 만 set
+    plan = build_risk_plan(
+        entry_price=78000.0, direction="long", leverage=10,
+        equity_usd=10000.0, config=TpSlConfig(), risk_pct=0.01,
+    )
+    bot._executor._plan = plan
+    bot._executor._remaining_qty = plan.position.coin_amount
+    assert bot._executor.has_position
+
+    # stop → start 사이클
+    await bot.stop()
+    new_client = _make_mock_client(ohlcv_rows=rows)
+    bot.configure(client=new_client, timeframes=["1H"], tpsl_config=TpSlConfig())
+    await bot.start()
+
+    # Executor state 보존 검증
+    assert bot._executor is not None
+    assert bot._executor.has_position  # _plan 살아있음 → 자기 포지션 인식
+    assert bot._executor._client is new_client  # set_client 로 새 client 주입됨
+
+    await bot.stop()
 
 
 @pytest.mark.asyncio

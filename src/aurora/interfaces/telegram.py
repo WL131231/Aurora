@@ -117,7 +117,11 @@ class TelegramBot:
     # ─── 설정 명령어 ──────────────────────────────────────
 
     async def cmd_setlev(self, update, context) -> None:  # type: ignore[no-untyped-def]
-        """/setlev <배율> — 레버리지 변경 (10~50)."""
+        """/setlev <배율> — 레버리지 변경 (10~50).
+
+        범위 10~50 출처: CLAUDE.md "거래소/페어" — 사용자 정책상 고배율 봇.
+        하한 10x = 의미있는 R 배수, 상한 50x = 청산 리스크 컷오프.
+        """
         # TODO(정용우):
         #   1. context.args[0] 파싱 → int
         #   2. 10 <= leverage <= 50 검증

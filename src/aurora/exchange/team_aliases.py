@@ -68,23 +68,67 @@ def load_aliases() -> dict[str, dict[str, str]]:
     return result
 
 
+def _load_user_aliases() -> dict[str, dict[str, str]]:
+    """``config_store.json`` 의 ``user_aliases`` dict 로드 (외부 사용자 매핑).
+
+    팀 alias (``data/team_aliases.json``) 와 분리 — 각 사용자 PC 한정 저장,
+    repo 절대 commit X (``.gitignore`` 처리됨).
+
+    Returns:
+        ``{nickname: {"api_key": ..., "api_secret": ...}}`` 형식.
+        ``config_store`` 비어있거나 ``user_aliases`` 키 없으면 빈 dict.
+    """
+    # 함수 내부 import — 순환 의존 회피 (config_store → exchange → team_aliases)
+    from aurora.interfaces import config_store
+
+    cfg = config_store.load() or {}
+    raw = cfg.get("user_aliases", {})
+    if not isinstance(raw, dict):
+        return {}
+    result: dict[str, dict[str, str]] = {}
+    for nickname, entry in raw.items():
+        if not isinstance(entry, dict):
+            continue
+        if "api_key" in entry and "api_secret" in entry:
+            result[nickname] = {
+                "api_key": str(entry["api_key"]),
+                "api_secret": str(entry["api_secret"]),
+            }
+    return result
+
+
 def resolve_alias(alias: str) -> tuple[str, str] | None:
-    """alias → ``(api_key, api_secret)`` lookup.
+    """alias → ``(api_key, api_secret)`` lookup — 팀 우선, 외부 사용자 fallback.
+
+    Lookup 순서:
+        1. ``data/team_aliases.json`` (팀 4명, repo commit, testing 한정)
+        2. ``config_store.json`` 의 ``user_aliases`` (외부 사용자, PC 한정)
 
     Args:
-        alias: 사용자 nickname (예: ``"장수"``, ``"정용우"``).
-            빈 문자열이거나 매핑 미존재 시 ``None``.
+        alias: 사용자 nickname (예: ``"장수"`` / 외부 사용자 등록 nickname).
+            빈 문자열이거나 양쪽 매핑 미존재 시 ``None``.
 
     Returns:
         ``(api_key, api_secret)`` 튜플. lookup 실패 시 ``None``.
     """
     if not alias:
         return None
-    aliases = load_aliases()
-    entry = aliases.get(alias)
-    if entry is None:
-        return None
-    return entry["api_key"], entry["api_secret"]
+
+    # 1순위: 팀 alias (공유 매핑)
+    team = load_aliases()
+    entry = team.get(alias)
+    if entry is not None:
+        return entry["api_key"], entry["api_secret"]
+
+    # 2순위: 외부 사용자 alias (PC 한정)
+    # Why: 팀 nickname 과 충돌 시 팀이 우선 — 외부 사용자가 같은 nickname 등록해도
+    # 본인 PC 의 config_store 에는 저장되지만 lookup 시 팀 키 사용됨.
+    user = _load_user_aliases()
+    entry = user.get(alias)
+    if entry is not None:
+        return entry["api_key"], entry["api_secret"]
+
+    return None
 
 
 def list_aliases() -> list[str]:

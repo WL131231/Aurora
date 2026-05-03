@@ -82,6 +82,7 @@ def test_status_returns_equity_when_configured() -> None:
     mock_client.get_equity = AsyncMock(
         return_value=Balance(total_usd=12345.67, free_usd=10000.0, used_usd=2345.67),
     )
+    mock_client.get_positions = AsyncMock(return_value=[])
     bot_instance.get_instance().configure(client=mock_client)
 
     body = _client().get("/status").json()
@@ -94,10 +95,36 @@ def test_status_equity_none_on_exchange_error() -> None:
 
     mock_client = MagicMock()
     mock_client.get_equity = AsyncMock(side_effect=RuntimeError("network down"))
+    mock_client.get_positions = AsyncMock(return_value=[])
     bot_instance.get_instance().configure(client=mock_client)
 
     body = _client().get("/status").json()
     assert body["equity_usd"] is None
+
+
+def test_status_open_positions_reflects_count_when_configured() -> None:
+    """/status open_positions 가 get_positions() 길이를 반영."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from aurora.exchange.base import Balance, Position
+
+    mock_client = MagicMock()
+    mock_client.get_equity = AsyncMock(
+        return_value=Balance(total_usd=8500.0, free_usd=666.0, used_usd=7834.0),
+    )
+    mock_client.get_positions = AsyncMock(
+        return_value=[
+            Position(
+                symbol="BTC/USDT:USDT", side="long", qty=1.0, entry_price=78600.0,
+                leverage=10, unrealized_pnl=-52.0, margin_mode="cross",
+            ),
+        ],
+    )
+    bot_instance.get_instance().configure(client=mock_client)
+
+    body = _client().get("/status").json()
+    assert body["open_positions"] == 1
+    assert body["equity_usd"] == 8500.0
 
 
 # ============================================================
@@ -109,6 +136,48 @@ def test_positions_returns_list() -> None:
     r = _client().get("/positions")
     assert r.status_code == 200
     assert r.json() == []
+
+
+def test_positions_returns_mapped_dtos_when_configured() -> None:
+    """configure 후 /positions 가 client.get_positions() 결과 → PositionDTO 매핑."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from aurora.exchange.base import Position
+
+    mock_client = MagicMock()
+    mock_client.get_positions = AsyncMock(
+        return_value=[
+            Position(
+                symbol="BTC/USDT:USDT", side="long", qty=0.5, entry_price=78000.0,
+                leverage=10, unrealized_pnl=12.34, margin_mode="cross",
+            ),
+        ],
+    )
+    bot_instance.get_instance().configure(client=mock_client)
+
+    body = _client().get("/positions").json()
+    assert len(body) == 1
+    p = body[0]
+    assert p["symbol"] == "BTC/USDT:USDT"
+    assert p["direction"] == "long"
+    assert p["entry_price"] == 78000.0
+    assert p["quantity"] == 0.5
+    assert p["leverage"] == 10
+    assert p["unrealized_pnl_usd"] == 12.34
+    assert p["sl_price"] is None
+    assert p["tp_prices"] == []
+
+
+def test_positions_empty_on_exchange_error() -> None:
+    """거래소 호출 실패 시 빈 리스트 (UI 안전)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_client = MagicMock()
+    mock_client.get_positions = AsyncMock(side_effect=RuntimeError("network down"))
+    bot_instance.get_instance().configure(client=mock_client)
+
+    body = _client().get("/positions").json()
+    assert body == []
 
 
 def test_get_config_returns_defaults() -> None:

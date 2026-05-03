@@ -202,6 +202,9 @@ async function refreshDashboard() {
         if (lu) lu.textContent = toKstString(new Date().toISOString()) + " KST";
 
         _setButtons(btnStart, btnStop, s.running, false);
+
+        // 열린 포지션 표 — /positions 호출 + 행 렌더
+        await refreshPositions();
     } catch (_) {
         connDot.style.background = "#fb7185";
         connDot.style.boxShadow  = "0 0 8px #fb7185";
@@ -209,6 +212,40 @@ async function refreshDashboard() {
         _setStatusBadge(mStatus, false, true);
         _setButtons(btnStart, btnStop, false, true);
     }
+}
+
+// 열린 포지션 표 갱신 — /positions API 호출 + tbody 행 렌더링
+async function refreshPositions() {
+    const tbody = document.getElementById("pos-tbody");
+    if (!tbody) return;
+    let positions = [];
+    try {
+        positions = await Api.getPositions();
+    } catch (_) {
+        // 백엔드 끊기면 status 분기에서 이미 처리, 여기는 빈 표 유지
+        return;
+    }
+    if (!Array.isArray(positions) || positions.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="pos-empty">열린 포지션 없음</td></tr>';
+        return;
+    }
+    const fmtPrice = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtPnl = (v) => {
+        const n = Number(v);
+        const sign = n >= 0 ? "+" : "";
+        const color = n >= 0 ? "#34d399" : "#fb7185";
+        return `<span style="color:${color}">${sign}${n.toFixed(2)} USDT</span>`;
+    };
+    tbody.innerHTML = positions.map(p => `
+        <tr>
+            <td class="mono">${p.symbol}</td>
+            <td>${p.direction === "long" ? "롱" : "숏"}</td>
+            <td class="mono">${fmtPrice(p.entry_price)}</td>
+            <td class="mono">${Number(p.quantity).toFixed(4)}</td>
+            <td class="mono">${p.leverage}×</td>
+            <td class="mono">${fmtPnl(p.unrealized_pnl_usd)}</td>
+        </tr>
+    `).join("");
 }
 
 // 제어 버튼 인라인 피드백 — success: 3초, error: 5초 + × 닫기

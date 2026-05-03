@@ -108,9 +108,13 @@ def main() -> int:
 
     # 봇 런타임에 안 쓰이는 백테스트/데이터 수집 의존성 — .exe 사이즈 폭증 방지.
     # tenacity 는 라이브 어댑터 (ccxt_client) 가 retry 사용 → exclude 풀림 (PR #53 E-11)
+    # aurora.backtest exclude 도 풀림 (2026-05-03 발견):
+    #   - exchange.data 가 from aurora.backtest.replay import TF_MINUTES 사용
+    #   - exchange.ccxt_client 가 from aurora.backtest.tf import normalize_to_ccxt 사용
+    #   - 봇 런타임도 backtest 모듈 의존 → exclude 시 ModuleNotFoundError
+    #   - backtest 모듈 자체는 가벼움 (pyarrow 만 분리해서 exclude 유지)
     cmd.extend([
         "--exclude-module", "pyarrow",          # parquet 엔진 (50 MB+) — fetch_ohlcv 전용
-        "--exclude-module", "aurora.backtest",  # 백테스트 모듈 (분석 도구)
     ])
 
     # 앱 아이콘 (플랫폼별)

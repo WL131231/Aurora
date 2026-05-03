@@ -398,7 +398,7 @@ VOLATILE_THRESHOLD = 0.005     # (high - low) / close > 0.5% 면 변동성 봉
 
 **함수**:
 
-- `slip_pct(candle_high, low, close) -> float` — 봉 변동성 따라 normal/volatile 슬립 선택
+- `slip_pct(candle_high, candle_low, candle_close) -> float` — 봉 변동성 따라 normal/volatile 슬립 선택
 - `apply_slippage(price, direction, side, slip) -> float` — entry/exit 시 unfavorable 방향으로 가격 조정
 - `apply_costs(raw_pnl_pct, size_pct, leverage, fee_pct=TAKER_FEE_PCT) -> tuple[float, float]` — `(lev_pnl, fee_loss)` 반환
 

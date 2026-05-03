@@ -27,10 +27,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import platform
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -90,6 +92,50 @@ def _exe_path() -> Path:
 # ============================================================
 
 
+# Windows subprocess.Popen creation flags — 부모 process 와 완전 분리.
+# DETACHED_PROCESS: 콘솔 X (GUI 앱)
+# CREATE_NEW_PROCESS_GROUP: 부모 group 분리 (Ctrl+C 전파 X)
+# CREATE_BREAKAWAY_FROM_JOB: 부모 job 객체와 분리 (PyInstaller 가 만든 job 영향 X)
+_DETACHED_PROCESS = 0x00000008
+_CREATE_NEW_PROCESS_GROUP = 0x00000200
+_CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+
+def _spawn_clean_env(exe: Path) -> None:
+    """새 .exe 를 부모 PyInstaller 환경과 완전 분리해 spawn.
+
+    Why: ``apply_pending_update`` 가 ``subprocess.Popen([new_exe]) + sys.exit(0)``
+    로 단순 spawn 하면 새 process 가 부모의 ``_MEIPASS`` / ``_PYI_*`` env 상속.
+    부모 atexit hook (PyInstaller 가 ``_MEI<random>`` 임시 디렉토리 정리) 가
+    새 process 의 numpy 등 import 와 race → ``numpy.linalg`` circular import.
+
+    해결책 (3겹):
+        1. ``_MEI`` / ``_PYI`` env 키 제거 → 새 process 가 자기 ``_MEI`` 만들게 강제
+        2. ``DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB``
+           → 부모 process 종료가 새 process 수명 영향 X
+        3. ``close_fds=True`` → 부모의 file handle 안 상속
+
+    Args:
+        exe: 새로 시작할 .exe 경로 (swap 직후의 정상 .exe).
+    """
+    # 1. env 정리 — PyInstaller bootloader 가 set 한 키 제거
+    clean_env = {
+        k: v for k, v in os.environ.items()
+        if not (k.startswith("_MEI") or k.startswith("_PYI"))
+    }
+
+    # 2. flags — Windows 전용 분리
+    flags = _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP | _CREATE_BREAKAWAY_FROM_JOB
+
+    subprocess.Popen(  # noqa: S603 — 자기 자신 재시작, 신뢰 가능
+        [str(exe)],
+        env=clean_env,
+        creationflags=flags,
+        close_fds=True,
+        cwd=str(exe.parent),  # CWD = .exe 디렉토리 (.env 옆에서 읽기 위해)
+    )
+
+
 def apply_pending_update() -> bool:
     """직전 다운로드된 업데이트가 있으면 swap → 새 버전 재시작.
 
@@ -102,7 +148,8 @@ def apply_pending_update() -> bool:
     Side effects:
         - ``Aurora.exe.old`` 정리 (이전 swap 잔재).
         - ``Aurora.exe`` ↔ ``Aurora.exe.new`` rename.
-        - ``subprocess.Popen`` 으로 새 exe 시작 + ``sys.exit(0)``.
+        - ``_spawn_clean_env`` 으로 새 exe 시작 (부모 _MEI env 분리) + ``sys.exit(0)``.
+        - 짧은 ``time.sleep(0.5)`` — 새 process 가 _MEI 풀 시간 확보.
     """
     if not _is_frozen():
         return False
@@ -127,8 +174,10 @@ def apply_pending_update() -> bool:
         # 3. .new → .exe
         new_path.rename(exe)
         logger.info("auto-update applied: %s → %s (재시작)", new_path.name, exe.name)
-        # 4. 새 exe 시작 + 현재 종료
-        subprocess.Popen([str(exe)])  # noqa: S603 — 자기 자신 재시작, 신뢰 가능
+        # 4. 새 exe spawn — 부모 _MEI env 분리 (numpy circular import race fix)
+        _spawn_clean_env(exe)
+        # 5. 짧은 대기 — 새 process 의 _MEI 풀기가 부모 정리와 race 안 나게
+        time.sleep(0.5)
         sys.exit(0)
     except OSError as e:
         logger.warning("auto-update apply 실패 (사용자 직접 다운 권장): %s", e)

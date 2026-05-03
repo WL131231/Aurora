@@ -151,7 +151,7 @@ class BotInstance:
             self._leverage = leverage
 
     def configure_from_settings(self) -> None:
-        """``aurora.config.settings`` 기반 default 어댑터 자동 생성.
+        """``aurora.config.settings`` + ``config_store`` 결합 자동 configure.
 
         결합 우선순위:
             - 거래소·API 키·demo 플래그 = ``settings`` (.env, 보안)

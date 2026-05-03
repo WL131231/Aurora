@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import traceback
 from collections import deque
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -32,11 +33,17 @@ class BufferHandler(logging.Handler):
     """logging.Handler — 모든 log record 를 _buffer 에 dict 형태로 push."""
 
     def emit(self, record: logging.LogRecord) -> None:
+        # exc_info 가 있으면 (logger.exception / logger.error(exc_info=True))
+        # message 끝에 traceback 붙임 — GUI 로그에 root cause 가시화.
+        msg = record.getMessage()
+        if record.exc_info:
+            tb = "".join(traceback.format_exception(*record.exc_info)).rstrip()
+            msg = f"{msg}\n{tb}"
         item = {
             "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": msg,
         }
         _buffer.append(item)
         # broadcaster 등록 + event loop 실행 중이면 비동기 push

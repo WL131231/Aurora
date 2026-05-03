@@ -529,6 +529,42 @@ body {
     font-family: var(--font-sans);
 }
 
+/* 로그 라인 — 1줄 = ts | level | message 그리드. 동일 폭으로 정렬되어 가독성 ↑ */
+.log-line {
+    display: grid;
+    grid-template-columns: 168px 64px 1fr;
+    gap: 0.75rem;
+    padding: 1px 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.log-line-ts    { color: var(--text-4); }
+.log-line-level { font-weight: 600; }
+.log-line-msg   { color: var(--text-2); }
+
+/* 레벨별 강조색 — index.html 의 체크박스 색상과 동일 톤 (UX 일관성) */
+.log-level-info  .log-line-level  { color: #4ade80; }
+.log-level-warn  .log-line-level  { color: #fbbf24; }
+.log-level-warn  .log-line-msg    { color: #fde68a; }
+.log-level-error .log-line-level  { color: #fb7185; }
+.log-level-error .log-line-msg    { color: #fecaca; }
+
+/* 로그 헤더 옆 상태 / 줄수 — 보조 정보. 톤 다운된 텍스트 컬러로 노이즈 X */
+.log-status {
+    font-family: var(--font-sans);
+    font-size: 12px;
+    color: var(--text-4);
+    margin-left: auto;
+    align-self: center;
+}
+.log-count {
+    font-family: var(--font-sans);
+    font-size: 11px;
+    color: var(--text-4);
+    font-weight: 400;
+    margin-left: 0.5rem;
+}
+
 /* ============================================================
    라디오 그룹 (낮음/보통/높음/최고 같은 단계 선택 — 게임 런처 스타일)
    ============================================================ */

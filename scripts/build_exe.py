@@ -120,9 +120,10 @@ def main() -> int:
         if icon_path.exists():
             cmd.extend(["--icon", str(icon_path)])
         else:
-            print(f"⚠ 아이콘 파일 없음: {icon_path} (skip)")
+            # ASCII only — Windows cp1252 stdout 회피 (CI 환경 안전)
+            print(f"[warn] icon not found: {icon_path} (skip)")
             if IS_WINDOWS:
-                print("   생성 방법: python scripts/generate_icon.py")
+                print("       generate via: python scripts/generate_icon.py")
 
     # --onefile 옵션 (사용자 명시 시)
     # macOS 는 --onefile 사용해도 .app 번들 생성됨 (PyInstaller 동작)
@@ -131,8 +132,10 @@ def main() -> int:
 
     cmd.append(str(entry))
 
-    print(f"플랫폼: {plat} ({sys.version})")
-    print("실행:", " ".join(cmd))
+    # ASCII only — CI Windows runner 의 cp1252 stdout encoding 회피.
+    # 한글 출력은 콘솔 한정 (사용자 머신은 UTF-8 가정해도 안전 X).
+    print(f"[platform] {plat} ({sys.version})")
+    print("[exec]", " ".join(cmd))
     return subprocess.run(cmd, check=False).returncode
 
 

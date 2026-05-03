@@ -8,6 +8,7 @@ import pytest
 
 from aurora.core.indicators import (
     HarmonicMatch,
+    atr_wilder,
     bollinger_bands,
     detect_pivots,
     ema,
@@ -696,3 +697,104 @@ def test_volume_confirmation_invalid_multiplier_raises() -> None:
         volume_confirmation(pd.Series([1.0, 2.0]), multiplier=0)
     with pytest.raises(ValueError):
         volume_confirmation(pd.Series([1.0, 2.0]), multiplier=-0.5)
+
+
+# ============================================================
+# ATR Wilder — Stage 1C engine.py 직접 의존성 (DESIGN.md §11 D-4)
+# ============================================================
+
+
+def _ohlc_for_atr(highs: list[float], lows: list[float], closes: list[float]) -> pd.DataFrame:
+    """ATR 테스트용 OHLC DataFrame 헬퍼 (open/volume 미사용)."""
+    return pd.DataFrame({"high": highs, "low": lows, "close": closes})
+
+
+def test_atr_wilder_length_matches_input() -> None:
+    """ATR 길이 = 입력 길이 (인덱스 유지)."""
+    df = _ohlc_for_atr(
+        highs=[10, 11, 12, 11, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+        lows=[ 9, 10, 11, 10,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+        closes=[10, 11, 12, 11, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+    )
+    atr = atr_wilder(df, period=14)
+    assert len(atr) == len(df)
+
+
+def test_atr_wilder_first_bar_equals_first_range() -> None:
+    """첫 봉 ATR = high[0] - low[0] (prev_close NaN 이라 tr1 만 적용)."""
+    df = _ohlc_for_atr(highs=[105.0], lows=[95.0], closes=[100.0])
+    atr = atr_wilder(df, period=14)
+    # ewm 첫 값 = TR[0] (alpha 보정 X)
+    assert atr.iloc[0] == pytest.approx(10.0)
+
+
+def test_atr_wilder_constant_range_converges() -> None:
+    """모든 봉의 TR 동일하면 ATR 도 그 값으로 수렴."""
+    n = 50
+    # 매 봉 동일한 5 단위 변동 (high=close+2, low=close-3, 다음 close 그대로)
+    closes = [100.0] * n
+    highs = [102.0] * n
+    lows = [97.0] * n
+    df = _ohlc_for_atr(highs=highs, lows=lows, closes=closes)
+    atr = atr_wilder(df, period=14)
+    # TR[0] = 5 (high-low). TR[t≥1] = max(5, |102-100|, |97-100|) = 5.
+    # Wilder MA 가 일정 입력 → 같은 값 수렴.
+    assert atr.iloc[-1] == pytest.approx(5.0)
+
+
+def test_atr_wilder_responds_to_volatility_spike() -> None:
+    """변동성 급등 봉 발생 시 ATR 상승 (Wilder smoothing 단조 반응)."""
+    n = 30
+    # 안정 구간 (range=2) → spike (range=20) → 안정 (range=2)
+    highs = [101.0] * 15 + [120.0] + [101.0] * (n - 16)
+    lows = [99.0] * 15 + [100.0] + [99.0] * (n - 16)
+    closes = [100.0] * n
+    df = _ohlc_for_atr(highs=highs, lows=lows, closes=closes)
+    atr = atr_wilder(df, period=14)
+    # spike 직전 vs 직후 ATR 비교
+    assert atr.iloc[15] > atr.iloc[14], "spike 봉에서 ATR 즉시 상승해야"
+    # 안정 회귀하면 ATR 점진 하락 (다만 즉시는 아님 — Wilder 부드러움)
+    assert atr.iloc[-1] < atr.iloc[15], "안정 구간 회귀 시 ATR 하락 추세"
+
+
+def test_atr_wilder_invalid_period_raises() -> None:
+    """period < 1 → ValueError."""
+    df = _ohlc_for_atr(highs=[10, 11], lows=[9, 10], closes=[10, 11])
+    with pytest.raises(ValueError):
+        atr_wilder(df, period=0)
+    with pytest.raises(ValueError):
+        atr_wilder(df, period=-5)
+
+
+def test_atr_wilder_missing_columns_raises() -> None:
+    """필수 컬럼 누락 → ValueError."""
+    # close 컬럼 없음
+    df = pd.DataFrame({"high": [10, 11], "low": [9, 10]})
+    with pytest.raises(ValueError):
+        atr_wilder(df, period=14)
+    # high 컬럼 없음
+    df2 = pd.DataFrame({"low": [9, 10], "close": [10, 11]})
+    with pytest.raises(ValueError):
+        atr_wilder(df2, period=14)
+
+
+def test_atr_wilder_gap_uses_prev_close_in_tr() -> None:
+    """갭 발생 시 TR = max(H-L, |H-prevC|) — prev_close 반영 검증.
+
+    봉 1: high=100, low=99, close=99.5
+    봉 2: high=110, low=108, close=109 (갭 상승, prev_close=99.5)
+      → tr1 = 110-108 = 2
+      → tr2 = |110-99.5| = 10.5  ← 가장 큼
+      → tr3 = |108-99.5| = 8.5
+      → TR[1] = 10.5 (단순 H-L 이 아닌 prev_close 반영 입증)
+    """
+    df = _ohlc_for_atr(
+        highs=[100.0, 110.0],
+        lows=[99.0, 108.0],
+        closes=[99.5, 109.0],
+    )
+    atr = atr_wilder(df, period=14)
+    # ewm alpha=1/14, TR=[1.0, 10.5]
+    # ATR[0] = 1.0
+    # ATR[1] = 1.0 + (1/14)*(10.5 - 1.0) = 1.0 + 9.5/14 ≈ 1.6786
+    assert atr.iloc[1] == pytest.approx(1.0 + 9.5 / 14.0, rel=1e-6)

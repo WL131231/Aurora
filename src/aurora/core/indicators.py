@@ -800,3 +800,61 @@ def ichimoku_cloud(
         },
         index=ohlc.index,
     )
+
+
+# ============================================================
+# ATR — Wilder smoothing (백테스트 / TP·SL ATR 모드 / 변동성 측정)
+# ============================================================
+
+
+def atr_wilder(ohlc: pd.DataFrame, period: int = 14) -> pd.Series:
+    """ATR (Average True Range) — Wilder's smoothing (1978 표준).
+
+    백테스트 / TP·SL ``ATR Dynamic`` 모드 / 변동성 측정 공통 입력.
+    ChoYoon Stage 1C ``engine.py`` 가 import 해서 ``BacktestStats`` 에 ATR
+    기반 통계 계산용으로 사용 (DESIGN.md §11 D-4 위임).
+
+    공식:
+        TR[t]  = max(high[t] - low[t],
+                     |high[t] - close[t-1]|,
+                     |low[t]  - close[t-1]|)
+        ATR[t] = Wilder MA(TR, period) = ewm(alpha=1/period, adjust=False).mean()
+
+    첫 봉은 ``close[t-1]`` 이 NaN 이라 tr2/tr3 NaN → max() 에서 무시되어
+    ``TR[0] = high[0] - low[0]`` 자동 적용. 이후 봉부터 정상 계산.
+
+    Args:
+        ohlc: ``high``, ``low``, ``close`` 컬럼이 있는 DataFrame.
+        period: Wilder smoothing 기간 (기본 14, Wilder 1978 권고).
+
+    Returns:
+        ATR 시리즈 (입력 인덱스 유지, 길이 동일).
+
+    Raises:
+        ValueError: 컬럼 누락 또는 ``period < 1``.
+
+    Example:
+        >>> atr = atr_wilder(df_4h, period=14)        # 4H ATR (백테스트 디폴트)
+        >>> sl_dist = atr.iloc[-1] * 1.5              # SL = 1.5×ATR
+    """
+    if period < 1:
+        raise ValueError(f"period 는 1 이상이어야 함 (받은 값: {period})")
+    required = {"high", "low", "close"}
+    if not required.issubset(ohlc.columns):
+        raise ValueError(
+            f"ohlc 에 'high','low','close' 컬럼 필요 (받은: {list(ohlc.columns)})"
+        )
+
+    high = ohlc["high"]
+    low = ohlc["low"]
+    prev_close = ohlc["close"].shift(1)
+
+    tr1 = high - low
+    tr2 = (high - prev_close).abs()
+    tr3 = (low - prev_close).abs()
+    # max(axis=1) 은 NaN 을 자동 무시 → 첫 봉 TR = tr1 (high-low) 자연 적용
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+    # Wilder smoothing = ewm(alpha=1/period, adjust=False).mean()
+    # (RSI 와 동일 — TradingView ta.atr Pine 구현과 일치)
+    return tr.ewm(alpha=1.0 / period, adjust=False).mean()

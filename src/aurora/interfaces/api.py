@@ -156,22 +156,28 @@ def create_app() -> FastAPI:
     async def status() -> StatusResponse:
         """봇 런타임 상태 요약 — 대시보드 첫 화면용.
 
-        equity_usd: configure 후 거래소 어댑터의 ``get_equity()`` 호출 (USDT total).
-            client 미설정·거래소 호출 실패 시 ``None`` (UI 는 "—" 로 표시).
+        equity_usd: 거래소 어댑터의 ``get_equity()`` 호출 (USDT total).
+        open_positions: 어댑터의 ``get_positions()`` 길이.
+        client 미설정·거래소 호출 실패 시 각각 ``None`` / ``0`` (UI 안전 폴백).
         """
-        # TODO(정용우): open_positions 도 어댑터 ``get_positions()`` 연결.
         bot = bot_instance.get_instance()
         equity: float | None = None
+        open_count = 0
         if bot.client is not None:
             try:
                 balance = await bot.client.get_equity()
                 equity = balance.total_usd
             except Exception as e:  # noqa: BLE001 — 거래소 호출 실패는 UI 끄지 않고 None 반환
                 logger.warning("/status get_equity 실패 (None 반환): %s", e)
+            try:
+                positions = await bot.client.get_positions()
+                open_count = len(positions)
+            except Exception as e:  # noqa: BLE001 — 포지션 조회 실패해도 status 자체는 응답
+                logger.warning("/status get_positions 실패 (0 반환): %s", e)
         return StatusResponse(
             running=bot.running,
             mode=settings.run_mode,
-            open_positions=0,
+            open_positions=open_count,
             equity_usd=equity,
         )
 
@@ -179,9 +185,32 @@ def create_app() -> FastAPI:
 
     @app.get("/positions", response_model=list[PositionDTO])
     async def positions() -> list[PositionDTO]:
-        """현재 열린 포지션 목록."""
-        # TODO(정용우): exchange 어댑터(추후 ChoYoon 영역) 의 ``get_positions()`` 호출.
-        return []
+        """현재 열린 포지션 목록 — 거래소 어댑터의 ``get_positions()`` 결과 매핑.
+
+        client 미설정·거래소 호출 실패 시 빈 리스트.
+        SL/TP 정보는 거래소가 안 줌 — Executor 가 별도 관리 (TODO).
+        """
+        bot = bot_instance.get_instance()
+        if bot.client is None:
+            return []
+        try:
+            raw = await bot.client.get_positions()
+        except Exception as e:  # noqa: BLE001 — UI 안전 (빈 리스트)
+            logger.warning("/positions get_positions 실패 (빈 리스트 반환): %s", e)
+            return []
+        return [
+            PositionDTO(
+                symbol=p.symbol,
+                direction=p.side,
+                entry_price=p.entry_price,
+                quantity=p.qty,
+                leverage=p.leverage,
+                unrealized_pnl_usd=p.unrealized_pnl,
+                sl_price=None,    # 거래소 미반환 — Executor 별도 관리 (TODO)
+                tp_prices=[],     # 동일
+            )
+            for p in raw
+        ]
 
     # ───── Config ───────────────────────────────────
 

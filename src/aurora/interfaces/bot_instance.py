@@ -151,26 +151,50 @@ class BotInstance:
             self._leverage = leverage
 
     def configure_from_settings(self) -> None:
-        """``aurora.config.settings`` 기반 default 어댑터 자동 생성.
+        """``aurora.config.settings`` + ``config_store`` 결합 자동 configure.
+
+        결합 우선순위:
+            - 거래소·API 키·demo 플래그 = ``settings`` (.env, 보안)
+            - 페어 / TF / 레버리지 / risk_pct / full_seed / use_* = ``config_store``
+              (GUI 에서 사용자가 변경 가능)
+            - 양쪽 다 미명시 시 default (BTC/USDT:USDT, [15m,1H,4H], 10x, 1%)
 
         Note:
-            CcxtClient 인스턴스를 settings 기반 (default_exchange / API key /
-            bybit_demo) 으로 만들고 configure() 호출. GUI ▶ 시작 또는
-            main.py 진입점에서 호출.
+            API 키는 항상 ``settings`` (.env) 에서만. ``config_store`` JSON 평문에
+            저장 X — 보안 정책 (Phase 1 단순화).
 
         Raises:
             RuntimeError: 봇 실행 중 호출 시.
         """
-        # 함수 내부 import — bot_instance 모듈 로드 시 ccxt 의존성 비용 회피
+        # 함수 내부 import — bot_instance 모듈 로드 시 의존성 비용 회피
         from aurora.exchange.ccxt_client import CcxtClient
+        from aurora.interfaces import config_store
+
+        # GUI 에서 저장한 값 (옵션 — 없으면 default)
+        cfg = config_store.load() or {}
 
         client = CcxtClient(
-            exchange_id=settings.default_exchange,
-            api_key=settings.bybit_api_key,
-            api_secret=settings.bybit_api_secret,
+            exchange_id=cfg.get("default_exchange", settings.default_exchange),
+            api_key=settings.bybit_api_key,        # 항상 .env (보안)
+            api_secret=settings.bybit_api_secret,  # 항상 .env (보안)
             demo=settings.bybit_demo,
         )
-        self.configure(client=client)
+
+        # StrategyConfig 의 use_* 토글 cfg 에서 반영
+        strategy_cfg = StrategyConfig()
+        for key in ("use_bollinger", "use_ma_cross", "use_harmonic", "use_ichimoku"):
+            if key in cfg:
+                setattr(strategy_cfg, key, bool(cfg[key]))
+
+        self.configure(
+            client=client,
+            symbol=cfg.get("primary_symbol", _DEFAULT_SYMBOL),
+            timeframes=cfg.get("timeframes", list(_DEFAULT_TIMEFRAMES)),
+            strategy_config=strategy_cfg,
+            leverage=cfg.get("leverage", _DEFAULT_LEVERAGE),
+            risk_pct=cfg.get("risk_pct", 0.01),
+            full_seed=cfg.get("full_seed", False),
+        )
 
     # ============================================================
     # lifecycle — start / stop

@@ -174,16 +174,16 @@
                 <div class="section">
                     <div class="section-title">거래소 선택</div>
                     <div class="radio-group">
-                        <input type="radio" name="exchange" id="ex-bybit" value="bybit" checked />
+                        <input type="radio" name="exchange" id="ex-bybit" value="bybit" data-config="default_exchange" checked />
                         <label for="ex-bybit">Bybit</label>
 
-                        <input type="radio" name="exchange" id="ex-okx" value="okx" />
+                        <input type="radio" name="exchange" id="ex-okx" value="okx" data-config="default_exchange" />
                         <label for="ex-okx">OKX</label>
 
-                        <input type="radio" name="exchange" id="ex-binance" value="binance" />
+                        <input type="radio" name="exchange" id="ex-binance" value="binance" data-config="default_exchange" />
                         <label for="ex-binance">Binance</label>
 
-                        <input type="radio" name="exchange" id="ex-other" value="other" />
+                        <input type="radio" name="exchange" id="ex-other" value="other" data-config="default_exchange" />
                         <label for="ex-other">기타</label>
                     </div>
 
@@ -365,7 +365,7 @@
                             <span class="slider-value" id="lev-val">10×</span>
                         </div>
                         <input type="range" class="slider-input" id="lev"
-                            min="10" max="50" step="1" value="10" />
+                            min="10" max="50" step="1" value="10" data-config="leverage" />
 
                         <div class="grid grid-cols-2 gap-4 mt-6">
                             <div>
@@ -449,7 +449,7 @@
                             <h3 class="ind-name">풀시드 모드</h3>
                             <p class="ind-sub">notional = equity × leverage (risk_pct 무시)</p>
                             <label class="toggle-switch">
-                                <input type="checkbox" id="full-seed" />
+                                <input type="checkbox" id="full-seed" data-config="full_seed" />
                                 <span class="slider"></span>
                             </label>
                         </div>
@@ -467,7 +467,7 @@
                             <span class="slider-value" id="risk-pct-val">1.0%</span>
                         </div>
                         <input type="range" class="slider-input" id="risk-pct"
-                            min="0.1" max="5" step="0.1" value="1.0" />
+                            min="0.1" max="5" step="0.1" value="1.0" data-config="risk_pct" />
                     </div>
 
                     <div class="flex gap-3 mt-8">

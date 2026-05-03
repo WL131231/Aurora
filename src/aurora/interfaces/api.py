@@ -67,19 +67,30 @@ class PositionDTO(BaseModel):
 
 
 class ConfigDTO(BaseModel):
-    """``GET/POST /config`` — 사용자 전략 설정.
+    """``GET/POST /config`` — 사용자 전략 + 매매 설정.
 
-    Selectable 지표 on/off + 파라미터 일부. 전체 ``StrategyConfig`` 에서
-    프론트가 노출할 만한 것만 골라서 표시.
+    Selectable 지표 on/off + 매매 파라미터. 전체 ``StrategyConfig`` /
+    ``TpSlConfig`` 에서 프론트가 노출할 만한 것만 추림. ``BotInstance.configure_from_settings``
+    가 본 dict 를 읽어 매매 사이클에 적용.
     """
 
+    # ===== Selectable 지표 on/off =====
     use_bollinger: bool = False
     use_ma_cross: bool = False
     use_harmonic: bool = False
     use_ichimoku: bool = False
+
+    # ===== 시드 / 리스크 =====
     leverage: int = 10
     risk_pct: float = 0.01
     full_seed: bool = False
+
+    # ===== 거래소 / 페어 / TF (Stage 2E C 통합) =====
+    # default_exchange 는 .env 에서도 읽을 수 있지만 GUI 에서 전환 가능
+    default_exchange: str = "bybit"
+    primary_symbol: str = "BTC/USDT:USDT"     # ccxt 표준 (linear perpetual)
+    # 멀티 TF 셋 — 전략 평가용. EMA 480 안정 warmup + RSI Div 1H 고정 정합
+    timeframes: list[str] = ["15m", "1H", "4H"]
 
 
 class ControlResponse(BaseModel):

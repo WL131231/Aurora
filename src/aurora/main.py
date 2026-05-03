@@ -28,15 +28,32 @@ from aurora.config import settings
 
 
 def main() -> None:
-    """Aurora 진입점 — Pywebview GUI 기동.
+    """Aurora 진입점 — Pywebview GUI 기동 + BotInstance 자동 configure.
 
     추후 Telegram 본 구현 시 GUI + Telegram 동시 기동 hub 가 됨. 현재는 GUI 단독.
+
+    BotInstance configure 시점:
+        진입점에서 ``configure_from_settings()`` 호출 → settings (.env) +
+        config_store (GUI 저장값) 결합 → 사용자가 GUI ▶ 시작 누르면 즉시 매매.
+        configure 실패 (ccxt 인스턴스 생성 등) 시 GUI 는 정상 띄우되 ▶ 시작 시
+        에러 노출 (사용자가 .env 점검 가능).
     """
     # 함수 내부 import: ``webview.py`` 는 ``import uvicorn`` 등 의존성 무거움.
     # 모듈 import 자체에 비용 없게 하려고 main() 호출 시점에만 로드.
+    from aurora.interfaces import bot_instance
     from aurora.interfaces.webview import launch
 
     print(f"Aurora v0.1.0 — run_mode={settings.run_mode} — GUI 기동")
+
+    # BotInstance 자동 configure — settings + config_store 결합
+    # Why: GUI ▶ 시작 누를 때마다 configure 안 해도 진입점에서 한 번 처리.
+    # 실패해도 GUI 는 띄움 (사용자가 .env 점검 + 재시작 가능).
+    try:
+        bot_instance.get_instance().configure_from_settings()
+        print("BotInstance: configured (Bybit Demo 또는 .env 기반)")
+    except Exception as e:  # noqa: BLE001 — 모든 예외 catch 의도 (GUI 기동 우선)
+        print(f"⚠ BotInstance configure 실패 (GUI 만 기동): {e}")
+
     launch()
 
 

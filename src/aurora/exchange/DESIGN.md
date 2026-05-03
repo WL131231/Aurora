@@ -47,9 +47,10 @@ from aurora.config import settings
 ex = ccxt.bybit({
     'apiKey': settings.bybit_api_key,
     'secret': settings.bybit_api_secret,
-    'enableRateLimit': True,
+    'enableRateLimit': True,                    # ccxt 표준 — rate limit 자동 sleep
     'options': {
-        'defaultType': 'swap',                  # USDT-margined linear perpetual
+        'defaultType': 'swap',                  # Perpetual (vs spot)
+        'defaultSubType': 'linear',             # USDT-margined (vs USDC/inverse) — PR-2 패턴 일치
         'recvWindow': 60000,                    # Windows clock skew 허용 (60초)
         'adjustForTimeDifference': True,        # 서버 시각 자동 보정
     },
@@ -61,8 +62,10 @@ ex.load_time_difference()                       # 시각 차이 명시 동기 (6
 
 **핵심 결정**:
 - **`enableDemoTrading(True)`** — Bybit Demo URL `https://api-demo.{hostname}` 사용 (≠ testnet.bybit.com)
+- **`defaultType='swap' + defaultSubType='linear'`** — Bybit perpetual USDT-margined 명시 (ChoYoon PR-2 #31 패턴 일치)
 - **`recvWindow=60000`** — Windows 환경에서 시각 차이 6초 발생 검증됨. 5초 디폴트로는 InvalidNonce 빈발
 - **`adjustForTimeDifference=True` + `load_time_difference()`** — ccxt 가 서버 시각으로 자동 timestamp 보정. 봇 기동 시 1회 호출 권장
+- **`enableRateLimit=True`** — ChoYoon PR-2 채택 표준
 
 ### §3.2 거래 모드 (`run_mode` 매핑)
 
@@ -80,6 +83,51 @@ async def place_order(self, ...) -> Order:
     # demo / live 는 실제 ccxt 호출
     ...
 ```
+
+### §3.3 fetch_ohlcv 페이지네이션 + Retry (PR-2 #31 패턴 차용)
+
+ChoYoon 가 PR-2 (`scripts/fetch_ohlcv.py`) 에서 발견·검증한 패턴 — **그대로 따른다**.
+
+**ccxt fetch_ohlcv since 인자 quirk** (Bybit perpetual 한정):
+- `since` 인자 사용 시 항상 `limit-1` 봉 반환 (예: limit=1000 요청 → 999 봉만 응답)
+- `len(page) < limit` 을 종료 조건으로 사용하면 **즉시 종료** 버그 발생
+- ChoYoon 검증 시점: 2026-05-02
+
+**페이지네이션 종료 조건** (PR-2 표준):
+1. `_fetch_page` 가 빈 리스트 반환 → 종료
+2. cursor 진행 안 함 (`new_cursor <= cursor`) → 안전 가드, 무한 루프 방지
+3. `cursor >= until_ms` → while 자연 종료
+- ❌ `len(page) < limit` 은 종료 조건으로 사용 금지
+
+**Retry 정책** (tenacity exponential backoff):
+```python
+@retry(
+    retry=retry_if_exception_type((
+        ccxt.NetworkError,
+        ccxt.RequestTimeout,
+        ccxt.ExchangeNotAvailable,
+        ccxt.RateLimitExceeded,
+        ccxt.DDoSProtection,
+    )),
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=30),
+    reraise=True,
+)
+```
+
+- **재시도 대상 5종** — 일시적 네트워크/거래소 장애만
+- **재시도 비대상** — `AuthenticationError` / `BadSymbol` / `InvalidOrder` 즉시 raise
+- **backoff 1s → 30s, 5회 한도, reraise=True** — 마지막 예외 그대로 전파
+
+**의존성**: `tenacity` 패키지 — `requirements.txt` 에 이미 있음 (PR-2 도입). 단, `build_exe.py` 에서 `--exclude-module tenacity` 처리됨 (.exe 사이즈 보호) → **봇 런타임에 tenacity 사용 시 exclude 정책 재검토 필요** (DESIGN.md §11 E-11 후속).
+
+**timeframe 변환** — ChoYoon `tf.py` 활용:
+```python
+from aurora.backtest.tf import normalize_to_ccxt
+ccxt_tf = normalize_to_ccxt(aurora_tf)   # "1H" → "1h"
+ohlcv = await ex.fetch_ohlcv(symbol, ccxt_tf, since=..., limit=1000)
+```
+→ Strict 정책 (Aurora 포맷 / ccxt 포맷 양쪽 명시). 산발적 `.lower()` 호출 금지.
 
 ---
 
@@ -293,3 +341,7 @@ async def _run_loop(self):
 | E-8 | TAKER_FEE_PCT (Bybit Demo) | ChoYoon `cost.py TAKER_FEE_PCT = 0.0004` (Binance 출발값) → Bybit perpetual taker = **0.06%** (확인 필요). `apply_costs(fee_pct=0.0006)` override |
 | E-9 | 레버리지 모드 | Bybit 의 isolated/cross 중 **isolated** (같은 페어 다른 포지션 안전). config 노출 검토 |
 | E-10 | symbol 표기 | ccxt 표준 `BTC/USDT:USDT` (linear perpetual) — 내부 계약 통일 |
+| E-11 | tenacity 봇 런타임 사용 | `build_exe.py --exclude-module tenacity` 정책 재검토 — 봇 런타임에서 retry 사용 시 .exe 에 포함 필요. **결정**: 어댑터 본 구현 시 tenacity 사용 → exclude 제거 + .exe 사이즈 영향 측정 (예상 ~수 MB) |
+| E-12 | fetch_ohlcv 페이지네이션 | PR-2 #31 패턴 그대로 — 빈 응답 + cursor safety + while 자연 종료. `len(page) < limit` 종료 조건 사용 금지 (Bybit since quirk: limit-1 반환) |
+| E-13 | Bybit perpetual 옵션 | `defaultType='swap' + defaultSubType='linear'` 명시 — USDT-margined 분리 (USDC/inverse 와 다름). PR-2 #31 패턴 일치 |
+| E-14 | timeframe 변환 | `aurora.backtest.tf.normalize_to_ccxt()` 단일 점 사용. 산발적 `.lower()` 호출 금지 (tf.py Strict 정책 정합) |

@@ -68,6 +68,61 @@ const stopBot = () => _request("/stop", { method: "POST" });
 
 const getLogs = (limit = 100) => _request(`/logs?limit=${limit}`);
 
+// WebSocket 실시간 로그 — /ws/live 연결 헬퍼.
+//   handlers.onOpen():        연결 open 직후 (첫 메시지 도착 전 — UX 피드백용)
+//   handlers.onMessage(record): 새 record 수신 (record = {ts, level, logger, message})
+//   handlers.onError(reason):   연결 실패 / 끊김 / 에러
+//   keepAliveMs:               서버 keep-alive ping 주기 (기본 25초)
+//
+// 반환: { close() } — 호출 시 깨끗한 종료. 외부에서 토글 끌 때 사용.
+//
+// 자동 재연결은 호출자가 onError 받고 결정 (예: "실시간" 체크박스 켜져있을 때).
+function connectLiveLog(handlers, keepAliveMs = 25000) {
+    const { onOpen, onMessage, onError } = handlers || {};
+    // ws://127.0.0.1:8765/ws/live (API_BASE 의 http → ws 치환)
+    const url = API_BASE.replace(/^http/, "ws") + "/ws/live";
+    let ws;
+    try {
+        ws = new WebSocket(url);
+    } catch (e) {
+        onError && onError(`WebSocket 생성 실패: ${e.message}`);
+        return { close: () => {} };
+    }
+
+    let pingTimer = null;
+    ws.addEventListener("open", () => {
+        // 서버는 receive_text() 로 클라이언트 ping 을 keep-alive 로 받음.
+        pingTimer = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) ws.send("ping");
+        }, keepAliveMs);
+        onOpen && onOpen();
+    });
+    ws.addEventListener("message", (ev) => {
+        try {
+            const msg = JSON.parse(ev.data);
+            if (msg && msg.type === "log" && msg.data) {
+                onMessage(msg.data);
+            }
+        } catch (_) {
+            /* JSON 파싱 실패 무시 (서버 보낸 형식 신뢰) */
+        }
+    });
+    ws.addEventListener("error", () => {
+        onError && onError("WebSocket 에러");
+    });
+    ws.addEventListener("close", () => {
+        if (pingTimer) clearInterval(pingTimer);
+        onError && onError("WebSocket 연결 종료");
+    });
+
+    return {
+        close: () => {
+            if (pingTimer) clearInterval(pingTimer);
+            try { ws.close(); } catch (_) { /* 이미 닫힘 */ }
+        },
+    };
+}
+
 // 글로벌 노출 (app.js 가 사용)
 window.AuroraApi = {
     ApiError,
@@ -79,4 +134,5 @@ window.AuroraApi = {
     startBot,
     stopBot,
     getLogs,
+    connectLiveLog,
 };

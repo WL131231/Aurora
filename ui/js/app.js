@@ -333,7 +333,216 @@ document.getElementById("btn-run-bt")?.addEventListener("click", () => {
 });
 
 // ============================================================
-// 11. 초기 로드 + 폴링
+// 11. Logs view — WebSocket 실시간 + 필터 / 검색 / 다운로드
+// ============================================================
+
+const Logs = (() => {
+    // 화면·메모리 모두 보호 차원의 상한. 봇 운영 중 INFO 다량 발생해도 GUI 불안정 방지.
+    const MAX_LINES = 1000;
+
+    const buffer = [];          // 수신된 record 누적 (FIFO, MAX 도달 시 shift)
+    let liveConn = null;        // connectLiveLog 반환 객체
+    let initialized = false;
+
+    const $ = (id) => document.getElementById(id);
+    const $box = () => $("log-box");
+    const $empty = () => $("log-empty");
+    const $count = () => $("log-count");
+    const $status = () => $("log-status");
+    const $autoStream = () => $("log-autostream");
+    const $search = () => $("log-search");
+
+    // 사용자가 켠 레벨 set — Python 표준 레벨 키로 저장 (INFO/WARNING/ERROR).
+    function enabledLevels() {
+        const set = new Set();
+        document.querySelectorAll("[data-log-level]").forEach((el) => {
+            if (el.checked) set.add(el.dataset.logLevel);
+        });
+        return set;
+    }
+
+    function levelClass(level) {
+        if (level === "ERROR" || level === "CRITICAL") return "log-level-error";
+        if (level === "WARNING" || level === "WARN") return "log-level-warn";
+        return "log-level-info";
+    }
+
+    // 필터·검색 매칭. CRITICAL 은 ERROR 체크박스에 흡수 (별도 토글 없음).
+    function isVisible(record, levels, query) {
+        const lvl = (record.level === "WARN") ? "WARNING"
+                  : (record.level === "CRITICAL") ? "ERROR"
+                  : record.level;
+        if (!levels.has(lvl)) return false;
+        if (query) {
+            const hay = `${record.message || ""} ${record.logger || ""}`.toLowerCase();
+            if (!hay.includes(query.toLowerCase())) return false;
+        }
+        return true;
+    }
+
+    function makeLineEl(record) {
+        const el = document.createElement("div");
+        el.className = `log-line ${levelClass(record.level)}`;
+        el.dataset.level = record.level;
+        const ts = document.createElement("span");
+        ts.className = "log-line-ts";
+        ts.textContent = toKstString(record.ts);
+        const lvl = document.createElement("span");
+        lvl.className = "log-line-level";
+        lvl.textContent = (record.level || "").padEnd(7).slice(0, 7);
+        const msg = document.createElement("span");
+        msg.className = "log-line-msg";
+        msg.textContent = `${record.logger ? record.logger + ": " : ""}${record.message || ""}`;
+        el.append(ts, lvl, msg);
+        return el;
+    }
+
+    function appendLine(record) {
+        const box = $box();
+        if (!box) return;
+        const empty = $empty();
+        if (empty) empty.style.display = "none";
+        const levels = enabledLevels();
+        const query = ($search()?.value) || "";
+        // Why: 사용자가 직접 위로 스크롤해서 과거 보고 있으면 강제 자동스크롤 X (UX).
+        const wasAtBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
+        const el = makeLineEl(record);
+        if (!isVisible(record, levels, query)) el.style.display = "none";
+        box.appendChild(el);
+        // DOM 라인 수 상한 — buffer 와 별개로 매우 오래된 노드는 떼어냄 (메모리 보호)
+        while (box.querySelectorAll(".log-line").length > MAX_LINES) {
+            box.querySelector(".log-line")?.remove();
+        }
+        if (wasAtBottom) box.scrollTop = box.scrollHeight;
+    }
+
+    function rerenderAll() {
+        const box = $box();
+        if (!box) return;
+        Array.from(box.querySelectorAll(".log-line")).forEach((el) => el.remove());
+        const levels = enabledLevels();
+        const query = ($search()?.value) || "";
+        let visibleCount = 0;
+        for (const r of buffer) {
+            const el = makeLineEl(r);
+            if (!isVisible(r, levels, query)) el.style.display = "none";
+            else visibleCount++;
+            box.appendChild(el);
+        }
+        const empty = $empty();
+        if (empty) empty.style.display = visibleCount === 0 ? "block" : "none";
+        box.scrollTop = box.scrollHeight;
+        updateCount();
+    }
+
+    function updateCount() {
+        const c = $count();
+        if (c) c.textContent = `(${buffer.length} 줄)`;
+    }
+
+    function setStatus(text, ok) {
+        const el = $status();
+        if (!el) return;
+        el.textContent = text;
+        el.style.color = ok ? "#22d3ee" : "#fb7185";
+    }
+
+    function pushRecord(record) {
+        buffer.push(record);
+        if (buffer.length > MAX_LINES) buffer.shift();
+        appendLine(record);
+        updateCount();
+    }
+
+    async function pollOnce(limit = 100) {
+        try {
+            const data = await Api.getLogs(limit);
+            const lines = (data && data.lines) || [];
+            // ts+message 키로 dedup (서버 폴링 결과가 buffer 와 겹칠 수 있음)
+            const seen = new Set(buffer.map((r) => `${r.ts}|${r.message}`));
+            for (const r of lines) {
+                const k = `${r.ts}|${r.message}`;
+                if (!seen.has(k)) {
+                    buffer.push(r);
+                    seen.add(k);
+                }
+            }
+            while (buffer.length > MAX_LINES) buffer.shift();
+            rerenderAll();
+            setStatus(`폴링 완료 (${lines.length}줄)`, true);
+        } catch (e) {
+            setStatus(`폴링 실패: ${e.message}`, false);
+        }
+    }
+
+    function startLive() {
+        if (liveConn) return;
+        setStatus("실시간 연결 중...", true);
+        liveConn = Api.connectLiveLog({
+            // open: 연결 확립 시점. 첫 record 안 와도 시각 피드백 제공 (UX).
+            onOpen: () => setStatus("LIVE (대기)", true),
+            onMessage: (record) => {
+                pushRecord(record);
+                setStatus("LIVE", true);
+            },
+            onError: (reason) => {
+                setStatus(`LIVE 끊김: ${reason}`, false);
+                stopLive();
+                // 자동 재연결: 토글이 여전히 켜져있을 때만 5초 후 재시도
+                if ($autoStream()?.checked) {
+                    setTimeout(() => { if ($autoStream()?.checked) startLive(); }, 5000);
+                }
+            },
+        });
+    }
+
+    function stopLive() {
+        if (liveConn) {
+            liveConn.close();
+            liveConn = null;
+        }
+    }
+
+    function init() {
+        if (initialized) return;
+        const box = $box();
+        if (!box) return;  // Logs view 마크업 없으면 noop
+        initialized = true;
+
+        // 필터 체크박스
+        document.querySelectorAll("[data-log-level]").forEach((cb) => {
+            cb.addEventListener("change", rerenderAll);
+        });
+        // 검색
+        $search()?.addEventListener("input", rerenderAll);
+        // 실시간 토글
+        $autoStream()?.addEventListener("change", () => {
+            if ($autoStream().checked) startLive();
+            else stopLive();
+        });
+        // 버튼들
+        $("log-refresh")?.addEventListener("click", () => pollOnce(200));
+        $("log-clear")?.addEventListener("click", () => {
+            // Why: 화면(DOM) 만 비우고 buffer 는 유지. 새로고침 시 복원 가능 + 새 record 계속 push.
+            Array.from(box.querySelectorAll(".log-line")).forEach((el) => el.remove());
+            const empty = $empty();
+            if (empty) empty.style.display = "block";
+            setStatus(`화면 비움 (버퍼 ${buffer.length}줄 유지)`, true);
+        });
+
+        // 초기 catch-up: /logs 폴링으로 최근 100 줄 가져오고, 자동 토글 켜져있으면 LIVE 시작.
+        pollOnce(100).then(() => {
+            if ($autoStream()?.checked) startLive();
+        });
+    }
+
+    return { init };
+})();
+
+Logs.init();
+
+// ============================================================
+// 12. 초기 로드 + 폴링
 // ============================================================
 
 refreshDashboard();

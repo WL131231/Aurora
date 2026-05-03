@@ -574,20 +574,20 @@
                     <div class="section-title">필터</div>
                     <div class="flex gap-6 items-center flex-wrap">
                         <label class="checkbox-row">
-                            <input type="checkbox" checked />
+                            <input type="checkbox" data-log-level="INFO" checked />
                             <span style="color: #4ade80">INFO</span>
                         </label>
                         <label class="checkbox-row">
-                            <input type="checkbox" checked />
+                            <input type="checkbox" data-log-level="WARNING" checked />
                             <span style="color: #fbbf24">WARN</span>
                         </label>
                         <label class="checkbox-row">
-                            <input type="checkbox" checked />
+                            <input type="checkbox" data-log-level="ERROR" checked />
                             <span style="color: #fb7185">ERROR</span>
                         </label>
                         <label class="checkbox-row">
-                            <input type="checkbox" checked />
-                            <span>자동 갱신 (5초)</span>
+                            <input type="checkbox" id="log-autostream" checked />
+                            <span>실시간 (WebSocket)</span>
                         </label>
                     </div>
 
@@ -596,14 +596,14 @@
                     </div>
 
                     <div class="flex gap-3 mt-2">
-                        <button class="btn">↻ 새로고침</button>
-                        <button class="btn btn-ghost">✕ 화면 비우기</button>
-                        <button class="btn btn-ghost">⤓ 다운로드</button>
+                        <button class="btn" id="log-refresh">↻ 새로고침</button>
+                        <button class="btn btn-ghost" id="log-clear">✕ 화면 비우기</button>
+                        <span id="log-status" class="log-status"></span>
                     </div>
 
-                    <div class="section-title">로그 스트림</div>
+                    <div class="section-title">로그 스트림 <span id="log-count" class="log-count"></span></div>
                     <div class="log-box" id="log-box">
-                        <div class="log-empty">로그 없음 — `GET /logs` 본 구현 후 표시 (TODO 정용우)</div>
+                        <div class="log-empty" id="log-empty">로그 없음 — 봇 시작 후 표시</div>
                     </div>
                 </div>
             </section>

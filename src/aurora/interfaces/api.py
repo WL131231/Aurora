@@ -22,6 +22,7 @@ CORS 정책:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -30,6 +31,8 @@ from pydantic import BaseModel
 
 from aurora.config import settings
 from aurora.interfaces import bot_instance, config_store, log_buffer
+
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # Pydantic 모델 (요청/응답 스키마)
@@ -151,13 +154,25 @@ def create_app() -> FastAPI:
 
     @app.get("/status", response_model=StatusResponse)
     async def status() -> StatusResponse:
-        """봇 런타임 상태 요약 — 대시보드 첫 화면용."""
-        # TODO(정용우): open_positions / equity 도 봇 인스턴스에서 실제 값 조회.
+        """봇 런타임 상태 요약 — 대시보드 첫 화면용.
+
+        equity_usd: configure 후 거래소 어댑터의 ``get_equity()`` 호출 (USDT total).
+            client 미설정·거래소 호출 실패 시 ``None`` (UI 는 "—" 로 표시).
+        """
+        # TODO(정용우): open_positions 도 어댑터 ``get_positions()`` 연결.
+        bot = bot_instance.get_instance()
+        equity: float | None = None
+        if bot.client is not None:
+            try:
+                balance = await bot.client.get_equity()
+                equity = balance.total_usd
+            except Exception as e:  # noqa: BLE001 — 거래소 호출 실패는 UI 끄지 않고 None 반환
+                logger.warning("/status get_equity 실패 (None 반환): %s", e)
         return StatusResponse(
-            running=bot_instance.get_instance().running,
+            running=bot.running,
             mode=settings.run_mode,
             open_positions=0,
-            equity_usd=None,
+            equity_usd=equity,
         )
 
     # ───── Positions ────────────────────────────────

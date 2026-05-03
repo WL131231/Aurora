@@ -101,6 +101,11 @@ class BotInstance:
         """configure* 호출 후 어댑터 생성 가능 상태."""
         return self._client is not None
 
+    @property
+    def client(self) -> ExchangeClient | None:
+        """어댑터 read-only 접근 — ``/status`` 의 ``get_equity()`` 등 외부 조회용."""
+        return self._client
+
     # ============================================================
     # configure — 외부 inject 또는 settings 기반 자동
     # ============================================================

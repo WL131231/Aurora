@@ -72,6 +72,34 @@ def test_status_response_shape() -> None:
     assert "mode" in body
 
 
+def test_status_returns_equity_when_configured() -> None:
+    """configure 후 /status 가 client.get_equity() 결과를 반환."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from aurora.exchange.base import Balance
+
+    mock_client = MagicMock()
+    mock_client.get_equity = AsyncMock(
+        return_value=Balance(total_usd=12345.67, free_usd=10000.0, used_usd=2345.67),
+    )
+    bot_instance.get_instance().configure(client=mock_client)
+
+    body = _client().get("/status").json()
+    assert body["equity_usd"] == 12345.67
+
+
+def test_status_equity_none_on_exchange_error() -> None:
+    """거래소 호출 실패 시 equity_usd=None — UI 끄지 않고 stub 메시지 유지."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_client = MagicMock()
+    mock_client.get_equity = AsyncMock(side_effect=RuntimeError("network down"))
+    bot_instance.get_instance().configure(client=mock_client)
+
+    body = _client().get("/status").json()
+    assert body["equity_usd"] is None
+
+
 # ============================================================
 # Positions / Config
 # ============================================================

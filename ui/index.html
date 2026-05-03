@@ -187,7 +187,20 @@
                         <label for="ex-other">기타</label>
                     </div>
 
-                    <div class="section-title">API 인증</div>
+                    <!-- ===== Testing 단계 단순화 — alias 입력 (장수/정용우/ChoYoon/WooJae) ===== -->
+                    <!-- Why: data/team_aliases.json 매핑 → 사용자는 nickname 만 입력. cleanup 시 본 섹션 제거. -->
+                    <div class="section-title">팀 alias <span class="text-xs text-zinc-500">(testing — nickname 입력 시 자동 매핑)</span></div>
+                    <div class="input-row">
+                        <label class="input-label">Alias</label>
+                        <input type="text" class="input-field" id="bybit-alias"
+                               placeholder="예: 장수 / 정용우 / ChoYoon / WooJae"
+                               data-config="bybit_alias" />
+                    </div>
+                    <p class="text-xs text-zinc-500 mt-2">
+                        ⚠ Testing 한정 (~1~2주). cleanup 후엔 alias 제거 + 본인 키 직접 입력으로 전환.
+                    </p>
+
+                    <div class="section-title">API 인증 <span class="text-xs text-zinc-500">(alias 미사용 시)</span></div>
                     <div class="grid grid-cols-2 gap-4">
                         <div class="input-row">
                             <label class="input-label">API Key</label>

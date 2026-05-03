@@ -168,15 +168,32 @@ class BotInstance:
         """
         # 함수 내부 import — bot_instance 모듈 로드 시 의존성 비용 회피
         from aurora.exchange.ccxt_client import CcxtClient
+        from aurora.exchange.team_aliases import resolve_alias
         from aurora.interfaces import config_store
 
         # GUI 에서 저장한 값 (옵션 — 없으면 default)
         cfg = config_store.load() or {}
 
+        # API 키 결정 — alias 우선, 매핑 실패 시 .env fallback (testing 단계 단순화)
+        # Why: 사용자가 GUI 에 "장수" 같은 nickname 입력하면 즉시 매핑 → 실 키 lookup.
+        # cleanup 후엔 본 분기 제거 + .env 단일 path 복원 (data/team_aliases.json 메타 참조).
+        alias = cfg.get("bybit_alias", "")
+        resolved = resolve_alias(alias) if alias else None
+        if resolved is not None:
+            api_key, api_secret = resolved
+            logger.info("BotInstance: alias '%s' resolved → Bybit Demo 키 적용", alias)
+        else:
+            api_key = settings.bybit_api_key
+            api_secret = settings.bybit_api_secret
+            if alias:
+                logger.warning(
+                    "BotInstance: alias '%s' 매핑 없음 — .env fallback", alias,
+                )
+
         client = CcxtClient(
             exchange_id=cfg.get("default_exchange", settings.default_exchange),
-            api_key=settings.bybit_api_key,        # 항상 .env (보안)
-            api_secret=settings.bybit_api_secret,  # 항상 .env (보안)
+            api_key=api_key,
+            api_secret=api_secret,
             demo=settings.bybit_demo,
         )
 

@@ -35,7 +35,10 @@ class Settings(BaseSettings):
     # ===== 거래소 키 (사용하는 것만 채우면 됨) =====
     bybit_api_key: str = ""
     bybit_api_secret: str = ""
-    bybit_testnet: bool = True              # 데모 진입 = testnet 디폴트 (안전). 실거래 시 .env 에서 false 명시
+    # Bybit Demo Trading 모드 — bybit.com 의 Demo Trading 기능 (≠ testnet.bybit.com).
+    # Demo = $1M 가상 자금으로 실 시장 데이터 거래, 별도 API endpoint.
+    # 안전 디폴트 True (실거래 시 .env 에서 명시 false). run_mode='demo' 와 짝.
+    bybit_demo: bool = True
 
     okx_api_key: str = ""
     okx_api_secret: str = ""

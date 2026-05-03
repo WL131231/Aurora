@@ -194,6 +194,9 @@ async function refreshDashboard() {
         document.getElementById("m-equity").textContent =
             s.equity_usd == null ? "—"
                 : s.equity_usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        // equity 실 값 들어오면 stub 메시지 숨김
+        const stub = document.getElementById("m-equity-stub");
+        if (stub) stub.style.display = (s.equity_usd == null) ? "" : "none";
 
         const lu = document.getElementById("m-last-update");
         if (lu) lu.textContent = toKstString(new Date().toISOString()) + " KST";

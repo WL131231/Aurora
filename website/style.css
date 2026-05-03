@@ -601,3 +601,39 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: #2a2a3a;
 }
+
+/* ============================================================
+   Hero Download CTA — 메인 다운로드 버튼 (사용자 진입 1순위)
+   ============================================================ */
+.hero-download-btn {
+    /* Aurora 그라디언트 — purple → indigo → cyan (로고와 일관) */
+    background: linear-gradient(135deg, #a855f7 0%, #6366f1 50%, #22d3ee 100%);
+    color: #06060a;
+    font-family: "Space Grotesk", system-ui, sans-serif;
+    text-transform: uppercase;
+    box-shadow:
+        0 0 20px -4px rgba(168, 85, 247, 0.5),
+        0 4px 16px -4px rgba(34, 211, 238, 0.3);
+    transition: transform 0.25s ease, box-shadow 0.25s ease, filter 0.25s ease;
+    cursor: pointer;
+}
+.hero-download-btn:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.1);
+    box-shadow:
+        0 0 32px -4px rgba(168, 85, 247, 0.7),
+        0 8px 24px -4px rgba(34, 211, 238, 0.4);
+}
+.hero-download-btn:active {
+    transform: translateY(0);
+}
+
+/* Nav 우측 작은 Download 링크 — Hero CTA 와 톤 다르게 (subtle) */
+.nav-download-link {
+    font-size: 11px;
+    background: rgba(168, 85, 247, 0.08);
+    transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+.nav-download-link:hover {
+    background: rgba(168, 85, 247, 0.15);
+}

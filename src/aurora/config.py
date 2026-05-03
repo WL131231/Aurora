@@ -26,9 +26,16 @@ class Settings(BaseSettings):
     # ===== 실행 모드 =====
     run_mode: Literal["paper", "demo", "live"] = "paper"
 
+    # ===== 거래소 선택 =====
+    # 데모 트레이딩 (Phase 2 진입) = Bybit 확정 (2026-05-03).
+    # 실거래 (Phase 3) = 미정 (장수 협상 중).
+    # 어댑터는 ccxt 통합이라 거래소 변경 시 이 값만 바꾸면 됨.
+    default_exchange: Literal["bybit", "okx", "binance"] = "bybit"
+
     # ===== 거래소 키 (사용하는 것만 채우면 됨) =====
     bybit_api_key: str = ""
     bybit_api_secret: str = ""
+    bybit_testnet: bool = True              # 데모 진입 = testnet 디폴트 (안전). 실거래 시 .env 에서 false 명시
 
     okx_api_key: str = ""
     okx_api_secret: str = ""

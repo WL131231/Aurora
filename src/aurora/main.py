@@ -28,9 +28,14 @@ from aurora.config import settings
 
 
 def main() -> None:
-    """Aurora 진입점 — Pywebview GUI 기동 + BotInstance 자동 configure.
+    """Aurora 진입점 — 자동 업데이트 적용 + Pywebview GUI 기동 + BotInstance configure.
 
-    추후 Telegram 본 구현 시 GUI + Telegram 동시 기동 hub 가 됨. 현재는 GUI 단독.
+    실행 순서:
+        1. ``apply_pending_update()`` — 직전 실행에서 다운된 새 버전 있으면 swap +
+           재시작 (이 함수 호출 안 돌아옴). 없으면 통과.
+        2. ``start_background_check()`` — 백그라운드 thread 로 GitHub Releases 체크
+           + 새 버전 있으면 다운로드 (다음 시작 시 적용).
+        3. BotInstance configure + GUI 기동.
 
     BotInstance configure 시점:
         진입점에서 ``configure_from_settings()`` 호출 → settings (.env) +
@@ -40,10 +45,17 @@ def main() -> None:
     """
     # 함수 내부 import: ``webview.py`` 는 ``import uvicorn`` 등 의존성 무거움.
     # 모듈 import 자체에 비용 없게 하려고 main() 호출 시점에만 로드.
+    from aurora import __version__, updater
     from aurora.interfaces import bot_instance
     from aurora.interfaces.webview import launch
 
-    print(f"Aurora v0.1.0 — run_mode={settings.run_mode} — GUI 기동")
+    # 1. 자동 업데이트 적용 (직전 실행에서 다운된 .new 가 있으면 swap + 재시작)
+    updater.apply_pending_update()
+
+    # 2. 백그라운드 update check (새 버전 있으면 다운로드, 다음 시작 시 적용)
+    updater.start_background_check()
+
+    print(f"Aurora v{__version__} — run_mode={settings.run_mode} — GUI 기동")
 
     # BotInstance 자동 configure — settings + config_store 결합
     # Why: GUI ▶ 시작 누를 때마다 configure 안 해도 진입점에서 한 번 처리.

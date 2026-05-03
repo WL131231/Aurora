@@ -53,18 +53,25 @@ def _start_api_server() -> None:
 def launch() -> None:
     """Pywebview 윈도우 띄우기.
 
-    1. ``_start_api_server`` 를 daemon 스레드로 시작 (FastAPI 가 준비될 때까지
+    1. ``log_buffer.install()`` — root logger 에 BufferHandler 부착.
+       GUI 단독 기동(.exe 더블클릭 / ``python -m aurora.interfaces.webview``)
+       시 ``main.py`` 를 안 거치므로 여기서 직접 호출. 누락 시 /logs · /ws/live
+       에 아무 로그도 안 쌓임.
+    2. ``_start_api_server`` 를 daemon 스레드로 시작 (FastAPI 가 준비될 때까지
        Pywebview 가 잠시 빈 화면을 보여줄 수 있음 — ``ui/`` 의 ``apiClient.js``
        가 retry 처리).
-    2. ``_ui_index_path()`` 로 ui/index.html 경로 해결 (소스 트리 / PyInstaller
+    3. ``_ui_index_path()`` 로 ui/index.html 경로 해결 (소스 트리 / PyInstaller
        번들 모두 대응).
-    3. ``webview.create_window(...)`` + ``webview.start()`` 로 GUI 시작.
+    4. ``webview.create_window(...)`` + ``webview.start()`` 로 GUI 시작.
 
     Note:
         ``import webview`` 는 함수 내부에서 호출 — pywebview 가 설치 안 된 환경
         (예: CI, headless 서버) 에서 모듈 import 자체는 통과하도록.
     """
     import webview  # type: ignore[import-not-found]
+
+    from aurora.interfaces import log_buffer
+    log_buffer.install()
 
     api_thread = threading.Thread(target=_start_api_server, daemon=True)
     api_thread.start()

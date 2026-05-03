@@ -69,14 +69,16 @@ const stopBot = () => _request("/stop", { method: "POST" });
 const getLogs = (limit = 100) => _request(`/logs?limit=${limit}`);
 
 // WebSocket 실시간 로그 — /ws/live 연결 헬퍼.
-//   onMessage(record): 새 record 수신 시 호출 (record = {ts, level, logger, message})
-//   onError(reason):   연결 실패 / 끊김 / 에러
-//   keepAliveMs:       서버 keep-alive ping 주기 (기본 25초)
+//   handlers.onOpen():        연결 open 직후 (첫 메시지 도착 전 — UX 피드백용)
+//   handlers.onMessage(record): 새 record 수신 (record = {ts, level, logger, message})
+//   handlers.onError(reason):   연결 실패 / 끊김 / 에러
+//   keepAliveMs:               서버 keep-alive ping 주기 (기본 25초)
 //
 // 반환: { close() } — 호출 시 깨끗한 종료. 외부에서 토글 끌 때 사용.
 //
-// 자동 재연결은 호출자가 onError 받고 결정 (예: "자동 갱신" 체크박스 켜져있을 때).
-function connectLiveLog(onMessage, onError, keepAliveMs = 25000) {
+// 자동 재연결은 호출자가 onError 받고 결정 (예: "실시간" 체크박스 켜져있을 때).
+function connectLiveLog(handlers, keepAliveMs = 25000) {
+    const { onOpen, onMessage, onError } = handlers || {};
     // ws://127.0.0.1:8765/ws/live (API_BASE 의 http → ws 치환)
     const url = API_BASE.replace(/^http/, "ws") + "/ws/live";
     let ws;
@@ -93,6 +95,7 @@ function connectLiveLog(onMessage, onError, keepAliveMs = 25000) {
         pingTimer = setInterval(() => {
             if (ws.readyState === WebSocket.OPEN) ws.send("ping");
         }, keepAliveMs);
+        onOpen && onOpen();
     });
     ws.addEventListener("message", (ev) => {
         try {

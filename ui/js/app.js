@@ -478,20 +478,22 @@ const Logs = (() => {
     function startLive() {
         if (liveConn) return;
         setStatus("실시간 연결 중...", true);
-        liveConn = Api.connectLiveLog(
-            (record) => {
+        liveConn = Api.connectLiveLog({
+            // open: 연결 확립 시점. 첫 record 안 와도 시각 피드백 제공 (UX).
+            onOpen: () => setStatus("LIVE (대기)", true),
+            onMessage: (record) => {
                 pushRecord(record);
                 setStatus("LIVE", true);
             },
-            (reason) => {
+            onError: (reason) => {
                 setStatus(`LIVE 끊김: ${reason}`, false);
                 stopLive();
                 // 자동 재연결: 토글이 여전히 켜져있을 때만 5초 후 재시도
                 if ($autoStream()?.checked) {
                     setTimeout(() => { if ($autoStream()?.checked) startLive(); }, 5000);
                 }
-            }
-        );
+            },
+        });
     }
 
     function stopLive() {

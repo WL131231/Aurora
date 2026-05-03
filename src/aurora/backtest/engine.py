@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from aurora.backtest.stats import TradeRecord
+
 
 @dataclass(slots=True)
 class BacktestConfig:
@@ -29,22 +31,6 @@ class BacktestConfig:
     # Walk-forward
     window_days: int = 5
     step_days: int = 1
-
-
-@dataclass(slots=True)
-class TradeRecord:
-    """단일 거래 기록."""
-
-    symbol: str
-    direction: str
-    entry_time: pd.Timestamp
-    entry_price: float
-    exit_time: pd.Timestamp
-    exit_price: float
-    qty: float
-    pnl_usd: float
-    pnl_pct: float
-    reason: str  # "tp1" | "tp2" | "sl" | "trailing" | "signal_reverse" | "timeout"
 
 
 class BacktestEngine:

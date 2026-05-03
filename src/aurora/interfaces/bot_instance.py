@@ -1,9 +1,26 @@
-"""봇 인스턴스 싱글톤 — /start /stop 이 제어할 실제 객체.
+"""봇 인스턴스 싱글톤 — /start /stop 이 제어할 매매 lifecycle.
 
-현재는 빈 껍데기 (lifecycle 만 관리). 추후 strategy + exchange 어댑터
-연결되면 run_loop 안에서 실제 매매 사이클 돌림.
+BotInstance 가 어댑터 (CcxtClient + MultiTfCache + Executor) 와 strategy 결합.
+매 1초 ``_step()`` 호출:
+    1. ``cache.step()`` — 봉 경계 시 새 봉 fetch
+    2. ``strategy.evaluate_*`` + ``signal.compose_entry`` — 진입 결정
+    3. ``executor.update_trailing_sl`` / ``should_close`` / ``close_position``
+       — 트레일링 / 청산
+    4. 진입 신호 + 무포지션 → ``executor.open_position``
 
-담당: 정용우
+Lifecycle:
+    >>> bot = bot_instance.get_instance()
+    >>> bot.configure_from_settings()       # settings 기반 일괄 (CcxtClient + 기본 설정)
+    >>> # 또는 bot.configure(client=mock_client, symbol=..., ...) — 테스트 inject
+    >>> await bot.start()                    # warmup + run_loop
+    >>> # 매매 자동 진행
+    >>> await bot.stop()                     # cancel + client.close()
+
+호환성 (기존 PR-C/D/F 테스트):
+    ``configure*`` 호출 안 한 BotInstance 는 ``start()`` 시 어댑터 생성 X
+    → ``_run_loop`` 가 noop 만 (1초 sleep). 기존 lifecycle 테스트 그대로 동작.
+
+담당: 정용우 (영역 위임 받음 2026-05-03 — 어댑터 PR Stage 2E C)
 """
 
 from __future__ import annotations
@@ -11,29 +28,185 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from aurora.config import settings
+from aurora.core.risk import TpSlConfig, build_risk_plan
+from aurora.core.signal import compose_entry
+from aurora.core.strategy import (
+    StrategyConfig,
+    detect_ema_touch,
+    detect_rsi_divergence,
+    evaluate_selectable,
+)
+from aurora.exchange.base import ExchangeClient
+from aurora.exchange.data import MultiTfCache
+from aurora.exchange.execution import Executor
+
 logger = logging.getLogger(__name__)
 
 
+# 매매 사이클 폴링 주기 — 봉 경계 검출은 cache.step 자체가 처리.
+# 1초보다 짧으면 ccxt 호출 빈도 ↑, 더 길면 SL/TP polling 반응 둔해짐.
+_LOOP_INTERVAL_SEC = 1.0
+
+# warmup default 봉 수 — 전략 평가에 충분한 history (EMA 480 / RSI Div 등)
+_WARMUP_DEFAULTS = {"15m": 200, "1H": 500, "2H": 250, "4H": 500, "1D": 200}
+
+# default 매매 페어 / TF 셋 — configure 안 하면 settings 기반 사용
+_DEFAULT_SYMBOL = "BTC/USDT:USDT"
+_DEFAULT_TIMEFRAMES = ["15m", "1H", "4H"]
+
+# default 레버리지 — TODO: GUI config 연결 시 settings.leverage 같은 필드 추가 (별도 PR)
+_DEFAULT_LEVERAGE = 10
+
+
 class BotInstance:
-    """봇 lifecycle — start/stop 플래그 + 백그라운드 task 관리."""
+    """봇 lifecycle — start/stop + 매매 사이클 (단일 페어).
+
+    호환성: 인자 없이 생성 가능 (기존 PR-C 시그니처). configure() 호출
+    안 하면 어댑터 X → start() 시 noop loop. 매매하려면 configure*.
+    """
 
     def __init__(self) -> None:
         self._running = False
         self._task: asyncio.Task | None = None
 
+        # 어댑터 / 설정 — configure 시점 lazy 생성
+        self._client: ExchangeClient | None = None
+        self._cache: MultiTfCache | None = None
+        self._executor: Executor | None = None
+
+        self._symbol: str = _DEFAULT_SYMBOL
+        self._timeframes: list[str] = list(_DEFAULT_TIMEFRAMES)
+        self._strategy_config: StrategyConfig = StrategyConfig()
+        self._tpsl_config: TpSlConfig = TpSlConfig()
+        self._risk_pct: float = 0.01
+        self._full_seed: bool = False
+        self._leverage: int = _DEFAULT_LEVERAGE
+
+    # ============================================================
+    # property — 외부 read-only 접근
+    # ============================================================
+
     @property
     def running(self) -> bool:
         return self._running
 
+    @property
+    def has_position(self) -> bool:
+        """현재 포지션 보유 여부 — UI 대시보드 / API status 표시용."""
+        return self._executor.has_position if self._executor else False
+
+    @property
+    def is_configured(self) -> bool:
+        """configure* 호출 후 어댑터 생성 가능 상태."""
+        return self._client is not None
+
+    # ============================================================
+    # configure — 외부 inject 또는 settings 기반 자동
+    # ============================================================
+
+    def configure(
+        self,
+        client: ExchangeClient,
+        *,
+        symbol: str | None = None,
+        timeframes: list[str] | None = None,
+        strategy_config: StrategyConfig | None = None,
+        tpsl_config: TpSlConfig | None = None,
+        risk_pct: float | None = None,
+        full_seed: bool | None = None,
+        leverage: int | None = None,
+    ) -> None:
+        """매매 사이클 시작 전 어댑터/설정 명시.
+
+        Args:
+            client: ``ExchangeClient`` (CcxtClient 등) — 외부 inject. 테스트는 mock 사용.
+            symbol: ccxt 표준 (default ``"BTC/USDT:USDT"``).
+            timeframes: 멀티 TF 리스트 (default ``["15m","1H","4H"]``).
+            strategy_config / tpsl_config: 전략·TP/SL 설정 (default = dataclass 기본).
+            risk_pct: 거래당 risk 비율 (default 0.01 = 1%).
+            full_seed: 풀시드 모드 (default False).
+            leverage: 레버리지 배율 (default 10).
+
+        Raises:
+            RuntimeError: 봇 실행 중 호출 시 (stop 후 configure).
+        """
+        if self._running:
+            raise RuntimeError("BotInstance running 중 configure 불가 — stop 후 호출")
+
+        self._client = client
+        if symbol is not None:
+            self._symbol = symbol
+        if timeframes is not None:
+            self._timeframes = list(timeframes)
+        if strategy_config is not None:
+            self._strategy_config = strategy_config
+        if tpsl_config is not None:
+            self._tpsl_config = tpsl_config
+        if risk_pct is not None:
+            self._risk_pct = risk_pct
+        if full_seed is not None:
+            self._full_seed = full_seed
+        if leverage is not None:
+            self._leverage = leverage
+
+    def configure_from_settings(self) -> None:
+        """``aurora.config.settings`` 기반 default 어댑터 자동 생성.
+
+        Note:
+            CcxtClient 인스턴스를 settings 기반 (default_exchange / API key /
+            bybit_demo) 으로 만들고 configure() 호출. GUI ▶ 시작 또는
+            main.py 진입점에서 호출.
+
+        Raises:
+            RuntimeError: 봇 실행 중 호출 시.
+        """
+        # 함수 내부 import — bot_instance 모듈 로드 시 ccxt 의존성 비용 회피
+        from aurora.exchange.ccxt_client import CcxtClient
+
+        client = CcxtClient(
+            exchange_id=settings.default_exchange,
+            api_key=settings.bybit_api_key,
+            api_secret=settings.bybit_api_secret,
+            demo=settings.bybit_demo,
+        )
+        self.configure(client=client)
+
+    # ============================================================
+    # lifecycle — start / stop
+    # ============================================================
+
     async def start(self) -> None:
+        """매매 lifecycle 시작 — configure 됐으면 warmup + 매매 loop, 아니면 noop loop.
+
+        호환성: 기존 PR-C 테스트는 configure 없이 start() 호출 → cache/executor
+        생성 X, _run_loop 가 1초 sleep 만 (lifecycle flag 만 검증).
+        """
         if self._running:
             logger.warning("BotInstance.start: 이미 실행 중")
             return
+
+        # configure 됐으면 어댑터 lazy 생성 + warmup
+        if self._client is not None:
+            self._cache = MultiTfCache(self._client, self._symbol, self._timeframes)
+            self._executor = Executor(self._client, self._symbol, self._tpsl_config)
+            warmup_lookback = {
+                tf: _WARMUP_DEFAULTS.get(tf, 500) for tf in self._timeframes
+            }
+            await self._cache.warmup(warmup_lookback)
+            logger.info(
+                "BotInstance.start: configured (symbol=%s, tfs=%s, leverage=%dx)",
+                self._symbol, self._timeframes, self._leverage,
+            )
+        else:
+            logger.info("BotInstance.start: noop (configure 미호출 — lifecycle only)")
+
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
         logger.info("BotInstance: 시작")
 
     async def stop(self) -> None:
+        """매매 lifecycle 중지 — task cancel + client cleanup."""
         if not self._running:
             logger.warning("BotInstance.stop: 이미 중지됨")
             return
@@ -44,16 +217,103 @@ class BotInstance:
                 await self._task
             except asyncio.CancelledError:
                 pass
+            self._task = None
+
+        # client 정리 — async ccxt 세션 close
+        if self._client is not None:
+            try:
+                await self._client.close()
+            except Exception:
+                logger.exception("BotInstance.stop: client.close() 실패 (무시)")
+            self._client = None
+            self._cache = None
+            self._executor = None
+
         logger.info("BotInstance: 중지")
 
+    # ============================================================
+    # 내부 — 매매 사이클
+    # ============================================================
+
     async def _run_loop(self) -> None:
-        """봇 메인 루프 — 추후 strategy.evaluate() + exchange.execute() 연결."""
+        """봇 메인 loop — 매 1초 ``_step()`` 호출.
+
+        예외 발생 시 stack trace 로깅 후 loop 계속 (운영 안정성). cancel 만 전파.
+        """
         while self._running:
-            # TODO(정용우): strategy 실행, 신호 발생 시 매매. 지금은 1초 sleep.
-            await asyncio.sleep(1)
+            try:
+                await self._step()
+            except asyncio.CancelledError:
+                raise  # cancel 은 stop() 에서 정상 종료 처리
+            except Exception:
+                logger.exception("BotInstance loop error — 다음 step 까지 대기")
+            await asyncio.sleep(_LOOP_INTERVAL_SEC)
+
+    async def _step(self) -> None:
+        """1 step — fetch / 트레일링 / 청산 / 진입 검사.
+
+        configure 안 됐으면 즉시 return (noop).
+        """
+        if self._cache is None or self._executor is None or self._client is None:
+            return
+
+        # 1. 새 봉 fetch (봉 경계 시점만 실 호출)
+        df_by_tf = await self._cache.step()
+
+        # 2. 현재가 (가장 빠른 TF 의 마지막 close)
+        primary_tf = self._timeframes[0]
+        primary_df = df_by_tf.get(primary_tf)
+        if primary_df is None or primary_df.empty:
+            return
+        current_price = float(primary_df["close"].iloc[-1])
+
+        # 3. 활성 포지션 — 트레일링 + 청산 검사 (진입 평가 X)
+        # Why: 동시에 진입 + 청산 평가하면 같은 봉에서 close + open 가능.
+        # Aurora 정책 (페어당 1개) 위반 방지 위해 분기 mutually exclusive.
+        if self._executor.has_position:
+            await self._executor.update_trailing_sl(current_price)
+            reason = self._executor.should_close(current_price)
+            if reason is not None:
+                await self._executor.close_position(reason=reason)
+            return
+
+        # 4. 진입 신호 평가 (무포지션)
+        signals = []
+        signals.extend(detect_ema_touch(df_by_tf, self._strategy_config))
+        df_1h = df_by_tf.get("1H")
+        if df_1h is not None and not df_1h.empty:
+            signals.extend(detect_rsi_divergence(df_1h, self._strategy_config))
+        signals.extend(
+            evaluate_selectable(df_by_tf, self._strategy_config, symbol=self._symbol),
+        )
+        decision = compose_entry(signals)
+
+        if not decision.enter or decision.direction is None:
+            return
+
+        # 5. 진입 실행 — equity 조회 + RiskPlan 산출
+        balance = await self._client.get_equity()
+        plan = build_risk_plan(
+            entry_price=current_price,
+            direction=decision.direction.value,
+            leverage=self._leverage,
+            equity_usd=balance.total_usd,
+            config=self._tpsl_config,
+            risk_pct=self._risk_pct,
+            full_seed=self._full_seed,
+        )
+        await self._executor.open_position(plan)
+        logger.info(
+            "BotInstance: 진입 — %s %s qty=%.6f (triggered_by=%s, score=%.2f)",
+            self._symbol, decision.direction.value, plan.position.coin_amount,
+            decision.triggered_by, decision.score,
+        )
 
 
-# 모듈 레벨 싱글톤
+# ============================================================
+# 싱글톤 — 기존 API 그대로 (PR-C 호환)
+# ============================================================
+
 _instance: BotInstance | None = None
 
 

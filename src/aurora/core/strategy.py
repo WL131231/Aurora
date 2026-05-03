@@ -78,11 +78,11 @@ class StrategyConfig:
     use_ichimoku: bool = False
 
     # 진입 파라미터
-    ema_touch_tolerance: float = 0.003  # ±0.3%
-    ema_periods: tuple[int, ...] = (200, 480)
-    rsi_period: int = 14
-    rsi_div_lb_left: int = 5
-    rsi_div_lb_right: int = 5
+    ema_touch_tolerance: float = 0.003  # ±0.3% — 노이즈는 통과시키고 의미있는 터치만 잡는 출발값
+    ema_periods: tuple[int, ...] = (200, 480)  # 200=중기 추세, 480=장기 추세 (EMA 보스 자료 기반)
+    rsi_period: int = 14                 # Wilder 1978 표준
+    rsi_div_lb_left: int = 5             # 트뷰 RSI Divergence 표준 lookback (좌)
+    rsi_div_lb_right: int = 5            # 트뷰 RSI Divergence 표준 lookback (우)
 
     # 거래량 컨펌 (EMA 한 세트, 단독 신호 X — strength 부스트만)
     volume_period: int = 20
@@ -93,8 +93,8 @@ class StrategyConfig:
     """거래량 동반 시 ``EntrySignal.strength`` 곱셈 (기본 1.5)."""
 
     # Bollinger Bands (Selectable — 1H 고정)
-    bollinger_period: int = 20
-    bollinger_std: float = 2.0
+    bollinger_period: int = 20           # John Bollinger 1980 표준 (20 SMA)
+    bollinger_std: float = 2.0           # ±2σ — 표준 정규분포 95% 구간
     bollinger_proximity_pct: float = 0.005
     """가장자리 라인에서 안쪽 ``proximity_pct`` 이내 = 진입 zone (예: 0.005 = 0.5%)."""
     bollinger_squeeze_threshold: float = 0.015

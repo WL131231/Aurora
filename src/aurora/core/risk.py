@@ -33,25 +33,30 @@ class TrailingMode(StrEnum):
 
 @dataclass(slots=True)
 class TpSlConfig:
-    """TP/SL 사용자 설정."""
+    """TP/SL 사용자 설정.
+
+    Note:
+        디폴트 값은 모두 "출발값" — 사용자가 GUI 에서 조정. 백테스트 결과로
+        상수 자체를 튜닝하지 말 것 (사용자 입력 오버라이드되는 값).
+    """
 
     mode: TpSlMode = TpSlMode.FIXED_PCT
     # 모드별 파라미터
-    atr_period: int = 14
+    atr_period: int = 14                   # 표준 ATR 기간 (Wilder 1978 권고치)
     atr_tp_multipliers: list[float] = field(default_factory=lambda: [1.0, 2.0, 3.0, 4.0])
-    atr_sl_multiplier: float = 1.5
+    atr_sl_multiplier: float = 1.5         # SL = 1.5×ATR — 노이즈 통과 보편 값
     fixed_tp_pcts: list[float] = field(default_factory=lambda: [1.0, 2.0, 3.0, 4.0])
-    fixed_sl_pct: float = 2.0
+    fixed_sl_pct: float = 2.0              # 10x 보수 영역 출발값 (sl_pct_for_leverage 와 일치)
     manual_tp_pcts: list[float] = field(default_factory=lambda: [0.5, 1.0, 1.5, 2.0])
     manual_sl_pct: float = 1.0
 
-    # 분할 익절 비율 (합 100)
+    # 분할 익절 비율 (합 100) — 4단계 균등 출발값, 사용자가 GUI 에서 조정
     tp_allocations: list[float] = field(default_factory=lambda: [25.0, 25.0, 25.0, 25.0])
 
     # 트레일링
     trailing_mode: TrailingMode = TrailingMode.MOVING_TARGET
-    trailing_trigger_target: int = 2  # TP 몇 단계 도달 시 발동
-    trailing_trigger_pct: float = 2.0  # 또는 % 기반 발동
+    trailing_trigger_target: int = 2  # TP 2단계 도달 시 발동 (1단계는 너무 빠른 lock-in)
+    trailing_trigger_pct: float = 2.0  # 또는 % 기반 발동 (fixed_sl 1배 = 1:1 RR)
     trailing_pct: float = 1.0  # 트레일링 거리
 
 

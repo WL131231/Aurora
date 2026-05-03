@@ -18,14 +18,14 @@ from aurora.core.strategy import Direction, EntrySignal
 # ============================================================
 
 TF_WEIGHTS: dict[str, int] = {
-    "15m":  1,
+    "15m":  1,   # 단기 노이즈 — 가중치 최소 (단일 신호 진입 임계 = 1)
     "1H":   2,
     "2H":   3,
-    "4H":   5,
-    "6H":   7,
+    "4H":   5,   # 멀티 TF entry 평가 주축
+    "6H":   7,   # 6H/12H 는 향후 장기 포지션 확장 placeholder (현재 replay.py 미포함, fallback weight=1 발생 안 함)
     "12H": 10,
-    "1D":  15,
-    "1W":  25,
+    "1D":  15,   # 장기 추세 — 1H 의 7.5배
+    "1W":  25,   # 가장 무거움. 거듭제곱(2배) 대신 선형 비슷한 점진 (옵션 b 채택)
 }
 """TF 별 점수 가중치 — 백테스트로 추후 튜닝 가능."""
 
@@ -98,7 +98,8 @@ def compose_entry(
             short_score += score
             short_sources.append(source_label)
 
-    # 진입 결정
+    # 진입 결정 — 큰 방향이 임계값 넘어야 진입.
+    # Why: 양 방향 점수가 같거나 둘 다 임계 미달 = 보류. 헷갈리는 시장에선 안 들어감 (안전).
     if long_score > short_score and long_score >= threshold:
         return CompositeDecision(
             enter=True,

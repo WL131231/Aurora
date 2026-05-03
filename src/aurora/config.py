@@ -24,7 +24,10 @@ class Settings(BaseSettings):
     )
 
     # ===== 실행 모드 =====
-    run_mode: Literal["paper", "demo", "live"] = "paper"
+    # 디폴트 = demo (testing 단계, 실 자금 위험 X). 외부 사용자가 .exe 만 다운로드해도
+    # .env 안 만들고 GUI alias nickname 입력만으로 즉시 demo 매매 시작 가능.
+    # paper (신호만 검증) 또는 live (실 자금) 는 .env 명시해야 함 — 의도 강제로 안전.
+    run_mode: Literal["paper", "demo", "live"] = "demo"
 
     # ===== 거래소 선택 =====
     # 데모 트레이딩 (Phase 2 진입) = Bybit 확정 (2026-05-03).

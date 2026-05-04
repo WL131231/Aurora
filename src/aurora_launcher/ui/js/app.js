@@ -1,6 +1,8 @@
 // Aurora Launcher GUI — pywebview js_api 통해 launcher.py 호출.
 
-const Api = window.pywebview && window.pywebview.api;
+// pywebview js_api 는 모듈 로드 시점엔 미주입 — pywebviewready 이벤트 후 사용 가능.
+// const 로 잡으면 영원히 undefined → 버튼 silent fail. let + ready 에서 갱신.
+let Api = null;
 
 const localVerEl = document.getElementById("local-ver");
 const latestVerEl = document.getElementById("latest-ver");
@@ -120,8 +122,9 @@ async function launchAurora() {
 btnCheck.addEventListener("click", checkUpdate);
 btnLaunch.addEventListener("click", launchAurora);
 
-// pywebview API 준비될 때까지 대기 (initial init 비동기)
+// pywebview API 준비될 때까지 대기 — ready 이벤트 후 Api 변수 갱신.
 window.addEventListener("pywebviewready", async () => {
+    Api = window.pywebview.api;
     await loadLocalInfo();
     setStatus("준비됨 — 시작 버튼 클릭");
     log("Launcher 시작");

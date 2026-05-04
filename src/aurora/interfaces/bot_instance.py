@@ -133,6 +133,13 @@ class BotInstance:
         # 가능 (POST /config 동일 cfg). 같은 적용 대상 필드 셋이면 silent.
         self._last_applied_config_key: str = ""
 
+        # v0.1.36: InsufficientFunds 무한 루프 fix — place_order 거부 (110007) 발생 시
+        # backoff. external_position flag 와 별개 (다른 페어 외부 포지션 케이스 대응 — 본
+        # 페어 fetch_position=None 이라 external_position 가 reset 되어도 backoff 유지).
+        # 5분 후 자동 재시도 — 사용자 청산 / 잔고 회복 가정.
+        self._funds_blocked_until_ms: int = 0
+        self._funds_blocked_warned: bool = False
+
         # 거래내역 (v0.1.20) — close_position 마다 ClosedTrade 추가 (rolling 100).
         # GUI "거래내역" 표 표시 + Telegram 알림 + PnL 카드 데이터 source.
         # v0.1.25: 디스크에서 영속화된 record 복원 → 봇 재시작 후 표 / 통계 유지.
@@ -961,6 +968,20 @@ class BotInstance:
         if not decision.enter or decision.direction is None:
             return
 
+        # v0.1.36: InsufficientFunds backoff check — place_order 거부 후 5분간 진입 시도
+        # skip (매 1초 폭주 회피). external_position flag 와 별개 (다른 페어 외부 포지션 케이스
+        # — 본 페어 fetch_position=None 이라 external_position 가 reset 되어도 backoff 유지).
+        import time as _t
+        now_ms = int(_t.time() * 1000)
+        if self._funds_blocked_until_ms > 0:
+            if now_ms < self._funds_blocked_until_ms:
+                # silent skip — 진입 평가 로그까지 정상, 실 place_order 만 차단
+                return
+            # backoff 만료 — flag reset + 재시도
+            self._funds_blocked_until_ms = 0
+            self._funds_blocked_warned = False
+            logger.info("InsufficientFunds backoff 만료 — 진입 시도 재개")
+
         # 6. 진입 실행 — equity 조회 + RiskPlan 산출
         balance = await self._client.get_equity()
         plan = build_risk_plan(
@@ -972,7 +993,27 @@ class BotInstance:
             risk_pct=self._risk_pct,
             full_seed=self._full_seed,
         )
-        await self._executor.open_position(plan, triggered_by=decision.triggered_by)
+        try:
+            await self._executor.open_position(plan, triggered_by=decision.triggered_by)
+        except Exception as e:  # noqa: BLE001 — 거래소 거부 catch (InsufficientFunds 등)
+            # v0.1.36: ccxt InsufficientFunds (110007 "ab not enough for new order") 무한
+            # 루프 fix. 거래소가 마진 부족으로 거부 → 5분 backoff + 1회 WARNING.
+            # 잔고 회복 시 자동 재개.
+            err_name = type(e).__name__
+            if "InsufficientFunds" in err_name or "InsufficientFunds" in str(e):
+                self._funds_blocked_until_ms = now_ms + 5 * 60 * 1000  # 5분
+                if not self._funds_blocked_warned:
+                    logger.warning(
+                        "거래소 진입 거부 (%s) — 5분 backoff. 잔고: total=%.2f free=%.2f "
+                        "USDT / 요청 마진=%.2f USDT. 거래소 외부 포지션/마진 점유 확인 "
+                        "권장. 잔고 회복 시 자동 재개.",
+                        err_name,
+                        balance.total_usd, balance.free_usd, plan.position.margin_usd,
+                    )
+                    self._funds_blocked_warned = True
+                return
+            # 다른 예외는 _run_loop 로 전파 (logger.exception 처리)
+            raise
         logger.info(
             "BotInstance: 진입 — %s %s qty=%.6f (triggered_by=%s, score=%.2f)",
             self._symbol, decision.direction.value, plan.position.coin_amount,

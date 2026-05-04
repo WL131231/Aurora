@@ -57,6 +57,9 @@ class StatusResponse(BaseModel):
     open_positions: int
     equity_usd: float | None  # 거래소 미연결 시 None
     external_position: bool = False  # 사용자가 직접 연 포지션 감지 (Aurora 진입 skip 중)
+    # 매 step 지표 트리거 상태 (v0.1.14) — UI 대시보드 패널 표시용.
+    # 형식: {"EMA": "long"|"short"|None, "RSI": ..., "BB": ..., "MA": ..., "Ichimoku": ..., "Harmonic": ...}
+    indicator_status: dict[str, str | None] = {}
 
 
 class PositionDTO(BaseModel):
@@ -196,6 +199,7 @@ def create_app() -> FastAPI:
             open_positions=open_count,
             equity_usd=equity,
             external_position=bot.external_position_detected,
+            indicator_status=bot.last_indicator_status,
         )
 
     # ───── Positions ────────────────────────────────

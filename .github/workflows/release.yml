@@ -235,12 +235,18 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install minimal deps (pywebview + pyinstaller)
+      - name: Install minimal deps (pywebview + pyinstaller + Pillow)
         shell: bash
         run: |
           PY="${{ steps.setup.outputs.python-path }}"
           "$PY" -m pip install --upgrade pip
-          "$PY" -m pip install pywebview pyinstaller
+          "$PY" -m pip install pywebview pyinstaller Pillow
+
+      - name: Generate launcher icon (검정 다이아몬드)
+        shell: bash
+        run: |
+          "${{ steps.setup.outputs.python-path }}" scripts/generate_launcher_icon.py
+        continue-on-error: true
 
       - name: Build Aurora-launcher
         shell: bash

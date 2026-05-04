@@ -58,6 +58,26 @@ _DEFAULT_TIMEFRAMES = ["15m", "1H", "4H"]
 # default 레버리지 — TODO: GUI config 연결 시 settings.leverage 같은 필드 추가 (별도 PR)
 _DEFAULT_LEVERAGE = 10
 
+# 지표 트리거 패널 카테고리 (UI 표시 6개) — signal.source 의 prefix 매핑.
+# v0.1.14 — 사용자가 "각 지표 현재 어떻게 보고 있나" 한눈에 확인용.
+_INDICATOR_CATEGORIES: list[str] = ["EMA", "RSI", "BB", "MA", "Ichimoku", "Harmonic"]
+_SOURCE_PREFIX_MAP: dict[str, str] = {
+    "ema_": "EMA",
+    "rsi_": "RSI",
+    "bollinger_": "BB",
+    "ma_cross_": "MA",
+    "ichimoku_": "Ichimoku",
+    "harmonic_": "Harmonic",
+}
+
+
+def _categorize_source(source: str) -> str | None:
+    """signal.source ("ema_touch_200" 등) → UI 카테고리 ("EMA")."""
+    for prefix, cat in _SOURCE_PREFIX_MAP.items():
+        if source.startswith(prefix):
+            return cat
+    return None  # 매핑 없는 source — UI 표시 X (예: 2468 internal)
+
 
 class BotInstance:
     """봇 lifecycle — start/stop + 매매 사이클 (단일 페어).
@@ -89,6 +109,10 @@ class BotInstance:
         # 진입 skip + 1회 WARNING (반복 로그 방지). 외부 포지션 사라지면 자동 reset.
         self._external_position: bool = False
         self._external_position_warned: bool = False
+
+        # 지표 트리거 상태 — 매 _step 마지막 평가 결과 보존 (UI 대시보드 표시용 v0.1.14).
+        # 형식: {"EMA": "long" | "short" | None, "RSI": ..., "BB": ..., ...}
+        self._last_indicator_status: dict[str, str | None] = {}
 
         self._symbol: str = _DEFAULT_SYMBOL
         self._timeframes: list[str] = list(_DEFAULT_TIMEFRAMES)
@@ -128,6 +152,16 @@ class BotInstance:
         True 면 Aurora 가 진입 skip 중. UI 알림 표시 / API 응답 노출용.
         """
         return self._external_position
+
+    @property
+    def last_indicator_status(self) -> dict[str, str | None]:
+        """매 _step 마지막 평가 결과 — UI 지표 트리거 패널 표시용 (v0.1.14).
+
+        형식: ``{"EMA": "long"|"short"|None, "RSI": ..., "BB": ..., "MA": ...,
+                "Ichimoku": ..., "Harmonic": ...}``
+        None = 신호 없음 (중립).
+        """
+        return dict(self._last_indicator_status)
 
     # ============================================================
     # configure — 외부 inject 또는 settings 기반 자동
@@ -488,6 +522,16 @@ class BotInstance:
         signals.extend(
             evaluate_selectable(df_by_tf, self._strategy_config, symbol=self._symbol),
         )
+
+        # 지표 트리거 상태 갱신 (v0.1.14) — UI 대시보드 패널 표시용.
+        # Fixed 6 카테고리 항상 노출 (signal 없으면 None=중립). 같은 카테고리
+        # 여러 신호 (예: ema_200 + ema_480) 시 최신 source 의 방향 보존.
+        self._last_indicator_status = {cat: None for cat in _INDICATOR_CATEGORIES}
+        for sig in signals:
+            cat = _categorize_source(sig.source)
+            if cat is not None:
+                self._last_indicator_status[cat] = sig.direction.value
+
         decision = compose_entry(signals)
 
         if not decision.enter or decision.direction is None:

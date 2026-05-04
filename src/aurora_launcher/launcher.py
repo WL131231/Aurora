@@ -264,8 +264,11 @@ class LauncherApi:
             except (ValueError, TypeError):
                 has_update = False
         else:
-            # 로컬 버전 미상 — 본체 .exe 자체가 없으면 다운 필요
-            has_update = not _aurora_exe_path().exists()
+            # 로컬 버전 미상 — .aurora_version 파일 없음. 안전하게 has_update=True
+            # 로 가정해 사용자 다운 권유. 첫 다운 후 .aurora_version 작성됨 → 다음
+            # 부터는 정상 비교. (v0.1.14 fix — 이전엔 exe 존재 시 has_update=False
+            # 라 사용자가 launcher 통해 swap 못 받음.)
+            has_update = True
         return {"latest": latest_tag, "has_update": has_update, "url": url,
                 "error": None}
 

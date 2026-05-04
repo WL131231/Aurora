@@ -343,11 +343,16 @@ class CcxtClient:
     ) -> list[ClosedPosition]:
         """거래소 청산 포지션 history — Bybit V5 ``/v5/position/closed-pnl`` 우선.
 
-        Bybit:
-            - 매개변수 ``category=linear``, ``startTime``, ``limit`` (50~200).
-            - record 한 개 = 1 closed position (avgEntry/avgExit/closedPnl 포함 — 매칭 완료).
-            - 응답 list 신→구 정렬 (Bybit 기본).
-            - rate limit: 600 req/5s — 1회 호출은 무시 가능.
+        Bybit V5 제약 (v0.1.27 fix):
+            - ``endTime - startTime ≤ 7일`` (한 호출 max 7일 윈도우)
+            - ``startTime`` 만 보내면 default 7일치만 반환 (7D=16건/30D=5건/180D=0건 버그 root cause)
+            - max ``limit=200`` per page, ``nextPageCursor`` 페이지네이션
+            - rate limit: 600 req/5s
+
+        흐름:
+            1. ``[since_ms, now]`` 구간을 7일 chunks 로 분할
+            2. 각 chunk 마다 cursor 페이지네이션 (200 record 초과 시)
+            3. 모든 record 머지 + ``closed_at_ts`` 신→구 재정렬 + ``limit`` 컷
 
         다른 거래소(OKX/Binance/...): 본 PR 미구현 → 빈 리스트 (TODO ChoYoon).
 
@@ -363,21 +368,63 @@ class CcxtClient:
             return []
         await self._ensure_init()
 
-        params: dict[str, Any] = {"category": "linear", "limit": limit}
-        if since_ms is not None:
-            params["startTime"] = int(since_ms)
+        now_ms = int(time.time() * 1000)
+        # since_ms 미지정 = 최근 7일 default (Bybit 정책 정합)
+        if since_ms is None:
+            since_ms = now_ms - 7 * 24 * 60 * 60 * 1000
 
-        # ccxt 의 raw Bybit V5 API 직접 호출 — closed-pnl 은 unified API X.
-        # 메서드 이름은 ccxt 가 자동 생성: GET /v5/position/closed-pnl → privateGetV5PositionClosedPnl.
-        try:
-            raw = await self._ex.private_get_v5_position_closed_pnl(params)
-        except (ccxt.NetworkError, ccxt.ExchangeError) as e:
-            logger.warning("fetch_closed_positions(bybit) 실패: %s", e)
-            return []
+        seven_days_ms = 7 * 24 * 60 * 60 * 1000
+        max_chunks = 30  # 안전 가드 — 30 × 7 = 210일치 (180D 토글 충분 + 여유)
 
-        result = (raw or {}).get("result") or {}
-        items = result.get("list") or []
-        return [self._parse_closed_pnl_bybit(item) for item in items]
+        all_records: list[ClosedPosition] = []
+        chunk_start = int(since_ms)
+        chunk_count = 0
+
+        while chunk_start < now_ms and chunk_count < max_chunks:
+            chunk_end = min(chunk_start + seven_days_ms, now_ms)
+            cursor: str | None = None
+            page_count = 0
+            max_pages_per_chunk = 10  # 안전 가드 — 한 chunk 에 2000 record 이면 충분
+
+            while page_count < max_pages_per_chunk:
+                params: dict[str, Any] = {
+                    "category": "linear",
+                    "startTime": chunk_start,
+                    "endTime": chunk_end,
+                    "limit": min(limit, 200),  # Bybit max 200 per page
+                }
+                if cursor:
+                    params["cursor"] = cursor
+
+                try:
+                    raw = await self._ex.private_get_v5_position_closed_pnl(params)
+                except (ccxt.NetworkError, ccxt.ExchangeError) as e:
+                    logger.warning(
+                        "fetch_closed_positions(bybit) chunk %d~%d 실패: %s",
+                        chunk_start, chunk_end, e,
+                    )
+                    break
+
+                result = (raw or {}).get("result") or {}
+                items = result.get("list") or []
+                for item in items:
+                    all_records.append(self._parse_closed_pnl_bybit(item))
+
+                cursor = result.get("nextPageCursor")
+                page_count += 1
+                if not cursor:
+                    break
+                if len(all_records) >= limit:
+                    break
+
+            chunk_start = chunk_end
+            chunk_count += 1
+            if len(all_records) >= limit:
+                break
+
+        # chunk 간 합치면 신→구 순서 흐트러질 수 있어 재정렬 + limit cut
+        all_records.sort(key=lambda r: r.closed_at_ts, reverse=True)
+        return all_records[:limit]
 
     @staticmethod
     def _parse_closed_pnl_bybit(raw: dict[str, Any]) -> ClosedPosition:

@@ -1125,6 +1125,35 @@ input[type="range"].slider-input:disabled {
     background: rgba(96, 81, 155, 0.18);
 }
 
+/* Trade Type chip — reason 별 색 구분 (v0.1.27) */
+.trade-type-external,
+.trade-type-tp,
+.trade-type-sl,
+.trade-type-rev {
+    display: inline-block;
+    padding: 2px 7px;
+    font-size: 0.6875rem;
+    border-radius: 3px;
+    letter-spacing: 0.05em;
+    font-family: var(--font-mono);
+}
+.trade-type-external {
+    color: var(--text-3);
+    background: rgba(255, 255, 255, 0.04);
+}
+.trade-type-tp {
+    color: #34d399;
+    background: rgba(52, 211, 153, 0.10);
+}
+.trade-type-sl {
+    color: #fb7185;
+    background: rgba(251, 113, 133, 0.10);
+}
+.trade-type-rev {
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.10);
+}
+
 /* "BTCUSDT Perp" 의 Perp 작은 chip */
 .trade-perp {
     display: inline-block;

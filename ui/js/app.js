@@ -361,6 +361,23 @@ async function refreshTrades() {
         const quote = (s.split("/")[1] || "").split(":")[0] || "USDT";
         return `${base}${quote} <span class="trade-perp">Perp</span>`;
     };
+    // v0.1.27 — reason 별 Trade Type 표시. Aurora 자기 vs 외부 시각 구분.
+    //   external  → "외부" (사용자 직접 / 봇 외부 거래)
+    //   tp_full   → "TP" (전량 익절)
+    //   tp_partial→ "TP 부분"
+    //   sl        → "SL"
+    //   reverse   → "REV" (REVERSE 신호 청산)
+    //   manual    → "Manual"
+    //   기타/누락  → "Trade" (fallback)
+    const fmtTradeType = (reason) => {
+        if (reason === "external") return '<span class="trade-type-external">외부</span>';
+        if (reason === "tp_full") return '<span class="trade-type-tp">TP</span>';
+        if (reason === "tp_partial") return '<span class="trade-type-tp">TP 부분</span>';
+        if (reason === "sl") return '<span class="trade-type-sl">SL</span>';
+        if (reason === "reverse") return '<span class="trade-type-rev">REV</span>';
+        if (reason === "manual") return 'Manual';
+        return 'Trade';
+    };
     tbody.innerHTML = trades.map((t, idx) => `
         <tr class="trade-row" data-trade-idx="${idx}">
             <td>${fmtSymbol(t.symbol)}</td>
@@ -368,7 +385,7 @@ async function refreshTrades() {
             <td class="mono">${fmtPrice(t.entry_price)}</td>
             <td class="mono">${fmtPrice(t.exit_price)}</td>
             <td class="mono">${fmtQty(t.qty, t.direction)}</td>
-            <td>Trade</td>
+            <td>${fmtTradeType(t.reason)}</td>
             <td class="mono">${fmtPnl(t.pnl_usd)}</td>
             <td class="mono">${fmtTime(t.closed_at_ts)}</td>
         </tr>

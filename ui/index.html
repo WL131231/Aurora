@@ -238,12 +238,29 @@
                         </div>
                     </div>
 
+                    <!-- 누적 PnL 차트 (v0.1.30) — 거래내역 토글과 같은 days/source/pair 사용 -->
+                    <div class="metric-card pnl-chart-card">
+                        <div class="metric-label">누적 PnL 곡선</div>
+                        <div class="pnl-chart-wrap">
+                            <canvas id="pnl-chart"></canvas>
+                            <div class="pnl-chart-empty" id="pnl-chart-empty">거래내역 없음</div>
+                        </div>
+                    </div>
+
                     <div class="section-title">
                         거래내역 (P&amp;L)
                         <span class="trades-period-toggle" id="trades-period-toggle">
                             <button data-days="7" class="active">7D</button>
                             <button data-days="30">30D</button>
                             <button data-days="180">180D</button>
+                        </span>
+                        <span class="trades-source-toggle" id="trades-source-toggle">
+                            <button data-source="all" class="active">전체</button>
+                            <button data-source="bot">Aurora</button>
+                            <button data-source="external">외부</button>
+                        </span>
+                        <span class="trades-pair-filter" id="trades-pair-filter">
+                            <!-- 페어 chip 동적 생성 (refreshTrades 이후) -->
                         </span>
                     </div>
                     <div class="metric-card" style="padding: 0">
@@ -762,6 +779,8 @@
 
     <!-- html2canvas (PnL 카드 PNG 캡처) — v1.4.1 CDN -->
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <!-- chart.js (누적 PnL 곡선, v0.1.30) — v4.4.x CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <script src="js/apiClient.js"></script>
     <script src="js/app.js"></script>
 </body>

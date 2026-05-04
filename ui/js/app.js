@@ -345,20 +345,46 @@ async function refreshPositions() {
     `).join("");
 }
 
-// 거래내역 (P&L) 표 갱신 — Bybit 스타일 (v0.1.20 + v0.1.23 기간 필터).
-// /trades?days=N 호출 + tbody 행 렌더. days 는 사용자 토글 (7/30/180) — 기본 7.
+// 거래내역 (P&L) 표 갱신 — Bybit 스타일 (v0.1.20 + v0.1.23 기간 필터 + v0.1.30 source/pair).
+// /trades?days=N&source=X 호출 + tbody 행 렌더. days/source 는 사용자 토글, pair 는 클라이언트 필터.
 let _tradesPeriodDays = 7;
+let _tradesSource = "all";          // "all" | "bot" | "external"
+let _tradesPairFilter = null;       // null = 전체 페어, or "BTC/USDT:USDT" 등
+
+// 마지막 fetch 결과 캐시 — pair 필터 변경 시 재조회 X (클라이언트 필터)
+let _tradesCache = [];
 
 async function refreshTrades() {
     const tbody = document.getElementById("trades-tbody");
     if (!tbody) return;
-    let trades = [];
     try {
-        trades = await Api.getTrades(200, _tradesPeriodDays, "all");
+        // backend 호출 — source 는 backend 분기, pair 는 클라이언트 필터
+        const sourceParam = (_tradesSource === "external") ? "exchange" : _tradesSource;
+        _tradesCache = await Api.getTrades(200, _tradesPeriodDays, sourceParam);
     } catch (_) {
         return;
     }
-    if (!Array.isArray(trades) || trades.length === 0) {
+    _renderTradesFiltered();
+}
+
+// 클라이언트 측 페어 필터 적용 + 행 렌더 + 페어 chip 갱신
+function _renderTradesFiltered() {
+    const tbody = document.getElementById("trades-tbody");
+    if (!tbody) return;
+    const all = Array.isArray(_tradesCache) ? _tradesCache : [];
+
+    // 페어 chip 동적 생성 (cache 기준 unique symbols)
+    _renderPairChips(all);
+
+    // 페어 필터 적용
+    const trades = _tradesPairFilter
+        ? all.filter((t) => t.symbol === _tradesPairFilter)
+        : all;
+
+    // 누적 PnL 차트 갱신 (필터 적용된 trades 기준)
+    _renderPnlChart(trades);
+
+    if (trades.length === 0) {
         tbody.innerHTML = '<tr><td colspan="8" class="trades-empty">거래내역 없음</td></tr>';
         return;
     }
@@ -446,6 +472,155 @@ async function refreshTrades() {
         });
     });
 })();
+
+// 거래내역 source 토글 (v0.1.30) — 전체 / Aurora / 외부
+(() => {
+    const toggle = document.getElementById("trades-source-toggle");
+    if (!toggle) return;
+    toggle.querySelectorAll("button[data-source]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            _tradesSource = btn.dataset.source;
+            toggle.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+            btn.classList.add("active");
+            // pair 필터 reset (다른 source 면 페어 list 다를 수 있음)
+            _tradesPairFilter = null;
+            refreshTrades();
+        });
+    });
+})();
+
+// 누적 PnL 차트 (v0.1.30) — chart.js, 필터 적용된 trades 기준 line chart.
+// trades 는 백엔드 응답 그대로 (신→구 정렬). 차트는 시간 순 (구→신) 으로 누적.
+let _pnlChartInstance = null;
+
+function _renderPnlChart(trades) {
+    const canvas = document.getElementById("pnl-chart");
+    const empty = document.getElementById("pnl-chart-empty");
+    if (!canvas || typeof Chart !== "function") return;
+
+    if (!trades || trades.length === 0) {
+        if (_pnlChartInstance) {
+            _pnlChartInstance.destroy();
+            _pnlChartInstance = null;
+        }
+        if (empty) empty.style.display = "flex";
+        return;
+    }
+    if (empty) empty.style.display = "none";
+
+    // 시간 순 정렬 (closed_at_ts 오름차순) + 누적 PnL 계산
+    const sorted = [...trades].sort((a, b) => a.closed_at_ts - b.closed_at_ts);
+    let cum = 0;
+    const points = sorted.map((t) => {
+        cum += Number(t.pnl_usd) || 0;
+        return { x: t.closed_at_ts, y: cum };
+    });
+
+    // 양수/음수 색 — 마지막 누적값 기준 (양=초록, 음=빨강)
+    const positive = cum >= 0;
+    const lineColor = positive ? "#34d399" : "#fb7185";
+    const fillColor = positive ? "rgba(52,211,153,0.12)" : "rgba(251,113,133,0.12)";
+
+    // 라벨 (간단한 시간 텍스트) — chart.js category scale 사용 (linear 도 가능)
+    const fmtShort = (ts) => {
+        const d = new Date(ts);
+        return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    };
+    const labels = points.map((p) => fmtShort(p.x));
+    const data = points.map((p) => p.y);
+
+    if (_pnlChartInstance) {
+        _pnlChartInstance.data.labels = labels;
+        _pnlChartInstance.data.datasets[0].data = data;
+        _pnlChartInstance.data.datasets[0].borderColor = lineColor;
+        _pnlChartInstance.data.datasets[0].backgroundColor = fillColor;
+        _pnlChartInstance.update("none");
+        return;
+    }
+
+    _pnlChartInstance = new Chart(canvas.getContext("2d"), {
+        type: "line",
+        data: {
+            labels,
+            datasets: [{
+                label: "누적 PnL (USDT)",
+                data,
+                borderColor: lineColor,
+                backgroundColor: fillColor,
+                borderWidth: 1.5,
+                fill: true,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                tension: 0.15,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: "rgba(13, 14, 22, 0.95)",
+                    borderColor: "rgba(96, 81, 155, 0.4)",
+                    borderWidth: 1,
+                    titleColor: "#bfc0d1",
+                    bodyColor: "#bfc0d1",
+                    padding: 10,
+                    callbacks: {
+                        label: (ctx) => {
+                            const v = ctx.parsed.y;
+                            return `${v >= 0 ? "+" : ""}${v.toFixed(2)} USDT`;
+                        },
+                    },
+                },
+            },
+            scales: {
+                x: {
+                    ticks: { color: "#666770", font: { size: 9 }, maxRotation: 0, autoSkipPadding: 32 },
+                    grid: { color: "rgba(255,255,255,0.03)" },
+                },
+                y: {
+                    ticks: {
+                        color: "#666770",
+                        font: { size: 10 },
+                        callback: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(0)}`,
+                    },
+                    grid: { color: "rgba(255,255,255,0.04)" },
+                },
+            },
+        },
+    });
+}
+
+// 페어 chip 동적 생성 (v0.1.30) — 거래내역 cache 기준 unique symbols
+function _renderPairChips(trades) {
+    const wrap = document.getElementById("trades-pair-filter");
+    if (!wrap) return;
+    const symbols = [...new Set(trades.map((t) => t.symbol))].sort();
+    if (symbols.length <= 1) {
+        wrap.innerHTML = "";  // 페어 1개 이하면 chip 표시 의미 X
+        return;
+    }
+    // "전체" + 각 페어
+    const fmt = (s) => {
+        const base = s.split("/")[0] || s;
+        return base;  // "BTC", "ETH" 등 짧게
+    };
+    const chips = [
+        `<button data-pair="" class="${_tradesPairFilter === null ? "active" : ""}">전체</button>`,
+        ...symbols.map((s) =>
+            `<button data-pair="${s}" class="${_tradesPairFilter === s ? "active" : ""}">${fmt(s)}</button>`,
+        ),
+    ];
+    wrap.innerHTML = chips.join("");
+    wrap.querySelectorAll("button[data-pair]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            _tradesPairFilter = btn.dataset.pair || null;
+            _renderTradesFiltered();  // 클라이언트 필터 — 재조회 X
+        });
+    });
+}
 
 // 결과 통계 6 카드 갱신 (v0.1.24) — /stats?days=N 호출 + 카드 값 채우기.
 async function refreshStats() {

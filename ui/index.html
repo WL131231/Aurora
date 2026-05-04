@@ -738,6 +738,13 @@
                         </label>
                     </div>
 
+                    <div class="flex gap-2 items-center flex-wrap mt-3">
+                        <button class="log-module-btn active-core"      data-log-module="core"       >core</button>
+                        <button class="log-module-btn active-exchange"  data-log-module="exchange"   >exchange</button>
+                        <button class="log-module-btn active-interfaces" data-log-module="interfaces">interfaces</button>
+                        <button class="log-module-btn active-backtest"  data-log-module="backtest"   >backtest</button>
+                    </div>
+
                     <div class="input-row" style="margin-top: 1.5rem">
                         <input type="text" class="input-field" id="log-search" placeholder="검색 (예: ERROR, EMA, BTC...)" />
                     </div>
@@ -751,8 +758,11 @@
                     </div>
 
                     <div class="section-title">로그 스트림 <span id="log-count" class="log-count"></span></div>
-                    <div class="log-box" id="log-box">
-                        <div class="log-empty" id="log-empty">로그 없음 — 봇 시작 후 표시</div>
+                    <div class="log-box-wrap">
+                        <div class="log-box" id="log-box">
+                            <div class="log-empty" id="log-empty">로그 없음 — 봇 시작 후 표시</div>
+                        </div>
+                        <button class="log-scroll-btn" id="log-scroll-btn">↓ 최신으로</button>
                     </div>
                 </div>
             </section>

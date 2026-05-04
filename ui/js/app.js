@@ -249,7 +249,7 @@ async function refreshPositions() {
         return;
     }
     if (!Array.isArray(positions) || positions.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="pos-empty">열린 포지션 없음</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="pos-empty">열린 포지션 없음</td></tr>';
         return;
     }
     const fmtPrice = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -264,9 +264,17 @@ async function refreshPositions() {
         const roiSign = roi >= 0 ? "+" : "";
         return `<span style="color:${color}">${roiSign}${roi.toFixed(2)}% &nbsp;&nbsp;${sign}${n.toFixed(2)} USDT</span>`;
     };
+    // 진입 트리거 — 봇 자기 진입한 포지션만 값 있음. 외부 포지션은 빈 list → "—"
+    const fmtTrigger = (arr) => {
+        if (!Array.isArray(arr) || arr.length === 0) {
+            return '<span style="color:var(--text-3)">—</span>';
+        }
+        return arr.map(t => `<span class="trigger-tag">${t}</span>`).join(" ");
+    };
     tbody.innerHTML = positions.map(p => `
         <tr>
             <td class="mono">${p.symbol}</td>
+            <td>${fmtTrigger(p.triggered_by)}</td>
             <td>${p.direction === "long" ? "롱" : "숏"}</td>
             <td class="mono">${fmtPrice(p.entry_price)}</td>
             <td class="mono">${Number(p.quantity).toFixed(4)}</td>

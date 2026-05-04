@@ -504,7 +504,7 @@ class BotInstance:
             risk_pct=self._risk_pct,
             full_seed=self._full_seed,
         )
-        await self._executor.open_position(plan)
+        await self._executor.open_position(plan, triggered_by=decision.triggered_by)
         logger.info(
             "BotInstance: 진입 — %s %s qty=%.6f (triggered_by=%s, score=%.2f)",
             self._symbol, decision.direction.value, plan.position.coin_amount,

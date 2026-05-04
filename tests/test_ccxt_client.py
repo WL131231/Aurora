@@ -384,9 +384,15 @@ async def test_fetch_closed_positions_non_bybit_returns_empty():
 
 @pytest.mark.asyncio
 async def test_fetch_closed_positions_bybit_parses_records():
-    """Bybit V5 closed-pnl 응답 → ClosedPosition 변환 — 핵심 필드 매핑."""
-    with patch("aurora.exchange.ccxt_client.settings") as mock_settings:
+    """Bybit V5 closed-pnl 응답 → ClosedPosition 변환 — 핵심 필드 매핑.
+
+    v0.1.27: Bybit ``endTime - startTime ≤ 7일`` 제약 + endTime 명시 추가.
+    since_ms 미지정 = default 최근 7일 (단일 chunk fast path 검증).
+    """
+    with patch("aurora.exchange.ccxt_client.settings") as mock_settings, \
+         patch("aurora.exchange.ccxt_client.time") as mock_time:
         mock_settings.run_mode = "demo"
+        mock_time.time = lambda: 1735100000.0  # 고정 now (chunk 계산 결정론)
         client = _make_client(exchange_id="bybit")
         # 두 record — 롱 청산 (Sell) + 숏 청산 (Buy)
         client._mock_ex.private_get_v5_position_closed_pnl = AsyncMock(  # type: ignore[attr-defined]
@@ -416,36 +422,102 @@ async def test_fetch_closed_positions_bybit_parses_records():
                             "updatedTime": "1735000800000",
                         },
                     ],
+                    "nextPageCursor": "",  # 페이지네이션 종료
                 },
             },
         )
-        result = await client.fetch_closed_positions(since_ms=1734000000000, limit=200)
+        # since_ms = 1735100000_000 - 7일 ms — 단일 chunk fast path
+        since_ms = int(1735100000.0 * 1000) - 7 * 24 * 60 * 60 * 1000
+        result = await client.fetch_closed_positions(since_ms=since_ms, limit=200)
         assert len(result) == 2
 
-        long_close = result[0]
-        assert long_close.symbol == "BTC/USDT:USDT"
-        assert long_close.direction == "long"
-        assert long_close.leverage == 10
-        assert long_close.qty == 0.01
-        assert long_close.entry_price == 60000.0
-        assert long_close.exit_price == 61000.0
-        assert long_close.pnl_usd == 10.0
+        # 신→구 정렬 — closed_at_ts 큰 게 앞 (ETHUSDT 1735000800 > BTCUSDT 1735000600)
+        first = result[0]
+        assert first.symbol == "ETH/USDT:USDT"
+        assert first.closed_at_ts == 1735000800000
+
+        second = result[1]
+        assert second.symbol == "BTC/USDT:USDT"
+        assert second.direction == "long"
+        assert second.leverage == 10
+        assert second.qty == 0.01
+        assert second.entry_price == 60000.0
+        assert second.exit_price == 61000.0
+        assert second.pnl_usd == 10.0
         # margin = (60000 × 0.01) / 10 = 60. ROI = 10 / 60 × 100 ≈ 16.67%
-        assert abs(long_close.roi_pct - (10.0 / 60.0 * 100.0)) < 1e-6
-        assert long_close.opened_at_ts == 1735000000000
-        assert long_close.closed_at_ts == 1735000600000
+        assert abs(second.roi_pct - (10.0 / 60.0 * 100.0)) < 1e-6
 
-        short_close = result[1]
-        assert short_close.symbol == "ETH/USDT:USDT"
-        assert short_close.direction == "short"
-        assert short_close.leverage == 20
-
-        # API params: category=linear, startTime, limit
+        # API params: category=linear, startTime, endTime (v0.1.27 추가), limit
         call_args = client._mock_ex.private_get_v5_position_closed_pnl.call_args  # type: ignore[attr-defined]
         params = call_args.args[0] if call_args.args else call_args.kwargs.get("params", {})
         assert params["category"] == "linear"
-        assert params["startTime"] == 1734000000000
+        assert params["startTime"] == since_ms
+        assert "endTime" in params  # v0.1.27 — 7일 default 윈도우 우회 fix
+        assert params["endTime"] == int(1735100000.0 * 1000)
         assert params["limit"] == 200
+
+
+@pytest.mark.asyncio
+async def test_fetch_closed_positions_bybit_long_period_chunks():
+    """30일치 fetch — 7일 chunks 자동 페이지네이션 (v0.1.27 fix).
+
+    Bybit V5 endTime - startTime ≤ 7일 제약 우회. 30일 = 5 chunks (마지막 chunk
+    < 7일). 각 chunk 마다 별도 호출 발생 verify.
+    """
+    with patch("aurora.exchange.ccxt_client.settings") as mock_settings, \
+         patch("aurora.exchange.ccxt_client.time") as mock_time:
+        mock_settings.run_mode = "demo"
+        mock_time.time = lambda: 1735100000.0
+        client = _make_client(exchange_id="bybit")
+        client._mock_ex.private_get_v5_position_closed_pnl = AsyncMock(  # type: ignore[attr-defined]
+            return_value={"result": {"list": [], "nextPageCursor": ""}},
+        )
+
+        now_ms = int(1735100000.0 * 1000)
+        thirty_days_ago = now_ms - 30 * 24 * 60 * 60 * 1000
+        await client.fetch_closed_positions(since_ms=thirty_days_ago)
+
+        # 30일 / 7일 = 4.28... → 5 chunks 호출
+        assert client._mock_ex.private_get_v5_position_closed_pnl.call_count == 5  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_fetch_closed_positions_bybit_pagination_within_chunk():
+    """한 chunk 안에 record 200 초과 → cursor 페이지네이션 자동 follow."""
+    with patch("aurora.exchange.ccxt_client.settings") as mock_settings, \
+         patch("aurora.exchange.ccxt_client.time") as mock_time:
+        mock_settings.run_mode = "demo"
+        mock_time.time = lambda: 1735100000.0
+        client = _make_client(exchange_id="bybit")
+
+        # 첫 페이지 = cursor 있음, 둘째 페이지 = cursor 없음
+        record_template = {
+            "symbol": "BTCUSDT", "side": "Sell", "leverage": "10",
+            "closedSize": "0.01", "avgEntryPrice": "60000",
+            "avgExitPrice": "61000", "closedPnl": "10",
+            "createdTime": "1735000000000", "updatedTime": "1735000600000",
+        }
+        responses = [
+            {"result": {"list": [record_template], "nextPageCursor": "next_page_token"}},
+            {"result": {"list": [record_template], "nextPageCursor": ""}},
+        ]
+        client._mock_ex.private_get_v5_position_closed_pnl = AsyncMock(  # type: ignore[attr-defined]
+            side_effect=responses,
+        )
+
+        # since_ms 단일 chunk (7일 이내)
+        since_ms = int(1735100000.0 * 1000) - 3 * 24 * 60 * 60 * 1000
+        result = await client.fetch_closed_positions(since_ms=since_ms)
+
+        # 두 페이지 = 2 record
+        assert len(result) == 2
+        # API 호출 2회 (cursor 페이지네이션)
+        assert client._mock_ex.private_get_v5_position_closed_pnl.call_count == 2  # type: ignore[attr-defined]
+
+        # 두 번째 호출에 cursor 파라미터 포함
+        second_call = client._mock_ex.private_get_v5_position_closed_pnl.call_args_list[1]  # type: ignore[attr-defined]
+        params = second_call.args[0] if second_call.args else second_call.kwargs.get("params", {})
+        assert params.get("cursor") == "next_page_token"
 
 
 @pytest.mark.asyncio

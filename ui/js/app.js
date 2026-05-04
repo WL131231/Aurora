@@ -309,13 +309,16 @@ async function refreshPositions() {
     `).join("");
 }
 
-// 거래내역 (P&L) 표 갱신 — Bybit 스타일 (v0.1.20). /trades 호출 + tbody 행 렌더.
+// 거래내역 (P&L) 표 갱신 — Bybit 스타일 (v0.1.20 + v0.1.23 기간 필터).
+// /trades?days=N 호출 + tbody 행 렌더. days 는 사용자 토글 (7/30/180) — 기본 7.
+let _tradesPeriodDays = 7;
+
 async function refreshTrades() {
     const tbody = document.getElementById("trades-tbody");
     if (!tbody) return;
     let trades = [];
     try {
-        trades = await Api.getTrades(50);
+        trades = await Api.getTrades(200, _tradesPeriodDays, "all");
     } catch (_) {
         return;
     }
@@ -373,6 +376,21 @@ async function refreshTrades() {
         });
     });
 }
+
+// 거래내역 기간 토글 (v0.1.23) — 7D / 30D / 180D
+(() => {
+    const toggle = document.getElementById("trades-period-toggle");
+    if (!toggle) return;
+    toggle.querySelectorAll("button[data-days]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            _tradesPeriodDays = parseInt(btn.dataset.days, 10);
+            toggle.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+            btn.classList.add("active");
+            // 봇 자기 거래 + 거래소 history 합쳐 즉시 다시 조회
+            refreshTrades();
+        });
+    });
+})();
 
 // ============================================================
 // 6b. PnL 공유 카드 (v0.1.21) — 모달 + html2canvas PNG 다운로드

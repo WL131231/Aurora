@@ -1082,6 +1082,35 @@ input[type="range"].slider-input:disabled {
     padding: 2.5rem;
 }
 
+/* 기간 토글 (7D / 30D / 180D) — section-title 우측 (v0.1.23) */
+.trades-period-toggle {
+    display: inline-flex;
+    gap: 4px;
+    margin-left: 0.75rem;
+    vertical-align: middle;
+}
+.trades-period-toggle button {
+    background: transparent;
+    border: 1px solid var(--border-soft);
+    color: var(--text-3);
+    font-size: 0.6875rem;
+    font-family: var(--font-mono);
+    letter-spacing: 0.05em;
+    padding: 3px 9px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.trades-period-toggle button:hover {
+    color: var(--text-1);
+    border-color: var(--text-3);
+}
+.trades-period-toggle button.active {
+    color: var(--text-1);
+    border-color: var(--aurora-purple);
+    background: rgba(96, 81, 155, 0.18);
+}
+
 /* "BTCUSDT Perp" 의 Perp 작은 chip */
 .trade-perp {
     display: inline-block;

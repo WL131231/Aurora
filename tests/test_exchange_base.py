@@ -101,6 +101,13 @@ class _MockClient:
     async def cancel_all(self, symbol: str) -> None:
         return None
 
+    async def fetch_closed_positions(
+        self,
+        since_ms: int | None = None,
+        limit: int = 200,
+    ) -> list:
+        return []
+
 
 def test_mock_client_satisfies_protocol():
     """_MockClient 가 ExchangeClient Protocol 만족 (structural typing).

@@ -355,3 +355,108 @@ async def test_close_calls_ccxt_close():
     client = _make_client()
     await client.close()
     client._mock_ex.close.assert_called_once()  # type: ignore[attr-defined]
+
+
+# ============================================================
+# Closed positions history (v0.1.23) — Bybit V5 closed-pnl
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_fetch_closed_positions_paper_returns_empty():
+    """paper 모드 = 빈 리스트 (실 호출 X)."""
+    with patch("aurora.exchange.ccxt_client.settings") as mock_settings:
+        mock_settings.run_mode = "paper"
+        client = _make_client()
+        result = await client.fetch_closed_positions(since_ms=1000, limit=50)
+        assert result == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_closed_positions_non_bybit_returns_empty():
+    """bybit 외 거래소 = 빈 리스트 (TODO 미구현)."""
+    with patch("aurora.exchange.ccxt_client.settings") as mock_settings:
+        mock_settings.run_mode = "demo"
+        client = _make_client(exchange_id="okx")
+        result = await client.fetch_closed_positions()
+        assert result == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_closed_positions_bybit_parses_records():
+    """Bybit V5 closed-pnl 응답 → ClosedPosition 변환 — 핵심 필드 매핑."""
+    with patch("aurora.exchange.ccxt_client.settings") as mock_settings:
+        mock_settings.run_mode = "demo"
+        client = _make_client(exchange_id="bybit")
+        # 두 record — 롱 청산 (Sell) + 숏 청산 (Buy)
+        client._mock_ex.private_get_v5_position_closed_pnl = AsyncMock(  # type: ignore[attr-defined]
+            return_value={
+                "result": {
+                    "list": [
+                        {
+                            "symbol": "BTCUSDT",
+                            "side": "Sell",         # 롱 청산
+                            "leverage": "10",
+                            "closedSize": "0.01",
+                            "avgEntryPrice": "60000",
+                            "avgExitPrice": "61000",
+                            "closedPnl": "10",
+                            "createdTime": "1735000000000",
+                            "updatedTime": "1735000600000",
+                        },
+                        {
+                            "symbol": "ETHUSDT",
+                            "side": "Buy",          # 숏 청산
+                            "leverage": "20",
+                            "closedSize": "0.5",
+                            "avgEntryPrice": "3000",
+                            "avgExitPrice": "2950",
+                            "closedPnl": "25",
+                            "createdTime": "1735000200000",
+                            "updatedTime": "1735000800000",
+                        },
+                    ],
+                },
+            },
+        )
+        result = await client.fetch_closed_positions(since_ms=1734000000000, limit=200)
+        assert len(result) == 2
+
+        long_close = result[0]
+        assert long_close.symbol == "BTC/USDT:USDT"
+        assert long_close.direction == "long"
+        assert long_close.leverage == 10
+        assert long_close.qty == 0.01
+        assert long_close.entry_price == 60000.0
+        assert long_close.exit_price == 61000.0
+        assert long_close.pnl_usd == 10.0
+        # margin = (60000 × 0.01) / 10 = 60. ROI = 10 / 60 × 100 ≈ 16.67%
+        assert abs(long_close.roi_pct - (10.0 / 60.0 * 100.0)) < 1e-6
+        assert long_close.opened_at_ts == 1735000000000
+        assert long_close.closed_at_ts == 1735000600000
+
+        short_close = result[1]
+        assert short_close.symbol == "ETH/USDT:USDT"
+        assert short_close.direction == "short"
+        assert short_close.leverage == 20
+
+        # API params: category=linear, startTime, limit
+        call_args = client._mock_ex.private_get_v5_position_closed_pnl.call_args  # type: ignore[attr-defined]
+        params = call_args.args[0] if call_args.args else call_args.kwargs.get("params", {})
+        assert params["category"] == "linear"
+        assert params["startTime"] == 1734000000000
+        assert params["limit"] == 200
+
+
+@pytest.mark.asyncio
+async def test_fetch_closed_positions_bybit_network_error_returns_empty():
+    """네트워크 에러 시 raise 안 하고 빈 리스트 (UI 안전)."""
+    import ccxt
+    with patch("aurora.exchange.ccxt_client.settings") as mock_settings:
+        mock_settings.run_mode = "demo"
+        client = _make_client(exchange_id="bybit")
+        client._mock_ex.private_get_v5_position_closed_pnl = AsyncMock(  # type: ignore[attr-defined]
+            side_effect=ccxt.NetworkError("network down"),
+        )
+        result = await client.fetch_closed_positions()
+        assert result == []

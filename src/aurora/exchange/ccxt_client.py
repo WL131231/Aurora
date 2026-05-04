@@ -30,7 +30,7 @@ from tenacity import (
 
 from aurora.backtest.tf import normalize_to_ccxt
 from aurora.config import settings
-from aurora.exchange.base import Balance, Order, Position
+from aurora.exchange.base import Balance, ClosedPosition, Order, Position
 
 logger = logging.getLogger(__name__)
 
@@ -331,6 +331,98 @@ class CcxtClient:
             return
         await self._ensure_init()
         await self._ex.cancel_all_orders(symbol)
+
+    # ============================================================
+    # Closed positions history (v0.1.23) — 거래소 측 거래내역 fetch
+    # ============================================================
+
+    async def fetch_closed_positions(
+        self,
+        since_ms: int | None = None,
+        limit: int = 200,
+    ) -> list[ClosedPosition]:
+        """거래소 청산 포지션 history — Bybit V5 ``/v5/position/closed-pnl`` 우선.
+
+        Bybit:
+            - 매개변수 ``category=linear``, ``startTime``, ``limit`` (50~200).
+            - record 한 개 = 1 closed position (avgEntry/avgExit/closedPnl 포함 — 매칭 완료).
+            - 응답 list 신→구 정렬 (Bybit 기본).
+            - rate limit: 600 req/5s — 1회 호출은 무시 가능.
+
+        다른 거래소(OKX/Binance/...): 본 PR 미구현 → 빈 리스트 (TODO ChoYoon).
+
+        paper 모드 = 빈 리스트 (실 호출 X).
+        """
+        if settings.run_mode == "paper":
+            return []
+        if self.name != "bybit":
+            logger.info(
+                "fetch_closed_positions: %s 어댑터 미구현 — 빈 리스트 반환 (TODO)",
+                self.name,
+            )
+            return []
+        await self._ensure_init()
+
+        params: dict[str, Any] = {"category": "linear", "limit": limit}
+        if since_ms is not None:
+            params["startTime"] = int(since_ms)
+
+        # ccxt 의 raw Bybit V5 API 직접 호출 — closed-pnl 은 unified API X.
+        # 메서드 이름은 ccxt 가 자동 생성: GET /v5/position/closed-pnl → privateGetV5PositionClosedPnl.
+        try:
+            raw = await self._ex.private_get_v5_position_closed_pnl(params)
+        except (ccxt.NetworkError, ccxt.ExchangeError) as e:
+            logger.warning("fetch_closed_positions(bybit) 실패: %s", e)
+            return []
+
+        result = (raw or {}).get("result") or {}
+        items = result.get("list") or []
+        return [self._parse_closed_pnl_bybit(item) for item in items]
+
+    @staticmethod
+    def _parse_closed_pnl_bybit(raw: dict[str, Any]) -> ClosedPosition:
+        """Bybit V5 closed-pnl record → ``ClosedPosition`` 변환.
+
+        Bybit 응답 키:
+            - symbol: "BTCUSDT" (raw, ccxt 표준 X) → ":USDT" suffix 추가
+            - side: "Sell" 면 롱 청산 = direction="long", "Buy" 면 숏 청산 = direction="short"
+            - leverage: str → int
+            - closedSize / avgEntryPrice / avgExitPrice / closedPnl: str → float
+            - createdTime / updatedTime: str → int (ms)
+        """
+        raw_symbol = str(raw.get("symbol") or "")
+        # "BTCUSDT" → "BTC/USDT:USDT" (linear perpetual ccxt 표준)
+        if raw_symbol.endswith("USDT"):
+            base = raw_symbol[:-4]
+            symbol = f"{base}/USDT:USDT"
+        else:
+            symbol = raw_symbol
+
+        side_raw = str(raw.get("side") or "Sell")
+        direction: Literal["long", "short"] = "long" if side_raw == "Sell" else "short"
+
+        qty = float(raw.get("closedSize") or 0)
+        entry_price = float(raw.get("avgEntryPrice") or 0)
+        exit_price = float(raw.get("avgExitPrice") or 0)
+        leverage = int(float(raw.get("leverage") or 1))
+        pnl_usd = float(raw.get("closedPnl") or 0)
+
+        # ROI% — (pnl / margin) × 100, margin = (entry × qty) / leverage
+        margin = (entry_price * qty) / max(leverage, 1)
+        roi_pct = (pnl_usd / margin * 100.0) if margin > 0 else 0.0
+
+        return ClosedPosition(
+            symbol=symbol,
+            direction=direction,
+            leverage=leverage,
+            qty=qty,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            opened_at_ts=int(float(raw.get("createdTime") or 0)),
+            closed_at_ts=int(float(raw.get("updatedTime") or 0)),
+            pnl_usd=pnl_usd,
+            roi_pct=roi_pct,
+        )
 
     @staticmethod
     def _parse_order(

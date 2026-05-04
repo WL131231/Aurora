@@ -53,9 +53,12 @@ const status = () => _request("/status");
 
 const getPositions = () => _request("/positions");
 
-// ─── Trades (거래내역 v0.1.20) ────────────────────
+// ─── Trades (거래내역 v0.1.20 + v0.1.23 기간 필터) ──
 
-const getTrades = (limit = 50) => _request(`/trades?limit=${limit}`);
+// days: 0 = bot buffer 만 (거래소 fetch X), 7/30/180 = 거래소 history 도 합침.
+// source: "bot" | "exchange" | "all" (기본 all). days>0 + source != bot 이어야 거래소 fetch.
+const getTrades = (limit = 200, days = 0, source = "all") =>
+    _request(`/trades?limit=${limit}&days=${days}&source=${source}`);
 
 // ─── Config ─────────────────────────────────────────
 

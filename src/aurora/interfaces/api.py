@@ -23,6 +23,7 @@ CORS 정책:
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -346,34 +347,82 @@ def create_app() -> FastAPI:
             version=tag,
         )
 
-    # ───── Trades (거래내역, v0.1.20) ────────────────
+    # ───── Trades (거래내역, v0.1.20 + v0.1.23) ────────
 
     @app.get("/trades", response_model=list[TradeDTO])
-    async def trades(limit: int = 50) -> list[TradeDTO]:
-        """청산된 거래내역 — 최근 N개 (rolling buffer).
+    async def trades(
+        limit: int = 200,
+        days: int = 0,
+        source: str = "all",
+    ) -> list[TradeDTO]:
+        """청산된 거래내역 — 봇 자기 거래 + 거래소 측 history (v0.1.23).
 
-        Bybit P&L 표 형식 매핑. 봇 자기 청산만 (사용자 직접 청산은 미포함).
+        Args:
+            limit: 최대 record 수.
+            days: 기간 필터 (일). 0 이면 전체 (봇 buffer 만 — 거래소 fetch X).
+                7 / 30 / 180 등 양수면 ``now - days`` 이후 closed_at_ts 만 반환 +
+                거래소 history (``source != 'bot'``) 도 fetch.
+            source: ``"bot"`` | ``"exchange"`` | ``"all"`` (기본).
+                - bot:      ``BotInstance._closed_trades`` 만 (Aurora 자기 거래)
+                - exchange: ``client.fetch_closed_positions()`` 만 (외부 + 사용자 직접 거래 포함)
+                - all:      두 source 합쳐서 closed_at_ts 기준 신→구 정렬
+
+        Bybit P&L 표 형식 매핑. 거래소 record 의 ``triggered_by`` 는 빈 list,
+        ``reason`` = ``"external"`` (Aurora 봇이 한 거 X 표시).
         """
         bot = bot_instance.get_instance()
-        records = bot.closed_trades[-limit:] if limit > 0 else bot.closed_trades
-        # 신→구 (가장 최근 trade 가 위로 오게 reverse)
-        return [
-            TradeDTO(
-                symbol=t.symbol,
-                direction=t.direction,
-                leverage=t.leverage,
-                qty=t.qty,
-                entry_price=t.entry_price,
-                exit_price=t.exit_price,
-                pnl_usd=t.pnl_usd,
-                roi_pct=t.roi_pct,
-                opened_at_ts=t.opened_at_ts,
-                closed_at_ts=t.closed_at_ts,
-                reason=t.reason,
-                triggered_by=list(t.triggered_by),
-            )
-            for t in reversed(records)
-        ]
+        now_ms = int(time.time() * 1000)
+        since_ms = (now_ms - days * 24 * 60 * 60 * 1000) if days > 0 else None
+
+        bot_records: list[TradeDTO] = []
+        if source in ("bot", "all"):
+            for t in bot.closed_trades:
+                if since_ms is not None and t.closed_at_ts < since_ms:
+                    continue
+                bot_records.append(TradeDTO(
+                    symbol=t.symbol,
+                    direction=t.direction,
+                    leverage=t.leverage,
+                    qty=t.qty,
+                    entry_price=t.entry_price,
+                    exit_price=t.exit_price,
+                    pnl_usd=t.pnl_usd,
+                    roi_pct=t.roi_pct,
+                    opened_at_ts=t.opened_at_ts,
+                    closed_at_ts=t.closed_at_ts,
+                    reason=t.reason,
+                    triggered_by=list(t.triggered_by),
+                ))
+
+        ex_records: list[TradeDTO] = []
+        # 거래소 fetch — days>0 일 때만 (since 명시적). bot 단독이면 fetch X.
+        if source in ("exchange", "all") and days > 0 and bot.client is not None:
+            try:
+                closed = await bot.client.fetch_closed_positions(
+                    since_ms=since_ms, limit=limit,
+                )
+                for c in closed:
+                    ex_records.append(TradeDTO(
+                        symbol=c.symbol,
+                        direction=c.direction,
+                        leverage=c.leverage,
+                        qty=c.qty,
+                        entry_price=c.entry_price,
+                        exit_price=c.exit_price,
+                        pnl_usd=c.pnl_usd,
+                        roi_pct=c.roi_pct,
+                        opened_at_ts=c.opened_at_ts,
+                        closed_at_ts=c.closed_at_ts,
+                        reason="external",
+                        triggered_by=[],
+                    ))
+            except Exception as e:  # noqa: BLE001 — UI 안전 (봇 buffer 만 보여줌)
+                logger.warning("/trades fetch_closed_positions 실패: %s", e)
+
+        # 합치고 closed_at_ts 신→구 정렬, limit 자르기.
+        merged = bot_records + ex_records
+        merged.sort(key=lambda t: t.closed_at_ts, reverse=True)
+        return merged[:limit]
 
     # ───── Config ───────────────────────────────────
 

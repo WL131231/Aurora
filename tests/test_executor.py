@@ -344,3 +344,68 @@ async def test_tp_hits_does_not_decrease_on_pullback():
     assert executor.tp_hits == 1
     await executor.update_trailing_sl(101.0)  # 후퇴
     assert executor.tp_hits == 1  # 유지
+
+
+# ============================================================
+# restore_plan (v0.1.26) — 재시작 후 포지션 복원
+# ============================================================
+
+
+def test_restore_plan_no_existing_position():
+    """빈 Executor 에 restore_plan — has_position=True + 모든 state 정확."""
+    executor, client = _make_executor()
+    plan = _make_plan(
+        direction="long", entry=100.0, sl=95.0,
+        tps=(102.0, 104.0, 106.0, 108.0),
+    )
+
+    executor.restore_plan(
+        plan=plan,
+        triggered_by=["EMA", "RSI"],
+        opened_at_ts=1735000000000,
+        remaining_qty=0.7,    # partial 청산 후 잔여
+        tp_hits=2,
+    )
+    # 거래소 호출 X — restore 는 메모리 state 만 채움
+    client.set_leverage.assert_not_called()
+    client.place_order.assert_not_called()
+
+    assert executor.has_position is True
+    assert executor.triggered_by == ["EMA", "RSI"]
+    assert executor.tp_hits == 2
+    assert executor.remaining_qty == 0.7
+    # high/low 는 entry_price 부터 출발 (current_market 모름)
+    assert executor._highest_since_entry == 100.0
+    assert executor._lowest_since_entry == 100.0
+
+
+def test_restore_plan_blocks_when_position_active():
+    """이미 활성 포지션 있는데 restore — RuntimeError (사용 패턴 위반)."""
+    import asyncio
+    executor, _ = _make_executor()
+    plan = _make_plan(direction="long")
+    asyncio.run(executor.open_position(plan))
+
+    with pytest.raises(RuntimeError, match="활성 포지션 존재"):
+        executor.restore_plan(
+            plan=_make_plan(direction="short"),
+            triggered_by=[],
+            opened_at_ts=0, remaining_qty=1.0, tp_hits=0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_restore_plan_then_trailing_works():
+    """restore 후 update_trailing_sl 정상 동작 — TP/SL 추적 이어짐."""
+    executor, _ = _make_executor()
+    plan = _make_plan(
+        direction="long", entry=100.0, sl=95.0,
+        tps=(102.0, 104.0, 106.0, 108.0),
+    )
+    executor.restore_plan(
+        plan=plan, triggered_by=[], opened_at_ts=0,
+        remaining_qty=1.0, tp_hits=1,   # TP1 이미 도달 상태 복원
+    )
+    # 가격이 TP2 도달 → tp_hits 2 로 증가
+    await executor.update_trailing_sl(105.0)
+    assert executor.tp_hits == 2

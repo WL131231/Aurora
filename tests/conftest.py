@@ -25,3 +25,17 @@ def _isolate_trades_store(monkeypatch, tmp_path):
         "aurora.interfaces.trades_store._path",
         lambda: test_path,
     )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_active_position_store(monkeypatch, tmp_path):
+    """``active_position_store._path`` 를 tmp 로 redirect (v0.1.26).
+
+    Why: BotInstance.start 가 영속 plan load 시도 → 사용자 PC
+    ``~/.aurora/active_position.json`` 읽기/쓰기 → test 격리 깨짐.
+    """
+    test_path = tmp_path / "active_position.json"
+    monkeypatch.setattr(
+        "aurora.interfaces.active_position_store._path",
+        lambda: test_path,
+    )

@@ -55,21 +55,23 @@ body {
     opacity: 0.7;
 }
 
-/* 두 손 배경 (NEXORA 톤 — 흰 배경 자동 제거 + 보라 톤). v0.1.16. */
+/* 두 손 배경 — cropped 이미지 (좌 로봇 / 우 인간). v0.1.17 사용자 cropped PNG 제공.
+   흰 배경 + 검정/회색 도트 손 → invert + screen 으로 흰=투명 / 손=흰 효과. */
 .bg-hands {
     position: fixed;
     inset: 0;
     z-index: 2;
     pointer-events: none;
     background-image: url("../img/launcher-bg-hands.png");
+    /* 손 이미지 1200×750 (가로) — 화면 중앙에 contain 으로 자연 fit. */
     background-size: contain;
-    background-position: center;
+    background-position: center 60%;
     background-repeat: no-repeat;
-    /* invert: 흰 배경 → 검정, 검정 손 → 흰. screen blend: 검정 → 투명, 흰 → 그대로
-       → 어두운 그라디언트 위에 흰/보라 손만 보임. */
+    /* invert: 흰 → 검정, 검정 손 → 흰. screen: 검정 → 투명 → 어두운 그라디언트
+       위에 흰/보라 손만 보임. */
     filter: invert(1) sepia(0.4) hue-rotate(220deg) saturate(1.4) brightness(0.95);
     mix-blend-mode: screen;
-    opacity: 0.22;
+    opacity: 0.32;
 }
 
 /* ===== 시네마틱 레이아웃 (좌 hero / 우 visual) ===== */

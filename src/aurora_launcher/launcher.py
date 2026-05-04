@@ -47,6 +47,10 @@ HTTP_TIMEOUT_SEC = 5
 # 본체 .exe 이름 — release.yml 의 Aurora-windows.exe 와 정합
 AURORA_EXE_NAME = "Aurora.exe"
 
+# 본체 + .new + .old + .aurora_version 모두 격리 폴더 (v0.1.17).
+# 사용자에게 launcher.exe 만 보이고 본체 파일들은 _aurora/ 안에 숨김.
+AURORA_DATA_DIR = "_aurora"
+
 # 본체에 전달할 env 마커 — 본체 자기-swap 중복 방지
 LAUNCHER_ENV_MARKER = "AURORA_FROM_LAUNCHER"
 
@@ -69,9 +73,44 @@ def _launcher_dir() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _aurora_data_dir() -> Path:
+    """본체 데이터 격리 폴더 — ``<launcher_dir>/_aurora/`` (v0.1.17).
+
+    사용자에게 launcher.exe 만 보이고 본체 .exe / .new / .old / .aurora_version
+    은 모두 본 폴더 안에 숨김.
+    """
+    return _launcher_dir() / AURORA_DATA_DIR
+
+
 def _aurora_exe_path() -> Path:
-    """본체 Aurora.exe 절대 경로 — launcher 와 같은 디렉토리."""
-    return _launcher_dir() / AURORA_EXE_NAME
+    """본체 Aurora.exe 절대 경로 — _aurora/ 폴더 안 (v0.1.17 격리)."""
+    return _aurora_data_dir() / AURORA_EXE_NAME
+
+
+def _migrate_legacy_layout() -> None:
+    """v0.1.16 이전 layout (launcher 옆 Aurora.exe) → _aurora/ 로 이전.
+
+    Why: 기존 사용자가 v0.1.17 launcher 받으면 _aurora/ 에 본체 없음 → 다시 다운.
+    legacy Aurora.exe 가 launcher 옆에 있으면 자동으로 _aurora/ 안으로 이동 →
+    재다운 비용 절감 + .new / .old 잔재 정리.
+    """
+    legacy_exe = _launcher_dir() / AURORA_EXE_NAME
+    new_exe = _aurora_exe_path()
+    if legacy_exe.exists() and not new_exe.exists():
+        try:
+            new_exe.parent.mkdir(parents=True, exist_ok=True)
+            legacy_exe.rename(new_exe)
+            logger.info("legacy %s → %s 이전 완료", legacy_exe, new_exe)
+        except OSError as e:
+            logger.warning("legacy 이전 실패 (재다운 필요): %s", e)
+    # legacy .new / .old / .aurora_version 잔재 정리 (best-effort)
+    for name in ("Aurora.exe.new", "Aurora.exe.old", ".aurora_version"):
+        legacy = _launcher_dir() / name
+        if legacy.exists():
+            try:
+                legacy.unlink()
+            except OSError:
+                pass
 
 
 def _parse_version(raw: str) -> tuple[int, ...]:
@@ -136,7 +175,7 @@ def get_local_aurora_version() -> str | None:
     파일 작성하는 패턴 (별도 PR) 또는 처음에는 None 반환.
     None 일 때는 launcher 가 무조건 최신 버전 다운 권유.
     """
-    version_file = _launcher_dir() / ".aurora_version"
+    version_file = _aurora_data_dir() / ".aurora_version"
     if version_file.exists():
         try:
             return version_file.read_text(encoding="utf-8").strip()
@@ -164,6 +203,8 @@ def apply_swap(downloaded_new: Path) -> bool:
     exe = _aurora_exe_path()
     old_path = exe.with_suffix(exe.suffix + ".old")
     try:
+        # _aurora/ 폴더 자동 생성 (v0.1.17 격리 흐름 첫 다운로드 케이스)
+        exe.parent.mkdir(parents=True, exist_ok=True)
         # 기존 .old 정리
         if old_path.exists():
             old_path.unlink()
@@ -218,7 +259,9 @@ def launch_aurora() -> bool:
             env=env,
             creationflags=flags,
             close_fds=True,
-            cwd=str(exe.parent),
+            # v0.1.17: cwd = launcher 옆 (본체는 _aurora/ 안). .env / config_store 등을
+            # launcher 옆에서 찾게 → 사용자가 .env 를 launcher.exe 옆에 두면 인식 OK.
+            cwd=str(_launcher_dir()),
         )
         return True
     except OSError as e:
@@ -279,6 +322,8 @@ class LauncherApi:
             ``{"success": bool, "message": str}``
         """
         target = _aurora_exe_path().with_suffix(_aurora_exe_path().suffix + ".new")
+        # _aurora/ 폴더 자동 생성 (첫 다운 시 폴더 없음)
+        target.parent.mkdir(parents=True, exist_ok=True)
         if not download_to(url, target):
             return {"success": False, "message": "다운로드 실패 (네트워크 확인)"}
         if not apply_swap(target):
@@ -287,7 +332,8 @@ class LauncherApi:
         try:
             release = fetch_latest_release()
             if release is not None:
-                version_file = _launcher_dir() / ".aurora_version"
+                version_file = _aurora_data_dir() / ".aurora_version"
+                version_file.parent.mkdir(parents=True, exist_ok=True)
                 version_file.write_text(
                     release.get("tag_name", "").lstrip("v"), encoding="utf-8",
                 )
@@ -321,6 +367,9 @@ def _ui_index_path() -> Path:
 def main() -> None:
     """launcher 진입점 — pywebview 윈도우 시작."""
     import webview  # type: ignore[import-not-found]
+
+    # v0.1.17: 이전 layout (launcher 옆 Aurora.exe) → _aurora/ 자동 이전.
+    _migrate_legacy_layout()
 
     api = LauncherApi()
     ui_path = _ui_index_path()

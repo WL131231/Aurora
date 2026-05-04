@@ -537,6 +537,10 @@ body {
     font-size: 12px;
     line-height: 1.7;
     color: var(--text-2);
+    /* v0.1.35 — 텍스트 선택/복사 명시 (pywebview 환경에서도 보장) */
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
 }
 
 .log-empty {

@@ -69,6 +69,9 @@ class Executor:
         # 활성 포지션 state — open_position 시 채움, close 시 None 으로 reset
         self._plan: RiskPlan | None = None
         self._remaining_qty: float = 0.0
+        # 진입 트리거 (어떤 지표로 진입했는지) — UI 표시용
+        # signal.py 의 EntryDecision.triggered_by 그대로 보존 (예: ["EMA", "RSI"])
+        self._triggered_by: list[str] = []
         # 트레일링 SL 입력 — 진입 후 매 step current_market 으로 갱신
         self._highest_since_entry: float = 0.0
         self._lowest_since_entry: float = 0.0
@@ -79,6 +82,11 @@ class Executor:
     def has_position(self) -> bool:
         """현재 활성 포지션 보유 여부 — BotInstance 가 진입 중복 방지에 사용."""
         return self._plan is not None
+
+    @property
+    def triggered_by(self) -> list[str]:
+        """진입 시 발동된 지표 목록 — UI 표시용 (예: ["EMA", "RSI"])."""
+        return list(self._triggered_by)
 
     def set_client(self, client: ExchangeClient) -> None:
         """ccxt 세션 재주입 — BotInstance stop/start 사이클 시 사용.
@@ -98,6 +106,7 @@ class Executor:
         """
         self._plan = None
         self._remaining_qty = 0.0
+        self._triggered_by = []
         self._tp_hits = 0
         self._highest_since_entry = 0.0
         self._lowest_since_entry = 0.0
@@ -116,7 +125,11 @@ class Executor:
     # 진입
     # ============================================================
 
-    async def open_position(self, plan: RiskPlan) -> Order:
+    async def open_position(
+        self,
+        plan: RiskPlan,
+        triggered_by: list[str] | None = None,
+    ) -> Order:
         """진입 — leverage 설정 + 시장가 주문.
 
         Phase 1 = 거래소 측 SL/TP 등록 X (DESIGN.md E-6). SL/TP 는 ``plan``
@@ -125,6 +138,9 @@ class Executor:
         Args:
             plan: ``core.risk.build_risk_plan`` 산출 결과.
                 ``plan.position.coin_amount`` 가 거래소 주문 qty.
+            triggered_by: 진입 발동 지표 목록 (예: ``["EMA", "RSI"]``). UI 표시용.
+                None 이면 빈 list. ``signal.py`` 의 ``EntryDecision.triggered_by``
+                직접 전달 가정.
 
         Returns:
             거래소 응답 Order (paper 모드는 가짜 'filled' Order).
@@ -156,14 +172,15 @@ class Executor:
         # 3. state 초기화
         self._plan = plan
         self._remaining_qty = qty
+        self._triggered_by = list(triggered_by) if triggered_by else []
         self._highest_since_entry = plan.entry_price
         self._lowest_since_entry = plan.entry_price
         self._tp_hits = 0
 
         logger.info(
-            "Executor.open_position: %s %s qty=%.6f entry=%.2f sl=%.2f leverage=%dx",
+            "Executor.open_position: %s %s qty=%.6f entry=%.2f sl=%.2f leverage=%dx triggered_by=%s",
             self._symbol, plan.direction, qty,
-            plan.entry_price, plan.sl_price, plan.leverage,
+            plan.entry_price, plan.sl_price, plan.leverage, self._triggered_by,
         )
         return order
 
@@ -314,6 +331,7 @@ class Executor:
         """포지션 종료 후 state 초기화 — open_position 가능 상태로 복귀."""
         self._plan = None
         self._remaining_qty = 0.0
+        self._triggered_by = []
         self._highest_since_entry = 0.0
         self._lowest_since_entry = 0.0
         self._tp_hits = 0

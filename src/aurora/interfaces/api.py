@@ -70,6 +70,7 @@ class PositionDTO(BaseModel):
     unrealized_pnl_usd: float
     sl_price: float | None
     tp_prices: list[float]
+    triggered_by: list[str] = []  # 진입 발동 지표 (예: ["EMA", "RSI"]) — 봇 자기 진입만
 
 
 class ConfigDTO(BaseModel):
@@ -214,6 +215,14 @@ def create_app() -> FastAPI:
         except Exception as e:  # noqa: BLE001 — UI 안전 (빈 리스트)
             logger.warning("/positions get_positions 실패 (빈 리스트 반환): %s", e)
             return []
+        # triggered_by 는 봇 자기 진입한 포지션에만 의미 있음.
+        # Executor._plan 이 살아있고 거래소 측 포지션 = 봇 자기 → triggered_by 노출.
+        # 외부 포지션이거나 stop/start 사이클 중 _plan 잃은 케이스 → 빈 list.
+        bot_triggered = (
+            bot._executor.triggered_by
+            if bot._executor is not None and bot._executor.has_position
+            else []
+        )
         return [
             PositionDTO(
                 symbol=p.symbol,
@@ -224,6 +233,15 @@ def create_app() -> FastAPI:
                 unrealized_pnl_usd=p.unrealized_pnl,
                 sl_price=None,    # 거래소 미반환 — Executor 별도 관리 (TODO)
                 tp_prices=[],     # 동일
+                # 봇 자기 포지션이면 triggered_by, 외부면 빈 list
+                triggered_by=(
+                    bot_triggered
+                    if bot._executor is not None
+                    and bot._executor.has_position
+                    and p.symbol == bot._symbol
+                    and p.side == bot._executor._plan.direction
+                    else []
+                ),
             )
             for p in raw
         ]

@@ -33,10 +33,18 @@ PLATFORM_HIDDEN_IMPORTS = {
 }
 
 
+PLATFORM_ICON = {
+    "Windows": "aurora.ico",
+    "Darwin": "aurora.icns",
+    "Linux": "aurora.png",
+}
+
+
 def main() -> int:
     plat = platform.system()
     entry = PROJECT_ROOT / "src" / "aurora_launcher" / "launcher.py"
     ui_dir = PROJECT_ROOT / "src" / "aurora_launcher" / "ui"
+    assets_dir = PROJECT_ROOT / "assets"
 
     cmd: list[str] = [
         sys.executable, "-m", "PyInstaller",
@@ -49,6 +57,15 @@ def main() -> int:
         "--noconfirm",
         "--onefile",
     ]
+
+    # 런처 아이콘 — 본체와 동일한 Aurora 다이아몬드 (assets/aurora.ico)
+    icon_name = PLATFORM_ICON.get(plat)
+    if icon_name:
+        icon_path = assets_dir / icon_name
+        if icon_path.exists():
+            cmd.extend(["--icon", str(icon_path)])
+        else:
+            print(f"[warn] launcher icon not found: {icon_path} (skip)")
 
     for module in PLATFORM_HIDDEN_IMPORTS.get(plat, []):
         cmd.extend(["--hidden-import", module])

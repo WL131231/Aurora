@@ -368,3 +368,145 @@ async def test_step_skips_strategy_when_position_open() -> None:
     assert client.get_equity.call_count == baseline_equity_calls
 
     await bot.stop()
+
+
+# ============================================================
+# v0.1.26 — 활성 포지션 영속화 + 재시작 복원
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_restore_active_position_no_persisted(monkeypatch) -> None:
+    """영속 plan 없으면 (첫 실행 / 정상 종료 후) — has_position 그대로 False."""
+    monkeypatch.setattr("aurora.interfaces.bot_instance.settings.run_mode", "demo")
+    bot = bot_instance.get_instance()
+    rows = _make_ohlcv_rows(start_ts_ms=1_700_000_000_000, count=10, tf_minutes=60)
+    client = _make_mock_client(ohlcv_rows=rows)
+    bot.configure(client=client, timeframes=["1H"])
+    await bot.start()
+    assert bot.has_position is False
+    await bot.stop()
+
+
+@pytest.mark.asyncio
+async def test_restore_active_position_exchange_has_matching_position(
+    monkeypatch,
+) -> None:
+    """영속 plan 있고 + 거래소 측 일치 — restore 호출 → has_position=True."""
+    from aurora.exchange.base import Position
+    from aurora.interfaces import active_position_store
+
+    monkeypatch.setattr("aurora.interfaces.bot_instance.settings.run_mode", "demo")
+
+    # 영속 plan 미리 저장
+    from aurora.core.risk import PositionSize, RiskPlan, TrailingMode
+    plan = RiskPlan(
+        entry_price=100.0,
+        direction="long",
+        leverage=10,
+        position=PositionSize(
+            notional_usd=1000.0, margin_usd=100.0, coin_amount=0.01,
+        ),
+        tp_prices=[101.0, 102.0, 103.0, 104.0],
+        sl_price=98.0,
+        trailing_mode=TrailingMode.MOVING_TARGET,
+    )
+    active_position_store.save(
+        plan=plan,
+        symbol="BTC/USDT:USDT",
+        triggered_by=["EMA"],
+        opened_at_ts=1735000000000,
+        remaining_qty=0.01,
+        tp_hits=1,
+    )
+
+    rows = _make_ohlcv_rows(start_ts_ms=1_700_000_000_000, count=10, tf_minutes=60)
+    client = _make_mock_client(ohlcv_rows=rows)
+    # 거래소 측 포지션 살아있는 상태 — fetch_position 이 정합 record 반환
+    client.fetch_position = AsyncMock(return_value=Position(
+        symbol="BTC/USDT:USDT",
+        side="long",
+        qty=0.01,
+        entry_price=100.0,
+        leverage=10,
+        unrealized_pnl=0.0,
+        margin_mode="cross",
+    ))
+
+    bot = bot_instance.get_instance()
+    bot.configure(client=client, timeframes=["1H"])
+    await bot.start()
+
+    # 영속 plan 거래소와 일치 → 봇 자기 포지션으로 복원
+    assert bot.has_position is True
+    assert bot._executor.tp_hits == 1   # 영속화 tp_hits 보존
+    assert bot._executor.triggered_by == ["EMA"]
+
+    await bot.stop()
+
+
+@pytest.mark.asyncio
+async def test_restore_active_position_exchange_empty_clears(monkeypatch) -> None:
+    """영속 plan 있는데 거래소 측 없음 — 외부 청산 → clear + has_position=False."""
+    from aurora.core.risk import PositionSize, RiskPlan, TrailingMode
+    from aurora.interfaces import active_position_store
+
+    monkeypatch.setattr("aurora.interfaces.bot_instance.settings.run_mode", "demo")
+
+    plan = RiskPlan(
+        entry_price=100.0, direction="long", leverage=10,
+        position=PositionSize(notional_usd=1000.0, margin_usd=100.0, coin_amount=0.01),
+        tp_prices=[101.0, 102.0, 103.0, 104.0],
+        sl_price=98.0, trailing_mode=TrailingMode.MOVING_TARGET,
+    )
+    active_position_store.save(
+        plan=plan, symbol="BTC/USDT:USDT", triggered_by=[],
+        opened_at_ts=0, remaining_qty=0.01, tp_hits=0,
+    )
+
+    rows = _make_ohlcv_rows(start_ts_ms=1_700_000_000_000, count=10, tf_minutes=60)
+    client = _make_mock_client(ohlcv_rows=rows)
+    client.fetch_position = AsyncMock(return_value=None)  # 거래소 측 없음
+
+    bot = bot_instance.get_instance()
+    bot.configure(client=client, timeframes=["1H"])
+    await bot.start()
+
+    assert bot.has_position is False
+    # 영속 데이터도 clear 됨
+    assert active_position_store.load() is None
+
+    await bot.stop()
+
+
+@pytest.mark.asyncio
+async def test_restore_active_position_paper_skipped(monkeypatch) -> None:
+    """paper 모드 — 영속 plan 있어도 실 거래소 호출 X 정책 → restore skip."""
+    from aurora.core.risk import PositionSize, RiskPlan, TrailingMode
+    from aurora.interfaces import active_position_store
+
+    monkeypatch.setattr("aurora.interfaces.bot_instance.settings.run_mode", "paper")
+
+    plan = RiskPlan(
+        entry_price=100.0, direction="long", leverage=10,
+        position=PositionSize(notional_usd=1000.0, margin_usd=100.0, coin_amount=0.01),
+        tp_prices=[101.0, 102.0, 103.0, 104.0],
+        sl_price=98.0, trailing_mode=TrailingMode.MOVING_TARGET,
+    )
+    active_position_store.save(
+        plan=plan, symbol="BTC/USDT:USDT", triggered_by=[],
+        opened_at_ts=0, remaining_qty=0.01, tp_hits=0,
+    )
+
+    rows = _make_ohlcv_rows(start_ts_ms=1_700_000_000_000, count=10, tf_minutes=60)
+    client = _make_mock_client(ohlcv_rows=rows)
+    bot = bot_instance.get_instance()
+    bot.configure(client=client, timeframes=["1H"])
+    await bot.start()
+
+    # paper 모드 — restore 안 함 → has_position False
+    assert bot.has_position is False
+    # 영속 데이터는 그대로 (paper 가 건드리지 않음)
+    assert active_position_store.load() is not None
+
+    await bot.stop()

@@ -136,6 +136,34 @@ class Executor:
         self._highest_since_entry = 0.0
         self._lowest_since_entry = 0.0
 
+    def restore_plan(
+        self,
+        plan: RiskPlan,
+        triggered_by: list[str],
+        opened_at_ts: int,
+        remaining_qty: float,
+        tp_hits: int,
+    ) -> None:
+        """봇 재시작 후 영속화된 plan 복원 (v0.1.26).
+
+        ``open_position`` 과 달리 거래소 주문 X — 이미 거래소 측 포지션 살아있다고
+        가정. BotInstance 가 ``fetch_position`` 으로 정합성 검증한 후 호출.
+
+        high/low 추적은 entry_price 부터 출발 (current_market 모르는 시점).
+        다음 ``update_trailing_sl`` 첫 호출 시 자연스럽게 갱신됨.
+        """
+        if self._plan is not None:
+            raise RuntimeError(
+                "restore_plan 호출했는데 활성 포지션 존재 — 기존 reset 먼저 필요",
+            )
+        self._plan = plan
+        self._remaining_qty = remaining_qty
+        self._triggered_by = list(triggered_by)
+        self._opened_at_ts = opened_at_ts
+        self._tp_hits = tp_hits
+        self._highest_since_entry = plan.entry_price
+        self._lowest_since_entry = plan.entry_price
+
     @property
     def remaining_qty(self) -> float:
         """남은 포지션 수량 (분할 청산 후 잔여) — read-only."""

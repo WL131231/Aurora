@@ -41,7 +41,7 @@ from aurora.core.strategy import (
 from aurora.exchange.base import ExchangeClient
 from aurora.exchange.data import MultiTfCache
 from aurora.exchange.execution import ClosedTrade, Executor
-from aurora.interfaces import trades_store
+from aurora.interfaces import active_position_store, trades_store
 
 logger = logging.getLogger(__name__)
 
@@ -170,12 +170,36 @@ class BotInstance:
 
         매 close_position 직후 호출. ``trades_store.save`` 는 atomic + 실패 시 silent
         (warn) — 디스크 이슈로 매매 lifecycle 차단되지 않게.
+
+        v0.1.26: 청산 후 active_position 도 동기화 — 잔여 0 = clear, partial = 새 state save.
         """
         self._closed_trades.append(closed)
         try:
             trades_store.save(list(self._closed_trades))
         except Exception as e:  # noqa: BLE001 — 매매 사이클 보호
             logger.warning("trades_store.save 실패 (in-memory 유지): %s", e)
+        self._persist_active()
+
+    def _persist_active(self) -> None:
+        """현재 Executor state 를 디스크에 영속화 (v0.1.26).
+
+        잔여 0 / has_position=False → clear. 활성 포지션 있으면 save (현재 plan + remaining + tp_hits).
+        매 진입 / partial 청산 / 외부 청산 감지 / start 복원 후 호출.
+        """
+        try:
+            if self._executor is None or not self._executor.has_position:
+                active_position_store.clear()
+                return
+            active_position_store.save(
+                plan=self._executor._plan,
+                symbol=self._symbol,
+                triggered_by=self._executor._triggered_by,
+                opened_at_ts=self._executor._opened_at_ts,
+                remaining_qty=self._executor._remaining_qty,
+                tp_hits=self._executor._tp_hits,
+            )
+        except Exception as e:  # noqa: BLE001 — 매매 사이클 보호
+            logger.warning("active_position_store sync 실패: %s", e)
 
     @property
     def closed_trades(self) -> list:
@@ -357,6 +381,8 @@ class BotInstance:
                 tf: _WARMUP_DEFAULTS.get(tf, 500) for tf in self._timeframes
             }
             await self._cache.warmup(warmup_lookback)
+            # v0.1.26: 영속화된 활성 포지션 복원 시도 — .exe 종료 후 자기 포지션 잊지 않게.
+            await self._restore_active_position()
             logger.info(
                 "BotInstance.start: configured (symbol=%s, tfs=%s, leverage=%dx)",
                 self._symbol, self._timeframes, self._leverage,
@@ -367,6 +393,94 @@ class BotInstance:
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
         logger.info("BotInstance: 시작")
+
+    async def _restore_active_position(self) -> None:
+        """봇 시작 시 영속화된 활성 포지션 복원 (v0.1.26).
+
+        흐름:
+            1. ``active_position_store.load()`` — 영속 plan 있으면 dict 반환
+            2. 없으면 (첫 실행 / 정상 종료 후) noop
+            3. 거래소 측 ``fetch_position`` 으로 정합성 검증
+                - 거래소 X → 사용자가 직접 청산했음 → ``clear()`` + noop
+                - symbol/direction 불일치 → 외부 변경 → ``clear()`` + noop
+                - qty 큰 차이 (>10%) → 외부 추가/부분 청산 → ``clear()`` + noop (안전 측)
+                - 정합 → ``Executor.restore_plan()`` 호출 + 봇이 자기 포지션으로 인식
+
+        이미 ``_executor.has_position`` 이면 (stop→start 사이클, _plan 보존) skip.
+        paper 모드 = skip (실 거래소 호출 안 하는 정책).
+        """
+        if settings.run_mode == "paper":
+            return
+        if self._client is None or self._executor is None:
+            return
+        if self._executor.has_position:
+            # Executor state 가 살아있는 stop→start 사이클 — 복원 불필요 (이미 메모리)
+            return
+
+        saved = active_position_store.load()
+        if saved is None:
+            return
+
+        plan = active_position_store.reconstruct_plan(saved.get("plan", {}))
+        if plan is None:
+            active_position_store.clear()
+            return
+
+        saved_symbol = saved.get("symbol", "")
+        if saved_symbol != self._symbol:
+            logger.info(
+                "재시작: 영속 포지션 심볼(%s) != 현재(%s) → clear",
+                saved_symbol, self._symbol,
+            )
+            active_position_store.clear()
+            return
+
+        try:
+            actual = await self._client.fetch_position(self._symbol)
+        except Exception as e:  # noqa: BLE001 — UI 안전, 시작 차단 방지
+            logger.warning("재시작 복원: fetch_position 실패 (%s) — 다음 step 재시도", e)
+            return
+
+        if actual is None:
+            logger.info("재시작: 영속 포지션 거래소엔 없음 → 외부 청산 — clear")
+            active_position_store.clear()
+            return
+
+        if actual.side != plan.direction:
+            logger.warning(
+                "재시작: 영속 방향(%s) != 거래소(%s) — 외부 변경, 복원 skip",
+                plan.direction, actual.side,
+            )
+            active_position_store.clear()
+            return
+
+        saved_remaining = float(saved.get("remaining_qty", plan.position.coin_amount))
+        # qty 10% 이상 차이 = 외부 추가/부분 청산 의심. 작은 차이는 부동소수 + 거래소
+        # 반올림 허용 (Bybit 0.001 단위 등).
+        denom = max(saved_remaining, 1e-9)
+        if abs(actual.qty - saved_remaining) / denom > 0.1:
+            logger.warning(
+                "재시작: 영속 qty(%.6f) != 거래소(%.6f) — 차이 큼, 복원 skip",
+                saved_remaining, actual.qty,
+            )
+            active_position_store.clear()
+            return
+
+        # 모든 검증 통과 — 복원
+        self._executor.restore_plan(
+            plan=plan,
+            triggered_by=list(saved.get("triggered_by", [])),
+            opened_at_ts=int(saved.get("opened_at_ts", 0)),
+            remaining_qty=actual.qty,  # 거래소 실제 qty 사용 (소량 변동 흡수)
+            tp_hits=int(saved.get("tp_hits", 0)),
+        )
+        logger.info(
+            "재시작: 활성 포지션 복원 — %s %s qty=%.6f sl=%.2f tp_hits=%d (영속 plan)",
+            self._symbol, plan.direction, actual.qty,
+            plan.sl_price, saved.get("tp_hits", 0),
+        )
+        # 거래소 실제 qty 로 살짝 보정됐으니 다시 save (state 동기화)
+        self._persist_active()
 
     async def stop(self) -> None:
         """매매 lifecycle 중지 — task cancel + client cleanup."""
@@ -448,6 +562,8 @@ class BotInstance:
                         self._symbol,
                     )
                     self._executor.reset_position()
+                    # v0.1.26: 영속 데이터도 같이 clear — 다음 시작 시 안 떠올리게
+                    self._persist_active()
                     return  # 다음 step 부터 진입 평가 분기 진입
 
                 # 3-2. qty sync — 사용자 직접 추가 진입 / 부분 청산 인지 (v0.1.8).
@@ -600,6 +716,8 @@ class BotInstance:
             self._symbol, decision.direction.value, plan.position.coin_amount,
             decision.triggered_by, decision.score,
         )
+        # v0.1.26: 진입 직후 영속화 — .exe 종료 시 잊지 않게
+        self._persist_active()
 
 
 # ============================================================

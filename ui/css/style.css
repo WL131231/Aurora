@@ -595,6 +595,17 @@ body {
     font-size: 0.8125rem;
     color: var(--text-2);
     user-select: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+}
+
+.radio-group label .mode-sub {
+    width: 100%;
+    margin-left: 1.5rem;
+    font-size: 0.6875rem;
+    color: var(--text-3);
+    margin-top: 0.125rem;
+    letter-spacing: 0.02em;
 }
 
 .radio-group label::before {

@@ -20,9 +20,6 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from aurora.backtest.cost import (
-    Direction as RecordDir,
-)
-from aurora.backtest.cost import (
     apply_costs,
     apply_slippage,
     slip_pct,
@@ -311,7 +308,6 @@ class BacktestEngine:
                 open_=float(bar_1m["open"]),
                 high=self._last_high,
                 low=self._last_low,
-                close=self._last_close,
             )
             # 4. 청산 X 시 high/low 갱신 — 다음 봉 트레일링 입력
             if record is None and self.position is not None:
@@ -388,32 +384,6 @@ class BacktestEngine:
     # 헬퍼 함수 — Group 2 본문 구현 자리 (시그니처만 박음)
     # ─────────────────────────────────────────────
 
-    def _to_record_direction(self, direction: str) -> RecordDir:
-        """direction 이중 표준 격리 — ``RiskPlan`` (소문자) → ``TradeRecord``
-        (대문자) 변환을 1 곳에 격리 (D-19).
-
-        ``core`` 영역 ``Direction StrEnum value="long"/"short"`` ↔ ``backtest``
-        ``cost.Direction Literal["LONG","SHORT"]`` 정합. ``cost`` / ``stats``
-        Stage 1B 변경 X (회귀 비용 0). 본질 정합화는 후속 PR (장수 ping 답변
-        후 결정).
-
-        Note:
-            cost.Direction (Literal) 은 본 모듈에서 ``RecordDir`` 로 alias —
-            ``core.strategy.Direction`` (StrEnum, signal 영역) 과 이름 충돌
-            회피.
-        """
-        # Why: Literal 반환 타입 narrowing 위해 if-elif-raise 패턴.
-        # `return norm` (str) 은 mypy/pyright 가 좁혀주지 않음.
-        norm = direction.upper()
-        if norm == "LONG":
-            return "LONG"
-        if norm == "SHORT":
-            return "SHORT"
-        raise ValueError(
-            f"잘못된 direction: {direction!r} "
-            f"(예상: 'long'/'short' 또는 'LONG'/'SHORT')",
-        )
-
     def _open(self, plan: RiskPlan, ts_ms: int) -> None:
         """포지션 진입 — ``Position`` 생성 + ``self.position`` 설정.
 
@@ -489,9 +459,8 @@ class BacktestEngine:
         plan = p.plan
 
         # 슬리피지 (exit) — 항상 불리한 방향
-        direction_upper = self._to_record_direction(plan.direction)
         slip = slip_pct(self._last_high, self._last_low, self._last_close)
-        exit_price = apply_slippage(fill, direction_upper, side="exit", slip=slip)
+        exit_price = apply_slippage(fill, plan.direction, side="exit", slip=slip)
 
         # raw pnl (방향 부호)
         sign = 1.0 if plan.direction == "long" else -1.0
@@ -537,7 +506,7 @@ class BacktestEngine:
             entry_ts=p.entry_ts,
             exit_price=exit_price,
             exit_ts=ts_ms,
-            direction=direction_upper,
+            direction=plan.direction,
             leverage=float(plan.leverage),
             pnl=lev_pnl,
             r_multiple=r_multiple,
@@ -584,9 +553,8 @@ class BacktestEngine:
         p = self.position
         plan = p.plan
 
-        direction_upper = self._to_record_direction(plan.direction)
         slip = slip_pct(self._last_high, self._last_low, self._last_close)
-        exit_price = apply_slippage(fill, direction_upper, side="exit", slip=slip)
+        exit_price = apply_slippage(fill, plan.direction, side="exit", slip=slip)
 
         sign = 1.0 if plan.direction == "long" else -1.0
         raw_pnl_pct = (exit_price - plan.entry_price) / plan.entry_price * sign
@@ -631,7 +599,7 @@ class BacktestEngine:
             entry_ts=p.entry_ts,
             exit_price=exit_price,
             exit_ts=ts_ms,
-            direction=direction_upper,
+            direction=plan.direction,
             leverage=float(plan.leverage),
             pnl=lev_pnl,
             r_multiple=r_multiple,
@@ -647,7 +615,6 @@ class BacktestEngine:
         open_: float,
         high: float,
         low: float,
-        close: float,
     ) -> TradeRecord | None:
         """매 1 분봉 SL/TP 도달 검사 — gap-fill 적용 + 4 단계 분할 일반화.
 
@@ -668,13 +635,14 @@ class BacktestEngine:
             open_: 1 분봉 open.
             high: 1 분봉 high.
             low: 1 분봉 low.
-            close: 1 분봉 close (의도적으로 매개변수 — 호출자 OHLC 4 인자 일관성.
-                slip 산출은 ``self._last_*`` 사용, ``step()`` 진입점에서 갱신).
+
+        Note:
+            close 는 매개변수에서 제외 — slip 산출은 ``self._last_close``
+            (``step()`` 진입점 L283-285 갱신) 사용. 장수+WooJae 합의 2026-05-04.
 
         Returns:
             청산 발생 시 ``TradeRecord``, 미청산이면 ``None``.
         """
-        del close   # 함수 내부 미사용 — slip 은 self._last_* 사용 (step 갱신)
         if self.position is None:
             return None
         p = self.position

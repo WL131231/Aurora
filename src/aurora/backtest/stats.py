@@ -34,7 +34,8 @@ class TradeRecord:
         entry_ts: 진입 시각 (ms epoch).
         exit_price: 슬리피지 반영 청산가.
         exit_ts: 청산 시각 (ms epoch).
-        direction: 포지션 방향 (cost.py Literal 재사용).
+        direction: 포지션 방향 (cost.py ``Literal["long","short"]`` 재사용 —
+            ``core.strategy.Direction`` StrEnum value 자연 통과).
         leverage: 레버리지 (Aurora 정책 10~50x).
         pnl: 레버리지·수수료 반영 net PnL 비율 (시드 대비, ``cost.apply_costs`` 산출 lev_pnl).
         r_multiple: R-multiple — sl_distance 단위 손익 평가.
@@ -179,7 +180,7 @@ def compute_r_multiples(
 
         ``r_multiple = (exit_price - entry_price) / sl_distance × sign``
 
-    여기서 ``sign`` 은 LONG +1 / SHORT -1, ``sl_distance = |entry - sl_price|``
+    여기서 ``sign`` 은 long +1 / short -1, ``sl_distance = |entry - sl_price|``
     (RiskPlan 에서 인라인 계산 — RiskPlan 에 sl_distance 필드 X).
 
     Args:
@@ -205,8 +206,8 @@ def compute_r_multiples(
                 f"sl_distance == 0 (entry={plan.entry_price}, sl={plan.sl_price}) — "
                 f"RiskPlan 산출 검토 필요",
             )
-        # Why: LONG 은 +1, SHORT 은 -1 부호 (방향 반전 시 R-multiple 부호 반전)
-        sign = 1.0 if trade.direction == "LONG" else -1.0
+        # Why: long 은 +1, short 은 -1 부호 (방향 반전 시 R-multiple 부호 반전)
+        sign = 1.0 if trade.direction == "long" else -1.0
         out.append((trade.exit_price - trade.entry_price) / sl_distance * sign)
     return out
 

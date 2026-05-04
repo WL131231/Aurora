@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # 타입 별칭 — 방향·체결 시점
 # ============================================================
 
-Direction = Literal["LONG", "SHORT"]
+Direction = Literal["long", "short"]
 Side = Literal["entry", "exit"]
 
 
@@ -80,15 +80,16 @@ def apply_slippage(
 ) -> float:
     """슬리피지를 가격에 반영해 실제 체결가 반환 (unfavorable 방향).
 
-    - LONG entry / SHORT exit → 가격 ↑ (사야 하는 쪽이 비싸짐)
-    - LONG exit / SHORT entry → 가격 ↓ (팔아야 하는 쪽이 싸짐)
+    - long entry / short exit → 가격 ↑ (사야 하는 쪽이 비싸짐)
+    - long exit / short entry → 가격 ↓ (팔아야 하는 쪽이 싸짐)
 
     백테스트 결과가 실거래보다 낙관적이지 않도록 항상 불리한 방향으로 체결 모델링.
     차용: replay_engine L543-552 (``_apply_slip``).
 
     Args:
         price: 슬리피지 미적용 가격 (시장가 봉 close 등).
-        direction: 포지션 방향 (``"LONG"`` 또는 ``"SHORT"``).
+        direction: 포지션 방향 (``"long"`` 또는 ``"short"`` —
+            ``core.strategy.Direction`` StrEnum value 정합).
         side: 체결 시점 (``"entry"`` 또는 ``"exit"``).
         slip: 슬리피지 비율 (``slip_pct`` 산출값 권장).
 
@@ -96,11 +97,11 @@ def apply_slippage(
         슬리피지 적용된 실제 체결가.
         잘못된 direction/side 시 AssertionError (Python -O 모드 시 자동 제거).
     """
-    assert direction in ("LONG", "SHORT"), f"잘못된 direction: {direction!r}"
+    assert direction in ("long", "short"), f"잘못된 direction: {direction!r}"
     assert side in ("entry", "exit"), f"잘못된 side: {side!r}"
-    # Why: LONG entry 와 SHORT exit 는 가격 상승이 불리 (사거나 환매하므로 비싸게)
-    unfavorable_up = (direction == "LONG" and side == "entry") or \
-                     (direction == "SHORT" and side == "exit")
+    # Why: long entry 와 short exit 는 가격 상승이 불리 (사거나 환매하므로 비싸게)
+    unfavorable_up = (direction == "long" and side == "entry") or \
+                     (direction == "short" and side == "exit")
     if unfavorable_up:
         return price * (1 + slip)
     return price * (1 - slip)

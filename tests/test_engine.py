@@ -379,8 +379,11 @@ def test_close_sl_distance_zero_warns_caplog(
 @pytest.mark.parametrize(
     ("raw_pct", "expected_pnl_lo", "expected_pnl_hi"),
     [
-        (-0.90, -3.62, -3.58),                              # baseline [12] clamp 미발동
-        (-1.50, -4.001, -3.999),                            # baseline [13] clamp 발동 (-4.0)
+        # v0.1.13 ROI 단위 변경 후 size_pct 가 10배 (0.05→0.5) — clamp 한도 -5.0.
+        # raw=-0.90 → naive -4.5, cost ~-0.01 → -4.51 (clamp 미발동)
+        # raw=-1.50 → naive -7.5, clamp 발동 → -5.0 정확
+        (-0.90, -4.520, -4.500),                            # clamp 미발동 (cost 포함)
+        (-1.50, -5.001, -4.999),                            # clamp 발동 (-5.0)
     ],
 )
 def test_close_clamp_at_extreme_drop(
@@ -390,6 +393,10 @@ def test_close_clamp_at_extreme_drop(
 
     SHORT 사용 — LONG 은 raw_pct<-1 시 fill 음수 필요 (가격 무효). SHORT 면
     fill > entry × 2 로 자연 양수 (entry=100, raw=-1.5 → fill=250).
+
+    v0.1.13: SL/TP 단위 = ROI %. 동일 sl_pct 명목 값에서 가격 변동 % = ROI / leverage
+    이므로 sl_distance_pct 가 1/leverage 만큼 작아짐 → qty / size_pct 가 leverage 배.
+    clamp 한도도 -size_pct × leverage 로 leverage 배 (-0.05×10=-0.5 → -0.5×10=-5).
     """
     engine = BacktestEngine(BacktestConfig(leverage=10))
     _open_short(engine, entry=100.0)

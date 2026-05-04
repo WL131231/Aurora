@@ -445,13 +445,13 @@
                     <div class="section-title">TP / SL 모드</div>
                     <div class="radio-group">
                         <input type="radio" name="tpsl-mode" id="tpsl-fixed" value="fixed_pct" checked />
-                        <label for="tpsl-fixed">Fixed %</label>
+                        <label for="tpsl-fixed">Fixed %<span class="mode-sub">레버리지별 자동 ROI</span></label>
 
                         <input type="radio" name="tpsl-mode" id="tpsl-atr" value="atr" />
-                        <label for="tpsl-atr">ATR Dynamic</label>
+                        <label for="tpsl-atr">ATR Dynamic<span class="mode-sub">변동성 기반 동적</span></label>
 
                         <input type="radio" name="tpsl-mode" id="tpsl-manual" value="manual" />
-                        <label for="tpsl-manual">Manual %</label>
+                        <label for="tpsl-manual">Manual %<span class="mode-sub">사용자 직접 입력</span></label>
                     </div>
 
                     <div class="section-title">분할 익절 (4단계, 합 100)</div>
@@ -486,22 +486,22 @@
                     <div class="section-title">트레일링 모드</div>
                     <div class="radio-group" style="flex-wrap: wrap">
                         <input type="radio" name="trail" id="trail-off" value="off" />
-                        <label for="trail-off">OFF</label>
+                        <label for="trail-off">OFF<span class="mode-sub">트레일링 비활성</span></label>
 
                         <input type="radio" name="trail" id="trail-mt" value="moving_target" checked />
-                        <label for="trail-mt">Moving Target</label>
+                        <label for="trail-mt">Moving Target<span class="mode-sub">SL → 직전 TP 이동</span></label>
 
                         <input type="radio" name="trail" id="trail-m2t" value="moving_2_target" />
-                        <label for="trail-m2t">Moving 2-Target</label>
+                        <label for="trail-m2t">Moving 2-Target<span class="mode-sub">SL → 2 단계 직전 TP</span></label>
 
                         <input type="radio" name="trail" id="trail-be" value="breakeven" />
-                        <label for="trail-be">Breakeven</label>
+                        <label for="trail-be">Breakeven<span class="mode-sub">TP1 도달 시 본전</span></label>
 
                         <input type="radio" name="trail" id="trail-pbt" value="percent_below_triggers" />
-                        <label for="trail-pbt">% Below Triggers</label>
+                        <label for="trail-pbt">% Below Triggers<span class="mode-sub">TP 도달 시 % 거리 lock</span></label>
 
                         <input type="radio" name="trail" id="trail-pbh" value="percent_below_highest" />
-                        <label for="trail-pbh">% Below Highest</label>
+                        <label for="trail-pbh">% Below Highest<span class="mode-sub">최고가 대비 % 거리 추적</span></label>
                     </div>
 
                     <div class="section-title">시드 정책</div>

@@ -207,7 +207,13 @@ def test_position_size_min_seed_pct_out_of_range_raises() -> None:
 
 
 def test_build_risk_plan_fixed_pct_long() -> None:
-    """FIXED_PCT 롱: SL 은 entry 아래, TP 는 entry 위."""
+    """FIXED_PCT 롱: SL 은 entry 아래, TP 는 entry 위.
+
+    v0.1.13: fixed_sl_pct / fixed_tp_pcts 단위 = ROI %.
+    가격 변동 % = ROI / leverage.
+        sl=2.0 ROI / 10x → 가격 변동 0.2% → 100 × (1-0.002) = 99.8
+        tp=[1,2,3,4] ROI / 10x → 가격 [0.1, 0.2, 0.3, 0.4]% → [100.1, 100.2, 100.3, 100.4]
+    """
     cfg = TpSlConfig(
         mode=TpSlMode.FIXED_PCT,
         fixed_sl_pct=2.0,
@@ -224,14 +230,14 @@ def test_build_risk_plan_fixed_pct_long() -> None:
     assert plan.entry_price == 100.0
     assert plan.direction == "long"
     assert plan.leverage == 10
-    assert plan.sl_price == pytest.approx(98.0)  # 100 × (1 - 0.02)
-    assert plan.tp_prices == pytest.approx([101.0, 102.0, 103.0, 104.0])
+    assert plan.sl_price == pytest.approx(99.8)  # 100 × (1 - 0.002) = ROI 2% / 10x
+    assert plan.tp_prices == pytest.approx([100.1, 100.2, 100.3, 100.4])
     assert plan.trailing_mode == cfg.trailing_mode
     assert isinstance(plan.position, PositionSize)
 
 
 def test_build_risk_plan_fixed_pct_short() -> None:
-    """FIXED_PCT 숏: SL 은 entry 위, TP 는 entry 아래."""
+    """FIXED_PCT 숏: SL 은 entry 위, TP 는 entry 아래 (v0.1.13 ROI 단위)."""
     cfg = TpSlConfig(
         mode=TpSlMode.FIXED_PCT,
         fixed_sl_pct=2.0,
@@ -243,8 +249,8 @@ def test_build_risk_plan_fixed_pct_short() -> None:
         config=cfg, risk_pct=0.50,
     )
     assert plan.direction == "short"
-    assert plan.sl_price == pytest.approx(102.0)
-    assert plan.tp_prices == pytest.approx([99.0, 98.0, 97.0, 96.0])
+    assert plan.sl_price == pytest.approx(100.2)  # ROI 2% / 10x → 가격 0.2% 위
+    assert plan.tp_prices == pytest.approx([99.9, 99.8, 99.7, 99.6])
 
 
 def test_build_risk_plan_atr_mode() -> None:
@@ -266,7 +272,7 @@ def test_build_risk_plan_atr_mode() -> None:
 
 
 def test_build_risk_plan_manual_mode() -> None:
-    """MANUAL 모드: manual_sl_pct / manual_tp_pcts 사용."""
+    """MANUAL 모드: manual_sl_pct / manual_tp_pcts (ROI 단위, v0.1.13)."""
     cfg = TpSlConfig(
         mode=TpSlMode.MANUAL,
         manual_sl_pct=1.0,
@@ -277,8 +283,9 @@ def test_build_risk_plan_manual_mode() -> None:
         leverage=10, equity_usd=1000.0,
         config=cfg, risk_pct=0.50,
     )
-    assert plan.sl_price == pytest.approx(99.0)
-    assert plan.tp_prices == pytest.approx([100.5, 101.0, 101.5, 102.0])
+    # ROI 1% / 10x = 가격 0.1%, ROI [0.5,1,1.5,2] / 10x = 가격 [0.05,0.1,0.15,0.2]%
+    assert plan.sl_price == pytest.approx(99.9)
+    assert plan.tp_prices == pytest.approx([100.05, 100.1, 100.15, 100.2])
 
 
 def test_build_risk_plan_atr_requires_atr_value() -> None:

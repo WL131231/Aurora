@@ -45,8 +45,11 @@ class TpSlConfig:
     atr_period: int = 14                   # 표준 ATR 기간 (Wilder 1978 권고치)
     atr_tp_multipliers: list[float] = field(default_factory=lambda: [1.0, 2.0, 3.0, 4.0])
     atr_sl_multiplier: float = 1.5         # SL = 1.5×ATR — 노이즈 통과 보편 값
-    fixed_tp_pcts: list[float] = field(default_factory=lambda: [1.0, 2.0, 3.0, 4.0])
-    fixed_sl_pct: float = 2.0              # 10x 보수 영역 출발값 (sl_pct_for_leverage 와 일치)
+    # FIXED_PCT 모드 — 단위 = ROI % (마진 기준 손익률, 사용자 친화). build_risk_plan
+    # 에서 / leverage 변환해 가격 변동 % 로 매핑. 빈 list / None 이면 leverage 자동
+    # 산출 (sl_pct_for_leverage / tp_pct_4_levels_for_leverage).
+    fixed_tp_pcts: list[float] = field(default_factory=list)  # 빈 list = 자동 산출
+    fixed_sl_pct: float | None = None      # None = 자동 산출 (sl_pct_for_leverage)
     manual_tp_pcts: list[float] = field(default_factory=lambda: [0.5, 1.0, 1.5, 2.0])
     manual_sl_pct: float = 1.0
 
@@ -88,23 +91,25 @@ class RiskPlan:
 
 
 def sl_pct_for_leverage(leverage: int) -> float:
-    """레버리지별 SL 거리 (가격 변동 %).
+    """레버리지별 SL ROI 거리 (마진 기준 손익률 %, v0.1.13 단위 명확화).
+
+    단위 = ROI % (마진 기준). 가격 변동 % = ROI % / leverage.
+    예: 10x · ROI 2% → 가격 변동 0.2%
 
     구간 분기:
-        10x ~ 37x (보수): SL = 2 + (L - 10) / 27   (선형: 10x→2%, 37x→3%)
-        38x ~ 50x (공격): SL = 0.08 × L            (50x→4%)
+        10x ~ 37x (보수): SL = 2 + (L - 10) / 27   (선형: 10x→ROI 2%, 37x→ROI 3%)
+        38x ~ 50x (공격): SL = 0.08 × L            (50x→ROI 4%)
 
     근거:
-        - 저배율(10~37x): 작은 가격 변동에도 의미 있는 거래라 SL 2~3% 충분.
-        - 고배율(38~50x): 풀시드 수수료가 시드를 많이 갉아먹음 (50x = 5.5%)
-                          → 더 큰 가격 변동 필요.
+        - 저배율(10~37x): 작은 ROI 손실로도 충분한 시그널 — SL 2~3% 충분.
+        - 고배율(38~50x): 풀시드 수수료가 시드를 많이 갉아먹음 → ROI 손실 여유 필요.
         - 37x→38x 경계: 보수 → 공격 전환점 (의도된 점프).
 
-    예시:
-        10x → 2.00%
-        37x → 3.00% (보수 영역 끝)
-        38x → 3.04% (공격 영역 시작)
-        50x → 4.00%
+    예시 (ROI):
+        10x → 2.00% (가격 변동 0.20%)
+        37x → 3.00% (가격 변동 0.081%)
+        38x → 3.04% (가격 변동 0.080%)
+        50x → 4.00% (가격 변동 0.080%)
 
     Note: 출발값이고 테스트 결과 따라 조정 가능.
     """
@@ -114,23 +119,25 @@ def sl_pct_for_leverage(leverage: int) -> float:
 
 
 def tp_pct_range_for_leverage(leverage: int) -> tuple[float, float]:
-    """레버리지별 TP 범위 (가격 변동 %).
+    """레버리지별 TP ROI 범위 (마진 기준 손익률 %, v0.1.13 단위 명확화).
+
+    단위 = ROI % (마진 기준). 가격 변동 % = ROI % / leverage.
 
     구간 분기:
-        10x ~ 37x: TP min/max 모두 선형 그래디언트
-            TP min(L) = SL(L) + 0.8        (10x→2.8%, 37x→3.8%)
-            TP max(L) = SL(L) + 1.8        (10x→3.8%, 37x→4.8%)
+        10x ~ 37x: TP min/max 모두 선형 그래디언트 (SL 출발값 + 0.8 ~ 1.8)
+            TP min(L) = SL(L) + 0.8        (10x → ROI 2.8%, 37x → ROI 3.8%)
+            TP max(L) = SL(L) + 1.8        (10x → ROI 3.8%, 37x → ROI 4.8%)
         38x ~ 50x: TP = SL + 2 ~ 3
-            TP min = SL + 2.0              (50x→6%)
-            TP max = SL + 3.0              (50x→7%)
+            TP min = SL + 2.0              (50x → ROI 6%)
+            TP max = SL + 3.0              (50x → ROI 7%)
 
-    저배율은 작은 익절을 빈도로 누적, 고배율은 큰 가격 변동 요구.
+    저배율은 작은 ROI 익절을 빈도로 누적, 고배율은 큰 ROI 익절 (가격 변동은 작음).
     사용자가 min~max 범위 내에서 선택 (디폴트 mid).
 
     Returns:
-        (tp_min, tp_max) 튜플.
+        (tp_min_roi, tp_max_roi) 튜플 (단위 ROI %).
 
-    예시:
+    예시 (ROI):
         10x → (2.80%, 3.80%)
         37x → (3.80%, 4.80%)
         38x → (5.04%, 6.04%)
@@ -140,6 +147,22 @@ def tp_pct_range_for_leverage(leverage: int) -> tuple[float, float]:
     if leverage <= 37:
         return (sl + 0.8, sl + 1.8)
     return (sl + 2.0, sl + 3.0)
+
+
+def tp_pct_4_levels_for_leverage(leverage: int) -> list[float]:
+    """레버리지별 TP 4단계 ROI % — tp_pct_range 의 min~max 4등분 (v0.1.13 신규).
+
+    단위 = ROI %. 4단계 분할 익절 (TP1~TP4) 의 ROI 임계값. min, mid_low, mid_high, max.
+
+    예시 (10x): tp_pct_range = (2.80%, 3.80%) → step=0.333
+        TP1 = 2.80% / TP2 = 3.13% / TP3 = 3.47% / TP4 = 3.80%
+
+    Returns:
+        4단계 ROI % list (오름차순, long/short 무관).
+    """
+    tp_min, tp_max = tp_pct_range_for_leverage(leverage)
+    step = (tp_max - tp_min) / 3
+    return [tp_min, tp_min + step, tp_min + 2 * step, tp_max]
 
 
 # === Deprecated alias (이전 이름) ===
@@ -303,11 +326,26 @@ def build_risk_plan(
         sl_dist = atr * config.atr_sl_multiplier
         tp_dists = [atr * m for m in config.atr_tp_multipliers]
     elif config.mode == TpSlMode.FIXED_PCT:
-        sl_dist = entry_price * (config.fixed_sl_pct / 100.0)
-        tp_dists = [entry_price * (p / 100.0) for p in config.fixed_tp_pcts]
+        # FIXED_PCT 의 fixed_sl_pct / fixed_tp_pcts 는 ROI % 단위 (v0.1.13).
+        # 가격 변동 % = ROI % / leverage. None 또는 빈 list 면 leverage 자동 산출.
+        sl_roi = (
+            config.fixed_sl_pct
+            if config.fixed_sl_pct is not None
+            else sl_pct_for_leverage(leverage)
+        )
+        tp_rois = (
+            config.fixed_tp_pcts
+            if config.fixed_tp_pcts
+            else tp_pct_4_levels_for_leverage(leverage)
+        )
+        sl_dist = entry_price * (sl_roi / leverage / 100.0)
+        tp_dists = [entry_price * (p / leverage / 100.0) for p in tp_rois]
     elif config.mode == TpSlMode.MANUAL:
-        sl_dist = entry_price * (config.manual_sl_pct / 100.0)
-        tp_dists = [entry_price * (p / 100.0) for p in config.manual_tp_pcts]
+        # MANUAL 도 ROI % 단위로 통일 (v0.1.13).
+        sl_dist = entry_price * (config.manual_sl_pct / leverage / 100.0)
+        tp_dists = [
+            entry_price * (p / leverage / 100.0) for p in config.manual_tp_pcts
+        ]
     else:
         raise ValueError(f"unknown TpSlMode: {config.mode}")
 

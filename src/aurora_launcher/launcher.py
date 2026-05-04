@@ -329,10 +329,11 @@ def main() -> None:
         "Aurora Launcher",
         str(ui_path),
         js_api=api,
-        width=560,
-        height=420,
-        resizable=False,
-        background_color="#06060a",
+        width=1280,                  # 본체 .exe 와 동일 크기 (v0.1.16 redesign)
+        height=800,
+        min_size=(960, 600),
+        resizable=True,
+        background_color="#1e202c",  # v0.1.15 brand bg
     )
 
     # GUI 떠 있는 동안 백그라운드로 자동 update check (1회)

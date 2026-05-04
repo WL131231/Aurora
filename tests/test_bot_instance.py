@@ -546,6 +546,111 @@ def test_log_signal_evaluation_writes_info_with_categories(caplog) -> None:
     assert bot._last_evaluated_bar_ts == 1735000000000
 
 
+def test_log_signal_evaluation_throttles_unchanged_within_60s(monkeypatch) -> None:
+    """v0.1.32 — 같은 평가 결과 + 60초 안 = silent (heartbeat 미발동)."""
+    import logging
+    import time
+
+    from aurora.core.signal import CompositeDecision
+
+    bot = bot_instance.get_instance()
+    decision = CompositeDecision(enter=False, direction=None, score=0.0,
+                                 long_score=0.0, short_score=0.0)
+
+    # time mock — 0초, 30초 (60초 미만)
+    fake_time = [1_000_000.0]
+    monkeypatch.setattr(time, "time", lambda: fake_time[0])
+
+    records = []
+    handler = logging.Handler()
+    handler.emit = lambda r: records.append(r.getMessage())
+    log = logging.getLogger("aurora.interfaces.bot_instance")
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    try:
+        # 첫 호출 — 즉시 출력 (last_ts=0)
+        bot._log_signal_evaluation([], decision, bar_ts=1, in_position=False)
+        # 30초 후 같은 결과 — silent
+        fake_time[0] += 30
+        bot._log_signal_evaluation([], decision, bar_ts=2, in_position=False)
+    finally:
+        log.removeHandler(handler)
+
+    assert len(records) == 1  # 첫 호출만 출력, 30초 후 silent
+
+
+def test_log_signal_evaluation_heartbeat_after_60s(monkeypatch) -> None:
+    """v0.1.32 — 같은 평가 결과여도 60초 경과 시 heartbeat 출력."""
+    import logging
+    import time
+
+    from aurora.core.signal import CompositeDecision
+
+    bot = bot_instance.get_instance()
+    decision = CompositeDecision(enter=False, direction=None, score=0.0,
+                                 long_score=0.0, short_score=0.0)
+
+    fake_time = [1_000_000.0]
+    monkeypatch.setattr(time, "time", lambda: fake_time[0])
+
+    records = []
+    handler = logging.Handler()
+    handler.emit = lambda r: records.append(r.getMessage())
+    log = logging.getLogger("aurora.interfaces.bot_instance")
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    try:
+        bot._log_signal_evaluation([], decision, bar_ts=1, in_position=False)
+        # 65초 후 — heartbeat 발동
+        fake_time[0] += 65
+        bot._log_signal_evaluation([], decision, bar_ts=2, in_position=False)
+    finally:
+        log.removeHandler(handler)
+
+    assert len(records) == 2
+    # 두 번째는 (heartbeat) suffix
+    assert "(heartbeat)" in records[1]
+
+
+def test_log_signal_evaluation_emits_immediately_on_change(monkeypatch) -> None:
+    """v0.1.32 — 평가 결과 변화 시 60초 미만이어도 즉시 출력."""
+    import logging
+    import time
+
+    from aurora.core.signal import CompositeDecision
+    from aurora.core.strategy import Direction, EntrySignal
+
+    bot = bot_instance.get_instance()
+    decision_empty = CompositeDecision(enter=False, direction=None, score=0.0,
+                                       long_score=0.0, short_score=0.0)
+    sig = EntrySignal(direction=Direction.LONG, timeframe="1H", source="ema_touch_200",
+                      strength=1.0, note="", bar_timestamp=0)
+    decision_long = CompositeDecision(enter=True, direction=Direction.LONG, score=2.0,
+                                      long_score=2.0, short_score=0.0)
+
+    fake_time = [1_000_000.0]
+    monkeypatch.setattr(time, "time", lambda: fake_time[0])
+
+    records = []
+    handler = logging.Handler()
+    handler.emit = lambda r: records.append(r.getMessage())
+    log = logging.getLogger("aurora.interfaces.bot_instance")
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    try:
+        bot._log_signal_evaluation([], decision_empty, bar_ts=1)  # 첫 출력
+        fake_time[0] += 5  # 5초 후 (60초 미만)
+        # 신호 변화 — 즉시 출력
+        bot._log_signal_evaluation([sig], decision_long, bar_ts=2)
+    finally:
+        log.removeHandler(handler)
+
+    assert len(records) == 2
+    # 두 번째는 (heartbeat) X — 변화로 인한 출력
+    assert "(heartbeat)" not in records[1]
+    assert "EMA=L@1H(1.0)" in records[1]
+
+
 def test_log_signal_evaluation_marks_in_position_context() -> None:
     """보유 중 REVERSE 평가 vs 보유X 진입 평가 — 컨텍스트 라벨 구분."""
     import logging

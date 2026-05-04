@@ -29,6 +29,8 @@ import asyncio
 import logging
 from collections import deque
 
+import ccxt
+
 from aurora.config import settings
 from aurora.core.risk import TpSlConfig, build_risk_plan
 from aurora.core.signal import compose_entry, compose_exit
@@ -995,25 +997,22 @@ class BotInstance:
         )
         try:
             await self._executor.open_position(plan, triggered_by=decision.triggered_by)
-        except Exception as e:  # noqa: BLE001 — 거래소 거부 catch (InsufficientFunds 등)
-            # v0.1.36: ccxt InsufficientFunds (110007 "ab not enough for new order") 무한
-            # 루프 fix. 거래소가 마진 부족으로 거부 → 5분 backoff + 1회 WARNING.
-            # 잔고 회복 시 자동 재개.
-            err_name = type(e).__name__
-            if "InsufficientFunds" in err_name or "InsufficientFunds" in str(e):
-                self._funds_blocked_until_ms = now_ms + 5 * 60 * 1000  # 5분
-                if not self._funds_blocked_warned:
-                    logger.warning(
-                        "거래소 진입 거부 (%s) — 5분 backoff. 잔고: total=%.2f free=%.2f "
-                        "USDT / 요청 마진=%.2f USDT. 거래소 외부 포지션/마진 점유 확인 "
-                        "권장. 잔고 회복 시 자동 재개.",
-                        err_name,
-                        balance.total_usd, balance.free_usd, plan.position.margin_usd,
-                    )
-                    self._funds_blocked_warned = True
-                return
-            # 다른 예외는 _run_loop 로 전파 (logger.exception 처리)
-            raise
+        except ccxt.InsufficientFunds as e:
+            # v0.1.36 + v0.1.37: ccxt InsufficientFunds (Bybit 110007 "ab not enough for
+            # new order") 명시 catch. 5분 backoff + 1회 WARNING. 잔고 회복 시 자동 재개.
+            # v0.1.37: 명시 ccxt.InsufficientFunds catch 로 변경 (이전 string match 보다
+            # robust + 가독성 ↑).
+            self._funds_blocked_until_ms = now_ms + 5 * 60 * 1000  # 5분
+            if not self._funds_blocked_warned:
+                logger.warning(
+                    "거래소 진입 거부 (InsufficientFunds: %s) — 5분 backoff. 잔고: "
+                    "total=%.2f free=%.2f USDT / 요청 마진=%.2f USDT. 거래소 외부 "
+                    "포지션/마진 점유 확인 권장. 잔고 회복 시 자동 재개.",
+                    str(e)[:120],
+                    balance.total_usd, balance.free_usd, plan.position.margin_usd,
+                )
+                self._funds_blocked_warned = True
+            return
         logger.info(
             "BotInstance: 진입 — %s %s qty=%.6f (triggered_by=%s, score=%.2f)",
             self._symbol, decision.direction.value, plan.position.coin_amount,

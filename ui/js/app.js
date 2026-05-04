@@ -253,6 +253,9 @@ async function refreshDashboard() {
 
         // 거래내역 (P&L) 표 — /trades 호출 + Bybit 스타일 행 렌더 (v0.1.20)
         await refreshTrades();
+
+        // 결과 통계 6 카드 (v0.1.24) — /stats 호출, 거래내역 토글과 같은 days 사용
+        await refreshStats();
     } catch (_) {
         connDot.style.background = "#fb7185";
         connDot.style.boxShadow  = "0 0 8px #fb7185";
@@ -388,9 +391,52 @@ async function refreshTrades() {
             btn.classList.add("active");
             // 봇 자기 거래 + 거래소 history 합쳐 즉시 다시 조회
             refreshTrades();
+            // v0.1.24 — 통계 카드도 같은 기간으로 즉시 갱신
+            refreshStats();
         });
     });
 })();
+
+// 결과 통계 6 카드 갱신 (v0.1.24) — /stats?days=N 호출 + 카드 값 채우기.
+async function refreshStats() {
+    let s;
+    try {
+        s = await Api.getStats(_tradesPeriodDays);
+    } catch (_) {
+        return;
+    }
+    const $ = (id) => document.getElementById(id);
+
+    // 데이터 없으면 모두 "—" (n=0 → 의미 없는 0/0 보다 깔끔)
+    if (!s || s.total_trades === 0) {
+        ["stat-total", "stat-winrate", "stat-cumulative", "stat-dd", "stat-sharpe", "stat-hold"]
+            .forEach((id) => { const el = $(id); if (el) el.textContent = "—"; });
+        const wl = $("stat-winloss");
+        if (wl) wl.textContent = "—";
+        return;
+    }
+
+    $("stat-total").textContent = String(s.total_trades);
+    $("stat-winloss").textContent = `${s.win_count}W / ${s.loss_count}L`;
+    $("stat-winrate").textContent = `${s.win_rate_pct.toFixed(1)}%`;
+
+    // 누적 수익률 — USDT + 평균 ROI (양수=초록, 음수=빨강)
+    const pnl = s.cumulative_pnl_usd;
+    const sign = pnl >= 0 ? "+" : "";
+    const color = pnl >= 0 ? "#34d399" : "#fb7185";
+    const cum = $("stat-cumulative");
+    cum.innerHTML =
+        `<span style="color:${color}">${sign}${pnl.toFixed(2)} USDT</span>` +
+        `<span class="stat-aux mono">${s.avg_roi_pct >= 0 ? "+" : ""}${s.avg_roi_pct.toFixed(2)}% avg</span>`;
+
+    $("stat-dd").textContent = `${s.max_drawdown_pct.toFixed(2)}%`;
+    $("stat-sharpe").textContent = s.sharpe_ratio.toFixed(2);
+
+    // 평균 보유 — 분 → 시:분 또는 분 단위
+    const m = s.avg_hold_minutes;
+    const hold = m >= 60 ? `${Math.floor(m / 60)}h ${Math.round(m % 60)}m` : `${m.toFixed(1)}m`;
+    $("stat-hold").textContent = hold;
+}
 
 // ============================================================
 // 6b. PnL 공유 카드 (v0.1.21) — 모달 + html2canvas PNG 다운로드

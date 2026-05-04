@@ -679,6 +679,64 @@
         </main>
     </div>
 
+    <!-- ===== PnL 공유 카드 모달 (v0.1.21) ===== -->
+    <!-- 거래내역 행 클릭 시 열림. html2canvas → PNG 다운로드. -->
+    <div id="pnl-modal" class="pnl-modal" role="dialog" aria-modal="true" aria-hidden="true">
+        <button id="pnl-close" class="pnl-modal-close" aria-label="닫기">×</button>
+
+        <div class="pnl-modal-inner">
+            <!-- 캡처 대상 — html2canvas 가 이 노드만 PNG 로 변환 -->
+            <div id="pnl-card" class="pnl-card">
+                <div class="pnl-card-header">
+                    <svg width="22" height="22" viewBox="0 0 28 28" fill="none">
+                        <defs>
+                            <linearGradient id="pnlLogoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stop-color="#a855f7" />
+                                <stop offset="50%" stop-color="#6366f1" />
+                                <stop offset="100%" stop-color="#22d3ee" />
+                            </linearGradient>
+                        </defs>
+                        <path d="M14 2 L26 14 L14 26 L2 14 Z" stroke="url(#pnlLogoGrad)" stroke-width="1.5" fill="none" />
+                        <path d="M14 8 L20 14 L14 20 L8 14 Z" fill="url(#pnlLogoGrad)" opacity="0.6" />
+                    </svg>
+                    <span class="pnl-wordmark">AURORA</span>
+                </div>
+
+                <div class="pnl-card-symbol-row">
+                    <span id="pnl-symbol" class="pnl-card-symbol">—</span>
+                    <span id="pnl-side" class="pnl-card-side long">LONG</span>
+                    <span id="pnl-lev" class="pnl-card-lev">—×</span>
+                </div>
+
+                <div id="pnl-roi" class="pnl-card-roi positive">+0.00%</div>
+                <div id="pnl-pnl-usd" class="pnl-card-pnl">+0.00 USDT</div>
+
+                <div class="pnl-card-prices">
+                    <div class="pnl-card-price-block">
+                        <div class="label">Entry Price</div>
+                        <div class="value" id="pnl-entry">—</div>
+                    </div>
+                    <div class="pnl-card-price-block">
+                        <div class="label">Exit Price</div>
+                        <div class="value" id="pnl-exit">—</div>
+                    </div>
+                </div>
+
+                <div class="pnl-card-footer">
+                    <span id="pnl-time" class="pnl-time">—</span>
+                    <span>github.com/WL131231/Aurora</span>
+                </div>
+            </div>
+
+            <div class="pnl-actions">
+                <button id="pnl-download" class="btn btn-primary">⤓ PNG 저장</button>
+                <button id="pnl-close-btn" class="btn btn-ghost">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- html2canvas (PnL 카드 PNG 캡처) — v1.4.1 CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script src="js/apiClient.js"></script>
     <script src="js/app.js"></script>
 </body>

@@ -371,30 +371,33 @@ class BotInstance:
         # Aurora 정책 (페어당 1개) — 보유 중엔 SL/TP/REVERSE 청산만, 신규 진입 X.
         if self._executor.has_position:
             # 3-1. 거래소 측 sync — 사용자 직접 청산 / liquidation 감지 (v0.1.7).
-            actual = await self._client.fetch_position(self._symbol)
-            if actual is None:
-                logger.info(
-                    "외부 청산 감지: %s 봇 자기 포지션 거래소 측 사라짐 — state reset",
-                    self._symbol,
-                )
-                self._executor.reset_position()
-                return  # 다음 step 부터 진입 평가 분기 진입
-
-            # 3-2. qty sync — 사용자 직접 추가 진입 / 부분 청산 인지 (v0.1.8).
-            # Why: 봇 기록 _remaining_qty 와 거래소 실제 qty 가 다르면 SL 청산 시
-            # reduce_only 위반 또는 잔여 위험 노출. 보수적으로 min 으로 갱신.
-            if abs(actual.qty - self._executor._remaining_qty) > 1e-6:
-                logger.warning(
-                    "qty 불일치: 봇 %.4f / 거래소 %.4f → min(봇, 거래소) 로 보수 갱신",
-                    self._executor._remaining_qty, actual.qty,
-                )
-                self._executor._remaining_qty = min(
-                    self._executor._remaining_qty, actual.qty,
-                )
-                if self._executor._remaining_qty <= 1e-9:
-                    # 거래소 측 0 (사용자 전량 청산) — reset
+            # paper 모드는 fetch_position 항상 None 반환 (정책) → sync skip
+            # (v0.1.9 fix: 안 그러면 paper 진입 직후 즉시 reset 무한 루프).
+            if settings.run_mode != "paper":
+                actual = await self._client.fetch_position(self._symbol)
+                if actual is None:
+                    logger.info(
+                        "외부 청산 감지: %s 봇 자기 포지션 거래소 측 사라짐 — state reset",
+                        self._symbol,
+                    )
                     self._executor.reset_position()
-                    return
+                    return  # 다음 step 부터 진입 평가 분기 진입
+
+                # 3-2. qty sync — 사용자 직접 추가 진입 / 부분 청산 인지 (v0.1.8).
+                # Why: 봇 기록 _remaining_qty 와 거래소 실제 qty 가 다르면 SL 청산 시
+                # reduce_only 위반 또는 잔여 위험 노출. 보수적으로 min 으로 갱신.
+                if abs(actual.qty - self._executor._remaining_qty) > 1e-6:
+                    logger.warning(
+                        "qty 불일치: 봇 %.4f / 거래소 %.4f → min(봇, 거래소) 로 보수 갱신",
+                        self._executor._remaining_qty, actual.qty,
+                    )
+                    self._executor._remaining_qty = min(
+                        self._executor._remaining_qty, actual.qty,
+                    )
+                    if self._executor._remaining_qty <= 1e-9:
+                        # 거래소 측 0 (사용자 전량 청산) — reset
+                        self._executor.reset_position()
+                        return
 
             # 3-3. 트레일링 SL 갱신 + tp_hits 카운트
             prev_tp_hits = self._executor._tp_hits
@@ -453,7 +456,30 @@ class BotInstance:
                     await self._executor.close_position(reason="reverse")
             return
 
-        # 4. 진입 신호 평가 (무포지션)
+        # 4. 외부 포지션 detect (v0.1.9 — 신호 평가 전으로 위치 변경)
+        # Why: 이전엔 신호 평가 후 진입 직전에 detect → 신호 없을 때마다 flag reset
+        # → 다음 신호 발생 시 또 WARNING 출력 (반복 로그). 신호 평가 전 detect 하면
+        # flag 가 외부 포지션 자체 변화에만 반응 → WARNING 1회 보장.
+        # paper 모드는 fetch_position 항상 None 정책 → sync skip.
+        if settings.run_mode != "paper":
+            external = await self._client.fetch_position(self._symbol)
+            if external is not None:
+                if not self._external_position_warned:
+                    logger.warning(
+                        "외부 포지션 감지: %s %s qty=%.4f entry=%.2f — Aurora 진입 skip "
+                        "(사용자가 직접 청산하면 자동 매매 재개)",
+                        self._symbol, external.side, external.qty, external.entry_price,
+                    )
+                    self._external_position_warned = True
+                self._external_position = True
+                return  # 외부 포지션 있으면 진입 평가 X
+            # 외부 포지션 사라짐 → flag reset + 진입 평가 진행
+            if self._external_position:
+                logger.info("외부 포지션 사라짐 — Aurora 자동 매매 재개")
+            self._external_position = False
+            self._external_position_warned = False
+
+        # 5. 진입 신호 평가 (무포지션)
         signals = []
         signals.extend(detect_ema_touch(df_by_tf, self._strategy_config))
         df_1h = df_by_tf.get("1H")
@@ -465,30 +491,7 @@ class BotInstance:
         decision = compose_entry(signals)
 
         if not decision.enter or decision.direction is None:
-            # 진입 신호 없으면 외부 포지션 flag 도 reset (다음 진입 시 재평가 위해)
-            self._external_position = False
-            self._external_position_warned = False
             return
-
-        # 5. 외부 포지션 detect — Aurora 가 자기 진입 기록 X 인데 거래소 측 보유 중이면
-        # 사용자가 직접 연 포지션. 마진 부족 + Aurora 진입 시도 → InsufficientFunds 루프
-        # 방지 위해 skip + 1회 WARNING.
-        external = await self._client.fetch_position(self._symbol)
-        if external is not None:
-            self._external_position = True
-            if not self._external_position_warned:
-                logger.warning(
-                    "외부 포지션 감지: %s %s qty=%.4f entry=%.2f — Aurora 진입 skip "
-                    "(사용자가 직접 청산하면 자동 매매 재개)",
-                    self._symbol, external.side, external.qty, external.entry_price,
-                )
-                self._external_position_warned = True
-            return
-        # 외부 포지션 사라짐 → flag reset + 진입 진행
-        if self._external_position:
-            logger.info("외부 포지션 사라짐 — Aurora 자동 매매 재개")
-            self._external_position = False
-            self._external_position_warned = False
 
         # 6. 진입 실행 — equity 조회 + RiskPlan 산출
         balance = await self._client.get_equity()

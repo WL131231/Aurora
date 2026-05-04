@@ -34,7 +34,12 @@ PLATFORM_HIDDEN_IMPORTS = {
 
 
 PLATFORM_ICON = {
-    "Windows": "aurora.ico",
+    "Windows": "aurora-launcher.ico",  # v0.1.14 — 본체와 구분되는 검정 다이아몬드
+    "Darwin": "aurora-launcher.icns",
+    "Linux": "aurora-launcher.png",
+}
+PLATFORM_ICON_FALLBACK = {
+    "Windows": "aurora.ico",  # 검정 launcher 아이콘 미존재 시 본체 아이콘 fallback
     "Darwin": "aurora.icns",
     "Linux": "aurora.png",
 }
@@ -58,14 +63,18 @@ def main() -> int:
         "--onefile",
     ]
 
-    # 런처 아이콘 — 본체와 동일한 Aurora 다이아몬드 (assets/aurora.ico)
+    # 런처 아이콘 — 검정 다이아몬드 (assets/aurora-launcher.ico, v0.1.14).
+    # 미존재 시 본체 그라디언트 아이콘 fallback.
     icon_name = PLATFORM_ICON.get(plat)
-    if icon_name:
-        icon_path = assets_dir / icon_name
-        if icon_path.exists():
-            cmd.extend(["--icon", str(icon_path)])
-        else:
-            print(f"[warn] launcher icon not found: {icon_path} (skip)")
+    fallback_name = PLATFORM_ICON_FALLBACK.get(plat)
+    chosen_icon = None
+    if icon_name and (assets_dir / icon_name).exists():
+        chosen_icon = assets_dir / icon_name
+    elif fallback_name and (assets_dir / fallback_name).exists():
+        chosen_icon = assets_dir / fallback_name
+        print(f"[warn] launcher icon {icon_name} 미존재 → fallback {fallback_name}")
+    if chosen_icon:
+        cmd.extend(["--icon", str(chosen_icon)])
 
     for module in PLATFORM_HIDDEN_IMPORTS.get(plat, []):
         cmd.extend(["--hidden-import", module])

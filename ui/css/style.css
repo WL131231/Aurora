@@ -569,13 +569,24 @@ body {
    라디오 그룹 (낮음/보통/높음/최고 같은 단계 선택 — 게임 런처 스타일)
    ============================================================ */
 .radio-group {
+    position: relative;          /* input absolute 기준 — viewport 0,0 이동 방지 */
     display: flex;
     gap: 0.5rem;
     flex-wrap: wrap;
 }
 
 .radio-group input[type="radio"] {
+    /* sr-only 패턴 — focus 가 input 으로 가도 viewport 강제 스크롤 안 발생.
+       이전엔 position: absolute 만 해서 브라우저가 0,0 위치로 인식 → label 클릭
+       시 focus → scroll-into-view 가 페이지 맨 위로 이동 (v0.1.14 fix). */
     position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
     opacity: 0;
     pointer-events: none;
 }
@@ -1013,6 +1024,59 @@ input[type="range"].slider-input:disabled {
     color: var(--aurora-purple, #c4b5fd);
     font-family: 'JetBrains Mono', monospace;
     letter-spacing: 0.05em;
+}
+
+/* ============================================================
+   지표 트리거 상태 패널 (v0.1.14) — 대시보드 자본금 위
+   ============================================================ */
+.indicator-status-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.indicator-pill {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    transition: all 0.2s ease;
+    font-size: 0.75rem;
+}
+
+.indicator-pill .ind-name {
+    color: var(--text-2);
+    letter-spacing: 0.02em;
+    font-weight: 500;
+}
+
+.indicator-pill .ind-dir {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.6875rem;
+    color: var(--text-3);
+    letter-spacing: 0.05em;
+}
+
+/* 롱 신호 — 초록 */
+.indicator-pill.dir-long {
+    border-color: rgba(52, 211, 153, 0.4);
+    background: rgba(52, 211, 153, 0.06);
+}
+.indicator-pill.dir-long .ind-dir {
+    color: #34d399;
+}
+
+/* 숏 신호 — 빨강 */
+.indicator-pill.dir-short {
+    border-color: rgba(251, 113, 133, 0.4);
+    background: rgba(251, 113, 133, 0.06);
+}
+.indicator-pill.dir-short .ind-dir {
+    color: #fb7185;
 }
 
 .pos-direction-long { color: #4ade80; }

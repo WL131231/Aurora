@@ -221,6 +221,24 @@ async function refreshDashboard() {
         const extAlert = document.getElementById("external-position-alert");
         if (extAlert) extAlert.style.display = s.external_position ? "" : "none";
 
+        // 지표 트리거 상태 패널 (v0.1.14) — 6 카테고리 색깔 갱신
+        const indStatus = s.indicator_status || {};
+        document.querySelectorAll(".indicator-pill").forEach((pill) => {
+            const cat = pill.dataset.cat;
+            const dir = indStatus[cat]; // "long" | "short" | null
+            pill.classList.remove("dir-long", "dir-short");
+            const dirEl = pill.querySelector(".ind-dir");
+            if (dir === "long") {
+                pill.classList.add("dir-long");
+                if (dirEl) dirEl.textContent = "롱";
+            } else if (dir === "short") {
+                pill.classList.add("dir-short");
+                if (dirEl) dirEl.textContent = "숏";
+            } else if (dirEl) {
+                dirEl.textContent = "—";
+            }
+        });
+
         const lu = document.getElementById("m-last-update");
         if (lu) lu.textContent = toKstString(new Date().toISOString()) + " KST";
 

@@ -993,6 +993,20 @@ class BotInstance:
             risk_pct=self._risk_pct,
             full_seed=self._full_seed,
         )
+        # v0.1.36: 사전 마진 체크 — place_order 호출 전 차단 (거래소 호출 비용 절약 +
+        # 사용자 진단 명확). 잔고 free 의 95% 초과 시 risk_pct/leverage 조합 의심.
+        if plan.position.margin_usd > balance.free_usd * 0.95:
+            self._funds_blocked_until_ms = now_ms + 5 * 60 * 1000
+            if not self._funds_blocked_warned:
+                logger.warning(
+                    "진입 skip (사전 마진 체크): plan 마진=%.2f USDT > 가용 잔고 "
+                    "%.2f USDT × 0.95. risk_pct=%.4f (%.1f%%) / leverage=%dx 조합 "
+                    "확인 권장. GUI 03 전략·지표 → 거래당 risk %% 슬라이더 낮추기.",
+                    plan.position.margin_usd, balance.free_usd,
+                    self._risk_pct, self._risk_pct * 100, self._leverage,
+                )
+                self._funds_blocked_warned = True
+            return
         try:
             await self._executor.open_position(plan, triggered_by=decision.triggered_by)
         except Exception as e:  # noqa: BLE001 — 거래소 거부 catch (InsufficientFunds 등)

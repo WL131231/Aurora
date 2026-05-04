@@ -23,6 +23,22 @@
         <h1 class="splash-text">AURORA</h1>
     </div>
 
+    <!-- ===== 업데이트 알림 (v0.1.25) — 5분 주기 폴링, has_update 시 표시 ===== -->
+    <div id="release-alert" class="release-alert" role="alert" aria-live="polite">
+        <button id="release-alert-close" class="release-alert-close" aria-label="닫기">×</button>
+        <div class="release-alert-label">업데이트 알림</div>
+        <div class="release-alert-version">
+            <span id="release-alert-tag">—</span>
+            <span class="release-alert-arrow">↑</span>
+        </div>
+        <div class="release-alert-current">
+            현재 <span id="release-alert-current">—</span>
+        </div>
+        <div class="release-alert-actions">
+            <button id="release-alert-open" class="release-alert-btn">자세히 보기</button>
+        </div>
+    </div>
+
     <!-- ===== 배경 오로라 글로우 ===== -->
     <div class="aurora-stage">
         <div class="aurora-band band-1"></div>

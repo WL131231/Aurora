@@ -41,6 +41,7 @@ from aurora.core.strategy import (
 from aurora.exchange.base import ExchangeClient
 from aurora.exchange.data import MultiTfCache
 from aurora.exchange.execution import ClosedTrade, Executor
+from aurora.interfaces import trades_store
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,13 @@ class BotInstance:
 
         # 거래내역 (v0.1.20) — close_position 마다 ClosedTrade 추가 (rolling 100).
         # GUI "거래내역" 표 표시 + Telegram 알림 + PnL 카드 데이터 source.
+        # v0.1.25: 디스크에서 영속화된 record 복원 → 봇 재시작 후 표 / 통계 유지.
         self._closed_trades: deque[ClosedTrade] = deque(maxlen=100)
+        try:
+            for t in trades_store.load():
+                self._closed_trades.append(t)  # deque maxlen 자동 — 100 초과는 buffer drop
+        except Exception as e:  # noqa: BLE001 — 시작 차단 방지 (디스크 손상 등)
+            logger.warning("trades_store.load 실패 (in-memory 만으로 시작): %s", e)
 
         self._symbol: str = _DEFAULT_SYMBOL
         self._timeframes: list[str] = list(_DEFAULT_TIMEFRAMES)
@@ -157,6 +164,18 @@ class BotInstance:
         True 면 Aurora 가 진입 skip 중. UI 알림 표시 / API 응답 노출용.
         """
         return self._external_position
+
+    def _record_closed(self, closed: ClosedTrade) -> None:
+        """ClosedTrade 메모리 buffer + 디스크 영속화 통합 (v0.1.25).
+
+        매 close_position 직후 호출. ``trades_store.save`` 는 atomic + 실패 시 silent
+        (warn) — 디스크 이슈로 매매 lifecycle 차단되지 않게.
+        """
+        self._closed_trades.append(closed)
+        try:
+            trades_store.save(list(self._closed_trades))
+        except Exception as e:  # noqa: BLE001 — 매매 사이클 보호
+            logger.warning("trades_store.save 실패 (in-memory 유지): %s", e)
 
     @property
     def closed_trades(self) -> list:
@@ -469,7 +488,7 @@ class BotInstance:
                             _, closed = await self._executor.close_position(
                                 qty=partial_qty, reason="tp_partial",
                             )
-                            self._closed_trades.append(closed)
+                            self._record_closed(closed)
                             logger.info(
                                 "TP%d 부분 청산: qty=%.6f (allocation=%.1f%%)",
                                 new_tp_idx + 1, partial_qty, allocations[new_tp_idx],
@@ -482,7 +501,7 @@ class BotInstance:
                 reason = self._executor.should_close(current_price)
                 if reason is not None:
                     _, closed = await self._executor.close_position(reason=reason)
-                    self._closed_trades.append(closed)
+                    self._record_closed(closed)
                     return
 
             # 3-6. REVERSE 신호 (v0.1.8) — 보유 중 반대 방향 신호 → 청산.
@@ -504,7 +523,7 @@ class BotInstance:
                 if compose_exit(cur_dir, rev_signals):
                     logger.info("REVERSE 신호 (%s) → 청산 (다음 step 진입 평가)", cur_dir)
                     _, closed = await self._executor.close_position(reason="reverse")
-                    self._closed_trades.append(closed)
+                    self._record_closed(closed)
             return
 
         # 4. 외부 포지션 detect (v0.1.9 — 신호 평가 전으로 위치 변경)

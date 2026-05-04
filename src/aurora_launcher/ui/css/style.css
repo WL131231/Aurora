@@ -55,10 +55,27 @@ body {
     opacity: 0.7;
 }
 
+/* 두 손 배경 (NEXORA 톤 — 흰 배경 자동 제거 + 보라 톤). v0.1.16. */
+.bg-hands {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    background-image: url("../img/launcher-bg-hands.png");
+    background-size: contain;
+    background-position: center;
+    background-repeat: no-repeat;
+    /* invert: 흰 배경 → 검정, 검정 손 → 흰. screen blend: 검정 → 투명, 흰 → 그대로
+       → 어두운 그라디언트 위에 흰/보라 손만 보임. */
+    filter: invert(1) sepia(0.4) hue-rotate(220deg) saturate(1.4) brightness(0.95);
+    mix-blend-mode: screen;
+    opacity: 0.22;
+}
+
 /* ===== 시네마틱 레이아웃 (좌 hero / 우 visual) ===== */
 .cinematic {
     position: relative;
-    z-index: 2;
+    z-index: 3;                /* bg-gradient(0) / bg-texture(1) / bg-hands(2) 위 */
     display: grid;
     grid-template-columns: 1.2fr 1fr;
     height: 100vh;

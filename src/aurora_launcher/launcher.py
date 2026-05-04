@@ -348,8 +348,19 @@ class LauncherApi:
         return {"success": False, "message": "본체 .exe 미존재 — 먼저 업데이트"}
 
     def quit(self) -> None:
-        """launcher 종료."""
-        sys.exit(0)
+        """launcher 종료 — pywebview 윈도우 destroy + os._exit (v0.1.18 fix).
+
+        Why: 이전 sys.exit(0) 은 js_api thread 에서 호출되어 pywebview main thread
+        가 catch 안 함 → launcher 종료 X (사용자 보고). webview.windows[0].destroy()
+        + os._exit(0) 으로 강제 종료.
+        """
+        try:
+            import webview  # type: ignore[import-not-found]
+            if webview.windows:
+                webview.windows[0].destroy()
+        except Exception:  # noqa: BLE001 — 종료 흐름이라 예외 무시
+            pass
+        os._exit(0)  # noqa: S603 — 의도적 강제 종료
 
 
 # ============================================================

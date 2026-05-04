@@ -113,5 +113,28 @@ def launch() -> None:
     webview.start()
 
 
+def launch_headless(host: str | None = None, port: int | None = None) -> None:
+    """헤드리스 모드 — pywebview 없이 uvicorn 만 실행.
+
+    Termux / Linux / Chaquopy APK Phase B baseline.
+    GUI 없이 FastAPI 서버만 기동. Telegram 으로 제어, 브라우저로 UI 접근 가능.
+
+    Args:
+        host: 바인딩 호스트 (기본 settings.api_host).
+               Termux 에서 브라우저 접근 시 "0.0.0.0" 권장.
+        port: 포트 (기본 settings.api_port).
+    """
+    from aurora.interfaces import log_buffer
+    log_buffer.install()
+
+    app = create_app()
+    uvicorn.run(
+        app,
+        host=host or settings.api_host,
+        port=port or settings.api_port,
+        log_level=settings.log_level.lower(),
+    )
+
+
 if __name__ == "__main__":
     launch()

@@ -29,6 +29,7 @@ import platform
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -153,6 +154,15 @@ def find_aurora_exe_url(release: dict) -> str | None:
     return None
 
 
+def find_launcher_url(release: dict) -> str | None:
+    """release assets 에서 Aurora-launcher.exe URL 반환 (self-update v0.1.19)."""
+    for asset in release.get("assets", []):
+        if asset.get("name") == "Aurora-launcher.exe":
+            url = asset.get("browser_download_url")
+            return str(url) if url else None
+    return None
+
+
 def download_to(url: str, target: Path) -> bool:
     """url → target 경로 다운로드. 실패 시 부분 파일 정리."""
     try:
@@ -187,6 +197,99 @@ def get_local_aurora_version() -> str | None:
 # ============================================================
 # Swap (본체 .exe 갱신)
 # ============================================================
+
+
+# ============================================================
+# Launcher self-update (v0.1.19) — PR #71 본체 swap race fix 패턴 차용
+# ============================================================
+
+
+def _launcher_exe_path() -> Path:
+    """현재 실행 중 Aurora-launcher.exe 경로 (frozen 환경)."""
+    return Path(sys.executable).resolve()
+
+
+def apply_pending_launcher_update() -> bool:
+    """직전 다운된 launcher.new 가 있으면 swap → 새 launcher 재시작 (race fix).
+
+    main() 가장 처음 호출. swap 시 race condition 회피를 위해 PR #71 의
+    _spawn_clean_env 패턴 차용 (env 정리 + DETACHED + CREATE_BREAKAWAY_FROM_JOB).
+
+    Returns:
+        True (실제로는 도달 X — sys.exit). False — 해당 없음 / 실패.
+    """
+    if not _is_frozen() or platform.system() != "Windows":
+        return False
+    exe = _launcher_exe_path()
+    new_path = exe.with_suffix(exe.suffix + ".new")
+    old_path = exe.with_suffix(exe.suffix + ".old")
+    if not new_path.exists():
+        return False
+    try:
+        if old_path.exists():
+            old_path.unlink()
+        exe.rename(old_path)
+        new_path.rename(exe)
+        logger.info("launcher self-update applied: %s 재시작", exe.name)
+
+        # 새 launcher 분리 spawn (race fix — PR #71 패턴)
+        _DETACHED_PROCESS = 0x00000008  # noqa: N806
+        _CREATE_NEW_PROCESS_GROUP = 0x00000200  # noqa: N806
+        _CREATE_BREAKAWAY_FROM_JOB = 0x01000000  # noqa: N806
+        clean_env = {
+            k: v for k, v in os.environ.items()
+            if not (k.startswith("_MEI") or k.startswith("_PYI"))
+        }
+        flags = _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP | _CREATE_BREAKAWAY_FROM_JOB
+        subprocess.Popen(  # noqa: S603 — 자기 재시작
+            [str(exe)],
+            env=clean_env,
+            creationflags=flags,
+            close_fds=True,
+            cwd=str(exe.parent),
+        )
+        time.sleep(0.5)  # 새 process _MEI 풀 시간 확보
+        sys.exit(0)
+    except OSError as e:
+        logger.warning("launcher self-update apply 실패: %s", e)
+        return False
+
+
+def _check_and_download_launcher_update() -> None:
+    """백그라운드 thread — launcher 자기 update check + 다운로드 (다음 시작 시 apply)."""
+    if not _is_frozen() or platform.system() != "Windows":
+        return
+    release = fetch_latest_release()
+    if release is None:
+        return
+    tag = release.get("tag_name", "")
+    try:
+        if _parse_version(tag) <= _parse_version(__version__):
+            return  # 현재 launcher 가 최신 또는 더 높음
+    except (ValueError, TypeError):
+        return
+    url = find_launcher_url(release)
+    if url is None:
+        return
+    target = _launcher_exe_path().with_suffix(_launcher_exe_path().suffix + ".new")
+    if target.exists():
+        logger.info("launcher %s 이미 다운 완료 — 다음 시작 시 적용", tag)
+        return
+    logger.info("launcher %s 발견 → 백그라운드 다운로드", tag)
+    if download_to(url, target):
+        logger.info("launcher %s 다운 완료 → 다음 시작 시 자동 swap", tag)
+
+
+def start_background_launcher_check() -> None:
+    """launcher 시작 시 백그라운드 자기 update check thread 띄우기."""
+    if not _is_frozen():
+        return
+    t = threading.Thread(
+        target=_check_and_download_launcher_update,
+        daemon=True,
+        name="launcher-self-updater",
+    )
+    t.start()
 
 
 def apply_swap(downloaded_new: Path) -> bool:
@@ -379,8 +482,15 @@ def main() -> None:
     """launcher 진입점 — pywebview 윈도우 시작."""
     import webview  # type: ignore[import-not-found]
 
+    # v0.1.19: 직전 다운된 launcher.new 가 있으면 swap → 새 launcher 재시작.
+    # 본 함수는 swap 성공 시 sys.exit(0) — 도달 X.
+    apply_pending_launcher_update()
+
     # v0.1.17: 이전 layout (launcher 옆 Aurora.exe) → _aurora/ 자동 이전.
     _migrate_legacy_layout()
+
+    # v0.1.19: 백그라운드 launcher 자기 update check + 다운 (다음 시작 시 apply).
+    start_background_launcher_check()
 
     api = LauncherApi()
     ui_path = _ui_index_path()

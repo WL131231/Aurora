@@ -156,6 +156,31 @@ function toKstString(isoStr) {
     });
 }
 
+// v0.1.29 — 봇 활동 indicator. running 시 펄스 dot + 최근 평가 시각, 10초 이상
+// stale 면 노란 경고 (정체). 사용자 "봇이 자리 보고 있는지 / 작동 안하는지" 즉시 확인용.
+const _ACTIVITY_STALE_THRESHOLD_MS = 10_000;
+
+function _updateBotActivity(running, lastStepTs) {
+    const wrap = document.getElementById("m-activity");
+    const txt = document.getElementById("m-activity-text");
+    if (!wrap || !txt) return;
+    if (!running || !lastStepTs) {
+        wrap.style.display = "none";
+        return;
+    }
+    wrap.style.display = "flex";
+    const ago = Date.now() - lastStepTs;
+    const stale = ago > _ACTIVITY_STALE_THRESHOLD_MS;
+    wrap.classList.toggle("stale", stale);
+    if (stale) {
+        const sec = Math.floor(ago / 1000);
+        txt.textContent = `정체 ${sec}초`;
+    } else {
+        const sec = Math.max(0, Math.floor(ago / 1000));
+        txt.textContent = sec === 0 ? "평가 중" : `${sec}초 전 평가`;
+    }
+}
+
 function _setStatusBadge(el, running, backendDown) {
     el.className = "status-badge " +
         (backendDown ? "badge-error" : running ? "badge-running" : "badge-stopped");
@@ -209,6 +234,9 @@ async function refreshDashboard() {
 
         _setStatusBadge(mStatus, s.running, false);
 
+        // v0.1.29: 봇 활동 indicator — running 시 펄스 + 최근 평가 시각, stale 시 정체 경고
+        _updateBotActivity(s.running, s.last_step_ts);
+
         document.getElementById("m-positions").textContent = String(s.open_positions ?? 0);
         document.getElementById("m-equity").textContent =
             s.equity_usd == null ? "—"
@@ -221,13 +249,14 @@ async function refreshDashboard() {
         const extAlert = document.getElementById("external-position-alert");
         if (extAlert) extAlert.style.display = s.external_position ? "" : "none";
 
-        // 지표 트리거 상태 패널 (v0.1.14, v0.1.18 4-state) — long/short/neutral/disabled
+        // 지표 트리거 상태 패널 (v0.1.14 + v0.1.29 redesign) — 카드 색만으로 4-state 표시.
+        // "대기" 텍스트 제거 (sr-only). 활성·롱/숏 시 카드 글로우 + 색 변화. 비활성 점선.
         const indStatus = s.indicator_status || {};
         document.querySelectorAll(".indicator-pill").forEach((pill) => {
             const cat = pill.dataset.cat;
             const state = indStatus[cat];  // "long" | "short" | "neutral" | "disabled"
             pill.classList.remove("dir-long", "dir-short", "dir-neutral", "dir-disabled");
-            const stEl = pill.querySelector(".ind-state");
+            const stEl = pill.querySelector(".ind-state");  // sr-only (CSS clip)
             if (state === "long") {
                 pill.classList.add("dir-long");
                 if (stEl) stEl.textContent = "활성·롱";
@@ -265,6 +294,7 @@ async function refreshDashboard() {
         connLabel.textContent = "DISCONNECTED";
         _setStatusBadge(mStatus, false, true);
         _setButtons(btnStart, btnStop, false, true);
+        _updateBotActivity(false, 0);  // 백엔드 끊김 — indicator 숨김
     }
 }
 
@@ -916,45 +946,6 @@ document.getElementById("btn-restart")?.addEventListener("click", async () => {
     } finally {
         btn.textContent = orig;
         refreshDashboard();
-    }
-});
-
-// ============================================================
-// 8b. UI 핫 업데이트 버튼 (PR b) — 사이드바 footer
-// ============================================================
-//
-// 흐름:
-//   1. 사용자 "🔄 UI 업데이트" 클릭
-//   2. POST /update/apply_ui → 백엔드가 GitHub Releases 에서 Aurora-ui.zip 다운 + ui_override/ 풀기
-//   3. 응답 success=true 면 짧은 메시지 표시 후 1.5s 뒤 location.reload() — 새 GUI 적용
-//   4. 실패 시 메시지만 표시 (앱 그대로)
-
-document.getElementById("btn-ui-update")?.addEventListener("click", async () => {
-    const btn = document.getElementById("btn-ui-update");
-    const msgEl = document.getElementById("ui-update-msg");
-    if (!btn || !msgEl) return;
-    const orig = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = "확인 중...";
-    msgEl.textContent = "";
-    try {
-        const r = await Api.applyUiUpdate();
-        if (r.success) {
-            msgEl.textContent = `✓ ${r.version || ""} 적용 — 새로고침 중...`;
-            msgEl.style.color = "#4ade80";
-            // 1.5s 후 페이지 새로고침 — webview 가 ui_override/ 우선 로드
-            setTimeout(() => location.reload(), 1500);
-        } else {
-            msgEl.textContent = `✗ ${r.message}`;
-            msgEl.style.color = "#fb7185";
-            btn.textContent = orig;
-            btn.disabled = false;
-        }
-    } catch (e) {
-        msgEl.textContent = `✗ ${e.message}`;
-        msgEl.style.color = "#fb7185";
-        btn.textContent = orig;
-        btn.disabled = false;
     }
 });
 

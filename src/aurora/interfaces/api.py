@@ -23,6 +23,7 @@ CORS 정책:
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ from pydantic import BaseModel
 
 from aurora import __version__
 from aurora.config import settings
+from aurora.core.stats import compute_stats
 from aurora.interfaces import bot_instance, config_store, log_buffer
 
 logger = logging.getLogger(__name__)
@@ -57,6 +59,9 @@ class StatusResponse(BaseModel):
     open_positions: int
     equity_usd: float | None  # 거래소 미연결 시 None
     external_position: bool = False  # 사용자가 직접 연 포지션 감지 (Aurora 진입 skip 중)
+    # 매 step 지표 트리거 상태 (v0.1.14) — UI 대시보드 패널 표시용.
+    # 형식: {"EMA": "long"|"short"|None, "RSI": ..., "BB": ..., "MA": ..., "Ichimoku": ..., "Harmonic": ...}
+    indicator_status: dict[str, str | None] = {}
 
 
 class PositionDTO(BaseModel):
@@ -70,6 +75,7 @@ class PositionDTO(BaseModel):
     unrealized_pnl_usd: float
     sl_price: float | None
     tp_prices: list[float]
+    triggered_by: list[str] = []  # 진입 발동 지표 (예: ["EMA", "RSI"]) — 봇 자기 진입만
 
 
 class ConfigDTO(BaseModel):
@@ -116,6 +122,59 @@ class ControlResponse(BaseModel):
 
     success: bool
     message: str
+
+
+class TradeDTO(BaseModel):
+    """``GET /trades`` — 청산된 trade 한 개 (v0.1.20).
+
+    Bybit P&L 표 매핑:
+        - market = symbol (BTCUSDT Perp)
+        - instrument = "USDT Perpetuals" (고정)
+        - entry_price → Entry Price
+        - exit_price → Traded Price
+        - qty → Order Quantity (sell 빨강)
+        - direction → Long / Short (UI 색)
+        - pnl_usd → Realized P&L (양수 초록 / 음수 빨강)
+        - roi_pct → ROI%
+        - closed_at_ts → Trade Time
+        - reason → 청산 사유 (sl / tp_full / tp_partial / reverse / manual)
+        - triggered_by → 진입 트리거
+    """
+
+    symbol: str
+    instrument: str = "USDT Perpetuals"  # Bybit 표기 일치
+    direction: str
+    leverage: int
+    qty: float
+    entry_price: float
+    exit_price: float
+    pnl_usd: float
+    roi_pct: float
+    opened_at_ts: int
+    closed_at_ts: int
+    reason: str
+    triggered_by: list[str] = []
+
+
+class StatsDTO(BaseModel):
+    """``GET /stats`` — 거래 결과 통계 6 메트릭 (v0.1.24).
+
+    UI 대시보드 `결과 통계` 6 카드 (총 거래 / 승률 / 누적 수익률 / 최대 DD / 샤프 / 평균 보유)
+    + 보조 (win/loss count, cumulative PnL).
+
+    소스: 봇 자기 거래 (``BotInstance._closed_trades``) + 거래소 history
+    (``client.fetch_closed_positions``) — ``days`` 파라미터에 따라 조합.
+    """
+
+    total_trades: int
+    win_count: int
+    loss_count: int
+    win_rate_pct: float
+    cumulative_pnl_usd: float
+    avg_roi_pct: float
+    max_drawdown_pct: float
+    sharpe_ratio: float
+    avg_hold_minutes: float
 
 
 class UiUpdateResponse(BaseModel):
@@ -195,6 +254,7 @@ def create_app() -> FastAPI:
             open_positions=open_count,
             equity_usd=equity,
             external_position=bot.external_position_detected,
+            indicator_status=bot.last_indicator_status,
         )
 
     # ───── Positions ────────────────────────────────
@@ -214,6 +274,14 @@ def create_app() -> FastAPI:
         except Exception as e:  # noqa: BLE001 — UI 안전 (빈 리스트)
             logger.warning("/positions get_positions 실패 (빈 리스트 반환): %s", e)
             return []
+        # triggered_by 는 봇 자기 진입한 포지션에만 의미 있음.
+        # Executor._plan 이 살아있고 거래소 측 포지션 = 봇 자기 → triggered_by 노출.
+        # 외부 포지션이거나 stop/start 사이클 중 _plan 잃은 케이스 → 빈 list.
+        bot_triggered = (
+            bot._executor.triggered_by
+            if bot._executor is not None and bot._executor.has_position
+            else []
+        )
         return [
             PositionDTO(
                 symbol=p.symbol,
@@ -224,6 +292,15 @@ def create_app() -> FastAPI:
                 unrealized_pnl_usd=p.unrealized_pnl,
                 sl_price=None,    # 거래소 미반환 — Executor 별도 관리 (TODO)
                 tp_prices=[],     # 동일
+                # 봇 자기 포지션이면 triggered_by, 외부면 빈 list
+                triggered_by=(
+                    bot_triggered
+                    if bot._executor is not None
+                    and bot._executor.has_position
+                    and p.symbol == bot._symbol
+                    and p.side == bot._executor._plan.direction
+                    else []
+                ),
             )
             for p in raw
         ]
@@ -290,6 +367,129 @@ def create_app() -> FastAPI:
             success=True,
             message="UI 갱신 완료 — 새로고침으로 즉시 적용됨",
             version=tag,
+        )
+
+    # ───── Trades (거래내역, v0.1.20 + v0.1.23) ────────
+
+    @app.get("/trades", response_model=list[TradeDTO])
+    async def trades(
+        limit: int = 200,
+        days: int = 0,
+        source: str = "all",
+    ) -> list[TradeDTO]:
+        """청산된 거래내역 — 봇 자기 거래 + 거래소 측 history (v0.1.23).
+
+        Args:
+            limit: 최대 record 수.
+            days: 기간 필터 (일). 0 이면 전체 (봇 buffer 만 — 거래소 fetch X).
+                7 / 30 / 180 등 양수면 ``now - days`` 이후 closed_at_ts 만 반환 +
+                거래소 history (``source != 'bot'``) 도 fetch.
+            source: ``"bot"`` | ``"exchange"`` | ``"all"`` (기본).
+                - bot:      ``BotInstance._closed_trades`` 만 (Aurora 자기 거래)
+                - exchange: ``client.fetch_closed_positions()`` 만 (외부 + 사용자 직접 거래 포함)
+                - all:      두 source 합쳐서 closed_at_ts 기준 신→구 정렬
+
+        Bybit P&L 표 형식 매핑. 거래소 record 의 ``triggered_by`` 는 빈 list,
+        ``reason`` = ``"external"`` (Aurora 봇이 한 거 X 표시).
+        """
+        bot = bot_instance.get_instance()
+        now_ms = int(time.time() * 1000)
+        since_ms = (now_ms - days * 24 * 60 * 60 * 1000) if days > 0 else None
+
+        bot_records: list[TradeDTO] = []
+        if source in ("bot", "all"):
+            for t in bot.closed_trades:
+                if since_ms is not None and t.closed_at_ts < since_ms:
+                    continue
+                bot_records.append(TradeDTO(
+                    symbol=t.symbol,
+                    direction=t.direction,
+                    leverage=t.leverage,
+                    qty=t.qty,
+                    entry_price=t.entry_price,
+                    exit_price=t.exit_price,
+                    pnl_usd=t.pnl_usd,
+                    roi_pct=t.roi_pct,
+                    opened_at_ts=t.opened_at_ts,
+                    closed_at_ts=t.closed_at_ts,
+                    reason=t.reason,
+                    triggered_by=list(t.triggered_by),
+                ))
+
+        ex_records: list[TradeDTO] = []
+        # 거래소 fetch — days>0 일 때만 (since 명시적). bot 단독이면 fetch X.
+        if source in ("exchange", "all") and days > 0 and bot.client is not None:
+            try:
+                closed = await bot.client.fetch_closed_positions(
+                    since_ms=since_ms, limit=limit,
+                )
+                for c in closed:
+                    ex_records.append(TradeDTO(
+                        symbol=c.symbol,
+                        direction=c.direction,
+                        leverage=c.leverage,
+                        qty=c.qty,
+                        entry_price=c.entry_price,
+                        exit_price=c.exit_price,
+                        pnl_usd=c.pnl_usd,
+                        roi_pct=c.roi_pct,
+                        opened_at_ts=c.opened_at_ts,
+                        closed_at_ts=c.closed_at_ts,
+                        reason="external",
+                        triggered_by=[],
+                    ))
+            except Exception as e:  # noqa: BLE001 — UI 안전 (봇 buffer 만 보여줌)
+                logger.warning("/trades fetch_closed_positions 실패: %s", e)
+
+        # 합치고 closed_at_ts 신→구 정렬, limit 자르기.
+        merged = bot_records + ex_records
+        merged.sort(key=lambda t: t.closed_at_ts, reverse=True)
+        return merged[:limit]
+
+    # ───── Stats (결과 통계, v0.1.24) ──────────────────
+
+    @app.get("/stats", response_model=StatsDTO)
+    async def stats_endpoint(days: int = 0) -> StatsDTO:
+        """거래 결과 통계 — 봇 자기 거래 + 거래소 history (v0.1.24).
+
+        Args:
+            days: 기간 필터 (일). 0 = 봇 buffer 전체 (거래소 fetch X).
+                7 / 30 / 180 = 거래소 history 도 ``now - days`` 이후 fetch 후 합쳐서 통계.
+
+        UI ``거래내역 (P&L)`` 표 토글과 같은 ``days`` 사용 — 표 / 통계 일관.
+        """
+        bot = bot_instance.get_instance()
+        now_ms = int(time.time() * 1000)
+        since_ms = (now_ms - days * 24 * 60 * 60 * 1000) if days > 0 else None
+
+        # 봇 buffer (필요 시 기간 필터)
+        bot_records = list(bot.closed_trades)
+        if since_ms is not None:
+            bot_records = [t for t in bot_records if t.closed_at_ts >= since_ms]
+
+        # 거래소 history (days>0 일 때만)
+        ex_records: list = []
+        if days > 0 and bot.client is not None:
+            try:
+                ex_records = await bot.client.fetch_closed_positions(
+                    since_ms=since_ms, limit=200,
+                )
+            except Exception as e:  # noqa: BLE001 — UI 안전 (봇 buffer 만으로 통계)
+                logger.warning("/stats fetch_closed_positions 실패: %s", e)
+
+        # compute_stats 는 _TradeLike Protocol — 두 source 합쳐서 한 번에 계산.
+        merged = bot_records + ex_records
+        s = compute_stats(merged)
+        return StatsDTO(
+            total_trades=s.total_trades,
+            win_count=s.win_count,
+            loss_count=s.loss_count,
+            win_rate_pct=s.win_rate_pct,
+            cumulative_pnl_usd=s.cumulative_pnl_usd,
+            avg_roi_pct=s.avg_roi_pct,
+            max_drawdown_pct=s.max_drawdown_pct,
+            sharpe_ratio=s.sharpe_ratio,
+            avg_hold_minutes=s.avg_hold_minutes,
         )
 
     # ───── Config ───────────────────────────────────

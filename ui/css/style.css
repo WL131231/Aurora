@@ -1,31 +1,42 @@
 /* ============================================================
    Aurora GUI 콘솔 — 디자인 시스템
    웹사이트(`website/style.css`) 톤 차용:
-     - 배경 #06060a + 오로라 그라디언트 글로우
+     - 배경 #1e202c + 오로라 그라디언트 글로우
      - Bodoni Moda / Space Grotesk / Pretendard 폰트
      - 다이아몬드 로고 그라디언트 (purple → indigo → cyan)
      - photo-frame 카드 (다크 + 라디얼 글로우 + 그라디언트 보더)
    GUI 차이: hero 거대 타이포 X, 정보 밀도 ↑, 사진 배경 X.
    ============================================================ */
 
-/* ===== 폰트 변수 (웹사이트와 동일) ===== */
+/* ===== 폰트 + 컬러 (v0.1.15 팔레트 통일 + 페인팅 텍스처) =====
+   사용자 요청 4색 팔레트 + SVG fractalNoise 페인팅 질감.
+   로고 그라디언트 (purple→indigo→cyan) 만 예외 — 사용자 명시 유지.
+   롱/숏 의미색 (초록/빨강) 유지 — trading 컨벤션. */
 :root {
     --font-display: "Space Grotesk", "Pretendard Variable", system-ui, sans-serif;
     --font-sans: "Pretendard Variable", "Space Grotesk", system-ui, sans-serif;
     --font-wordmark: "Monica Allcaps Stencil", "Bodoni Moda", "Playfair Display", "Times New Roman", serif;
 
-    --bg: #06060a;
-    --bg-card: #0d0d18;
-    --border: rgba(255, 255, 255, 0.08);
-    --border-soft: rgba(255, 255, 255, 0.05);
-    --text-1: rgba(255, 255, 255, 0.95);
-    --text-2: rgba(255, 255, 255, 0.7);
-    --text-3: rgba(255, 255, 255, 0.4);
-    --text-4: rgba(255, 255, 255, 0.25);
+    /* === Brand 4색 (v0.1.15) === */
+    --bg: #1e202c;                    /* 짙은 남색-검정 (주 배경) */
+    --bg-card: #31323e;                /* 짙은 회색-남색 (카드 배경) */
+    --aurora-purple: #60519b;          /* 보라 (강조 / primary) */
+    --text-base: #bfc0d1;              /* 밝은 라벤더 (텍스트 베이스) */
 
-    --aurora-purple: #a855f7;
-    --aurora-indigo: #6366f1;
-    --aurora-cyan: #22d3ee;
+    --border: rgba(191, 192, 209, 0.08);
+    --border-soft: rgba(191, 192, 209, 0.05);
+    --text-1: rgba(191, 192, 209, 0.95);
+    --text-2: rgba(191, 192, 209, 0.70);
+    --text-3: rgba(191, 192, 209, 0.45);
+    --text-4: rgba(191, 192, 209, 0.25);
+
+    /* === 로고 그라디언트만 예외 (사용자 유지 요청) === */
+    --logo-purple: #a855f7;
+    --logo-indigo: #6366f1;
+    --logo-cyan: #22d3ee;
+
+    /* === Painterly 텍스처 — SVG fractalNoise inline (overlay blend) === */
+    --paint-texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.16 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
 
 html { scroll-behavior: smooth; }
@@ -34,6 +45,11 @@ body {
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    background: var(--bg);
+    /* Painterly 질감 — body 전체 배경에 fractalNoise overlay (텍스트 영향 X). */
+    background-image: var(--paint-texture);
+    background-blend-mode: overlay;
+    color: var(--text-1);
 }
 
 /* ===== 워드마크 ===== */
@@ -45,7 +61,7 @@ body {
 
 /* ===== 다이아몬드 로고 글로우 (웹사이트와 동일) ===== */
 .logo-mark {
-    filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.5));
+    filter: drop-shadow(0 0 8px rgba(96, 81, 155, 0.5));
 }
 
 /* ============================================================
@@ -70,17 +86,17 @@ body {
 
 .band-1 {
     width: 60vw; height: 60vh; top: -20vh; left: -10vw;
-    background: radial-gradient(circle, rgba(168, 85, 247, 0.85), transparent 65%);
+    background: radial-gradient(circle, rgba(96, 81, 155, 0.85), transparent 65%);
     animation: drift 25s ease-in-out infinite alternate;
 }
 .band-2 {
     width: 50vw; height: 50vh; top: 15vh; right: -15vw;
-    background: radial-gradient(circle, rgba(99, 102, 241, 0.7), transparent 65%);
+    background: radial-gradient(circle, rgba(96, 81, 155, 0.7), transparent 65%);
     animation: drift 30s ease-in-out infinite alternate-reverse;
 }
 .band-3 {
     width: 45vw; height: 45vh; bottom: -15vh; left: 30vw;
-    background: radial-gradient(circle, rgba(34, 211, 238, 0.55), transparent 65%);
+    background: radial-gradient(circle, rgba(96, 81, 155, 0.55), transparent 65%);
     animation: drift 28s ease-in-out infinite alternate;
 }
 
@@ -115,11 +131,11 @@ body {
 
 .nav-btn:hover {
     background: rgba(255, 255, 255, 0.02);
-    border-left-color: rgba(168, 85, 247, 0.3);
+    border-left-color: rgba(96, 81, 155, 0.3);
 }
 
 .nav-btn.active {
-    background: rgba(168, 85, 247, 0.06);
+    background: rgba(96, 81, 155, 0.06);
     border-left-color: var(--aurora-purple);
 }
 
@@ -214,15 +230,17 @@ body {
     border-radius: 14px;
     padding: 1.5rem 1.5rem 1.25rem;
     border: 1px solid var(--border);
+    /* v0.1.15 — bg-card 단색 + painterly texture overlay. 보라 글로우 약하게 유지. */
     background:
-        radial-gradient(ellipse at 30% 20%, rgba(168, 85, 247, 0.10), transparent 60%),
-        radial-gradient(ellipse at 70% 80%, rgba(34, 211, 238, 0.08), transparent 60%),
-        linear-gradient(135deg, var(--bg-card), #060610);
+        var(--paint-texture),
+        radial-gradient(ellipse at 30% 20%, rgba(96, 81, 155, 0.12), transparent 60%),
+        linear-gradient(135deg, var(--bg-card), #1e202c);
+    background-blend-mode: overlay, normal, normal;
     backdrop-filter: blur(20px);
     box-shadow:
-        0 1px 0 rgba(255, 255, 255, 0.05) inset,
+        0 1px 0 rgba(191, 192, 209, 0.05) inset,
         0 20px 40px -20px rgba(0, 0, 0, 0.5),
-        0 0 30px -10px rgba(168, 85, 247, 0.10);
+        0 0 30px -10px rgba(96, 81, 155, 0.15);
     transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
 
@@ -232,7 +250,7 @@ body {
     box-shadow:
         0 1px 0 rgba(255, 255, 255, 0.08) inset,
         0 30px 50px -20px rgba(0, 0, 0, 0.6),
-        0 0 50px -10px rgba(168, 85, 247, 0.18);
+        0 0 50px -10px rgba(96, 81, 155, 0.18);
 }
 
 /* metric-card 내부 */
@@ -257,7 +275,7 @@ body {
     margin-top: 1rem;
     width: 2.5rem;
     height: 1px;
-    background: linear-gradient(to right, rgba(168, 85, 247, 0.7), transparent);
+    background: linear-gradient(to right, rgba(96, 81, 155, 0.7), transparent);
 }
 
 /* indicator-toggle-card */
@@ -337,8 +355,8 @@ body {
 }
 
 .toggle-switch input:checked + .slider {
-    background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(99, 102, 241, 0.4));
-    border-color: rgba(168, 85, 247, 0.6);
+    background: linear-gradient(135deg, rgba(96, 81, 155, 0.4), rgba(96, 81, 155, 0.4));
+    border-color: rgba(96, 81, 155, 0.6);
 }
 
 .toggle-switch input:checked + .slider::before {
@@ -368,9 +386,9 @@ body {
 }
 
 .ctrl-start:hover {
-    border-color: rgba(34, 211, 238, 0.5);
+    border-color: rgba(96, 81, 155, 0.5);
     color: var(--aurora-cyan);
-    box-shadow: 0 0 24px -8px rgba(34, 211, 238, 0.4);
+    box-shadow: 0 0 24px -8px rgba(96, 81, 155, 0.4);
 }
 
 .ctrl-stop:hover {
@@ -380,9 +398,9 @@ body {
 }
 
 .ctrl-save:hover {
-    border-color: rgba(168, 85, 247, 0.5);
+    border-color: rgba(96, 81, 155, 0.5);
     color: #d8b4fe;
-    box-shadow: 0 0 24px -8px rgba(168, 85, 247, 0.4);
+    box-shadow: 0 0 24px -8px rgba(96, 81, 155, 0.4);
 }
 
 /* ============================================================
@@ -425,7 +443,7 @@ body {
     top: 0.7rem;
     width: 0.75rem;
     height: 1px;
-    background: linear-gradient(to right, rgba(168, 85, 247, 0.8), transparent);
+    background: linear-gradient(to right, rgba(96, 81, 155, 0.8), transparent);
 }
 
 .placeholder-todo {
@@ -569,13 +587,24 @@ body {
    라디오 그룹 (낮음/보통/높음/최고 같은 단계 선택 — 게임 런처 스타일)
    ============================================================ */
 .radio-group {
+    position: relative;          /* input absolute 기준 — viewport 0,0 이동 방지 */
     display: flex;
     gap: 0.5rem;
     flex-wrap: wrap;
 }
 
 .radio-group input[type="radio"] {
+    /* sr-only 패턴 — focus 가 input 으로 가도 viewport 강제 스크롤 안 발생.
+       이전엔 position: absolute 만 해서 브라우저가 0,0 위치로 인식 → label 클릭
+       시 focus → scroll-into-view 가 페이지 맨 위로 이동 (v0.1.14 fix). */
     position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
     opacity: 0;
     pointer-events: none;
 }
@@ -595,6 +624,17 @@ body {
     font-size: 0.8125rem;
     color: var(--text-2);
     user-select: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+}
+
+.radio-group label .mode-sub {
+    width: 100%;
+    margin-left: 1.5rem;
+    font-size: 0.6875rem;
+    color: var(--text-3);
+    margin-top: 0.125rem;
+    letter-spacing: 0.02em;
 }
 
 .radio-group label::before {
@@ -608,15 +648,15 @@ body {
 }
 
 .radio-group label:hover {
-    border-color: rgba(168, 85, 247, 0.4);
+    border-color: rgba(96, 81, 155, 0.4);
     color: var(--text-1);
 }
 
 .radio-group input[type="radio"]:checked + label {
     border-color: var(--aurora-purple);
-    background: rgba(168, 85, 247, 0.1);
+    background: rgba(96, 81, 155, 0.1);
     color: var(--text-1);
-    box-shadow: 0 0 16px -4px rgba(168, 85, 247, 0.4);
+    box-shadow: 0 0 16px -4px rgba(96, 81, 155, 0.4);
 }
 
 .radio-group input[type="radio"]:checked + label::before {
@@ -661,11 +701,11 @@ input[type="range"].slider-input {
     width: 100%;
     height: 4px;
     border-radius: 2px;
+    /* v0.1.18: 보라 → 흰 그라디언트 (어두운 배경 위 가시성 ↑) */
     background: linear-gradient(
         to right,
         var(--aurora-purple),
-        var(--aurora-indigo),
-        var(--aurora-cyan)
+        var(--text-1)
     );
     outline: none;
     cursor: pointer;
@@ -677,10 +717,11 @@ input[type="range"].slider-input::-webkit-slider-thumb {
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background: linear-gradient(135deg, var(--aurora-purple), var(--aurora-cyan));
-    border: 2px solid var(--bg-card);
+    /* v0.1.18: 흰 단색 핸들 + 보라 outline → 한눈에 보이게 (사용자 요청). */
+    background: var(--text-1);
+    border: 2px solid var(--aurora-purple);
     cursor: pointer;
-    box-shadow: 0 0 12px -2px rgba(168, 85, 247, 0.6);
+    box-shadow: 0 0 12px -2px rgba(191, 192, 209, 0.6);
     transition: transform 0.15s ease;
 }
 
@@ -692,8 +733,8 @@ input[type="range"].slider-input::-moz-range-thumb {
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background: linear-gradient(135deg, var(--aurora-purple), var(--aurora-cyan));
-    border: 2px solid var(--bg-card);
+    background: var(--text-1);
+    border: 2px solid var(--aurora-purple);
     cursor: pointer;
 }
 
@@ -724,8 +765,8 @@ input[type="range"].slider-input:disabled {
 .input-field:focus {
     outline: none;
     border-color: var(--aurora-purple);
-    background: rgba(168, 85, 247, 0.04);
-    box-shadow: 0 0 16px -4px rgba(168, 85, 247, 0.4);
+    background: rgba(96, 81, 155, 0.04);
+    box-shadow: 0 0 16px -4px rgba(96, 81, 155, 0.4);
 }
 
 .input-field:disabled {
@@ -802,15 +843,15 @@ input[type="range"].slider-input:disabled {
 }
 
 .btn-primary {
-    border-color: rgba(168, 85, 247, 0.5);
+    border-color: rgba(96, 81, 155, 0.5);
     color: #d8b4fe;
-    background: linear-gradient(135deg, rgba(168, 85, 247, 0.1), rgba(99, 102, 241, 0.1));
+    background: linear-gradient(135deg, rgba(96, 81, 155, 0.1), rgba(96, 81, 155, 0.1));
 }
 
 .btn-primary:hover {
     border-color: var(--aurora-purple);
     color: white;
-    box-shadow: 0 0 24px -8px rgba(168, 85, 247, 0.6);
+    box-shadow: 0 0 24px -8px rgba(96, 81, 155, 0.6);
 }
 
 .btn-danger {
@@ -889,14 +930,14 @@ input[type="range"].slider-input:disabled {
 }
 
 .pair-card:hover {
-    border-color: rgba(168, 85, 247, 0.4);
-    background: rgba(168, 85, 247, 0.04);
+    border-color: rgba(96, 81, 155, 0.4);
+    background: rgba(96, 81, 155, 0.04);
 }
 
 .pair-card.selected {
     border-color: var(--aurora-purple);
-    background: linear-gradient(135deg, rgba(168, 85, 247, 0.10), rgba(34, 211, 238, 0.06));
-    box-shadow: 0 0 20px -8px rgba(168, 85, 247, 0.5);
+    background: linear-gradient(135deg, rgba(96, 81, 155, 0.10), rgba(96, 81, 155, 0.06));
+    box-shadow: 0 0 20px -8px rgba(96, 81, 155, 0.5);
 }
 
 .pair-card .pair-symbol {
@@ -959,6 +1000,20 @@ input[type="range"].slider-input:disabled {
     color: transparent;
 }
 
+/* 보조 라인 (W/L 비율, 평균 ROI 등) — stat-value 아래 작은 글자 (v0.1.24) */
+.stat-sub {
+    margin-top: 0.25rem;
+    font-size: 0.6875rem;
+    color: var(--text-3);
+    letter-spacing: 0.05em;
+}
+.stat-aux {
+    display: inline-block;
+    margin-left: 0.625rem;
+    font-size: 0.75rem;
+    color: var(--text-3);
+}
+
 /* ============================================================
    포지션 테이블
    ============================================================ */
@@ -990,6 +1045,170 @@ input[type="range"].slider-input:disabled {
     color: var(--text-4);
     font-style: italic;
     padding: 2.5rem;
+}
+
+.trigger-tag {
+    display: inline-block;
+    font-size: 10px;
+    padding: 2px 6px;
+    margin-right: 2px;
+    border-radius: 3px;
+    background: rgba(96, 81, 155, 0.12);
+    color: var(--aurora-purple, #c4b5fd);
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.05em;
+}
+
+/* ============================================================
+   거래내역 표 (Bybit P&L 스타일, v0.1.20)
+   ============================================================ */
+.trades-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+}
+
+.trades-table th {
+    text-align: left;
+    padding: 0.875rem 1rem;
+    color: var(--text-3);
+    font-weight: 400;
+    font-size: 0.6875rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border-soft);
+}
+
+.trades-table td {
+    padding: 0.875rem 1rem;
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--text-2);
+}
+
+.trades-table tr:last-child td {
+    border-bottom: none;
+}
+
+.trades-table .trades-empty {
+    text-align: center;
+    color: var(--text-4);
+    font-style: italic;
+    padding: 2.5rem;
+}
+
+/* 기간 토글 (7D / 30D / 180D) — section-title 우측 (v0.1.23) */
+.trades-period-toggle {
+    display: inline-flex;
+    gap: 4px;
+    margin-left: 0.75rem;
+    vertical-align: middle;
+}
+.trades-period-toggle button {
+    background: transparent;
+    border: 1px solid var(--border-soft);
+    color: var(--text-3);
+    font-size: 0.6875rem;
+    font-family: var(--font-mono);
+    letter-spacing: 0.05em;
+    padding: 3px 9px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.trades-period-toggle button:hover {
+    color: var(--text-1);
+    border-color: var(--text-3);
+}
+.trades-period-toggle button.active {
+    color: var(--text-1);
+    border-color: var(--aurora-purple);
+    background: rgba(96, 81, 155, 0.18);
+}
+
+/* "BTCUSDT Perp" 의 Perp 작은 chip */
+.trade-perp {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 1px 5px;
+    font-size: 0.625rem;
+    color: var(--text-3);
+    background: rgba(191, 192, 209, 0.06);
+    border-radius: 3px;
+    letter-spacing: 0.05em;
+}
+
+/* ============================================================
+   지표 트리거 상태 패널 (v0.1.14) — 대시보드 자본금 위
+   ============================================================ */
+.indicator-status-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.indicator-pill {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    transition: all 0.2s ease;
+    font-size: 0.75rem;
+}
+
+.indicator-pill .ind-name {
+    color: var(--text-2);
+    letter-spacing: 0.02em;
+    font-weight: 500;
+}
+
+.indicator-pill .ind-state,
+.indicator-pill .ind-dir {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.6875rem;
+    color: var(--text-3);
+    letter-spacing: 0.05em;
+}
+
+/* 롱 신호 — 초록 (활성·롱) */
+.indicator-pill.dir-long {
+    border-color: rgba(52, 211, 153, 0.4);
+    background: rgba(52, 211, 153, 0.06);
+}
+.indicator-pill.dir-long .ind-state,
+.indicator-pill.dir-long .ind-dir {
+    color: #34d399;
+}
+
+/* 숏 신호 — 빨강 (활성·숏) */
+.indicator-pill.dir-short {
+    border-color: rgba(251, 113, 133, 0.4);
+    background: rgba(251, 113, 133, 0.06);
+}
+.indicator-pill.dir-short .ind-state,
+.indicator-pill.dir-short .ind-dir {
+    color: #fb7185;
+}
+
+/* 대기 — 보라 dim */
+.indicator-pill.dir-neutral {
+    border-color: var(--border);
+}
+.indicator-pill.dir-neutral .ind-state {
+    color: var(--aurora-purple);
+    opacity: 0.7;
+}
+
+/* 비활성 (Selectable 꺼짐) — 회색 dim */
+.indicator-pill.dir-disabled {
+    border-color: var(--border-soft);
+    opacity: 0.5;
+}
+.indicator-pill.dir-disabled .ind-state {
+    color: var(--text-4);
 }
 
 .pos-direction-long { color: #4ade80; }
@@ -1138,4 +1357,207 @@ input[type="range"].slider-input:disabled {
 }
 ::-webkit-scrollbar-thumb:hover {
     background: #2a2a3a;
+}
+
+/* ============================================================
+   PnL 공유 카드 (v0.1.21) — 거래내역 행 클릭 → 모달 + html2canvas PNG
+   ============================================================ */
+
+/* 거래내역 표 행 — 클릭 가능 표시 */
+.trades-table tbody tr.trade-row {
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+.trades-table tbody tr.trade-row:hover {
+    background: rgba(96, 81, 155, 0.08);
+}
+
+/* 모달 백드롭 */
+.pnl-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(6, 6, 10, 0.78);
+    backdrop-filter: blur(8px);
+    animation: pnl-fade-in 0.2s ease-out;
+}
+.pnl-modal.open {
+    display: flex;
+}
+
+@keyframes pnl-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.pnl-modal-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    align-items: center;
+    max-height: 92vh;
+    overflow: auto;
+}
+
+/* 닫기 버튼 (우상단) */
+.pnl-modal-close {
+    position: absolute;
+    top: 1.25rem;
+    right: 1.25rem;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-2);
+    border: 1px solid var(--border-soft);
+    font-size: 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+}
+.pnl-modal-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-1);
+}
+
+/* 카드 본체 — 800x1000 (세로 4:5, 트위터/디스코드 공유 비율) */
+.pnl-card {
+    width: 480px;
+    height: 600px;
+    border-radius: 18px;
+    padding: 2.25rem 2.25rem 1.75rem;
+    background:
+        radial-gradient(circle at 20% 0%, rgba(96, 81, 155, 0.32) 0%, transparent 55%),
+        radial-gradient(circle at 80% 100%, rgba(34, 211, 238, 0.18) 0%, transparent 55%),
+        linear-gradient(135deg, #1a1b27 0%, #0d0e16 100%);
+    border: 1px solid rgba(96, 81, 155, 0.25);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+    color: var(--text-1);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+}
+
+/* 상단 로고 + 워드마크 */
+.pnl-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+}
+.pnl-card-header .pnl-wordmark {
+    font-family: var(--font-wordmark);
+    font-weight: 500;
+    font-size: 1rem;
+    letter-spacing: 0.25em;
+    color: var(--text-2);
+}
+
+/* 심볼 + 방향 + 레버리지 라인 */
+.pnl-card-symbol-row {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    margin-bottom: 0.5rem;
+}
+.pnl-card-symbol {
+    font-size: 1.375rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: var(--text-1);
+}
+.pnl-card-side {
+    padding: 3px 9px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+}
+.pnl-card-side.long {
+    color: #34d399;
+    background: rgba(52, 211, 153, 0.12);
+}
+.pnl-card-side.short {
+    color: #fb7185;
+    background: rgba(251, 113, 133, 0.12);
+}
+.pnl-card-lev {
+    padding: 3px 9px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    color: var(--text-2);
+    background: rgba(255, 255, 255, 0.06);
+    font-family: var(--font-mono);
+}
+
+/* 큼지막 ROI — 카드 중앙 핵심 */
+.pnl-card-roi {
+    font-family: var(--font-mono);
+    font-size: 4.25rem;
+    font-weight: 500;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin-top: 1.5rem;
+}
+.pnl-card-roi.positive { color: #34d399; }
+.pnl-card-roi.negative { color: #fb7185; }
+
+.pnl-card-pnl {
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    color: var(--text-2);
+    margin-top: 0.25rem;
+}
+
+/* 가격 라인 (진입가 → 청산가) */
+.pnl-card-prices {
+    margin-top: auto;
+    padding-top: 1.5rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+.pnl-card-price-block .label {
+    font-size: 0.6875rem;
+    color: var(--text-3);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.25rem;
+}
+.pnl-card-price-block .value {
+    font-family: var(--font-mono);
+    font-size: 1.0625rem;
+    color: var(--text-1);
+    font-weight: 500;
+}
+
+/* 시간 + 워터마크 (하단) */
+.pnl-card-footer {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.6875rem;
+    color: var(--text-4);
+    letter-spacing: 0.06em;
+}
+.pnl-card-footer .pnl-time {
+    font-family: var(--font-mono);
+}
+
+/* 액션 행 (다운로드 / 닫기) */
+.pnl-actions {
+    display: flex;
+    gap: 0.625rem;
+}
+.pnl-actions .btn {
+    min-width: 140px;
 }

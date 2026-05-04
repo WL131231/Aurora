@@ -3,13 +3,25 @@
    Tailwind 로 처리 못하는 그라디언트·애니메이션·필터 효과만 작성.
    ============================================================ */
 
-/* ===== 폰트 ===== */
+/* ===== 폰트 + 컬러 (v0.1.15 — 4색 팔레트 + painterly texture) ===== */
 :root {
     --font-display: "Space Grotesk", "Pretendard Variable", system-ui, sans-serif;
     --font-sans: "Pretendard Variable", "Space Grotesk", system-ui, sans-serif;
-    /* 워드마크: 사용자 PC에 설치된 Monica Allcaps Stencil 우선,
-       없으면 Bodoni Moda → Playfair → Times 순 fallback */
     --font-wordmark: "Monica Allcaps Stencil", "Bodoni Moda", "Playfair Display", "Times New Roman", serif;
+
+    /* Brand 4색 (본체 / 런처 와 동일) */
+    --bg: #1e202c;
+    --bg-card: #31323e;
+    --aurora-purple: #60519b;
+    --text-base: #bfc0d1;
+
+    /* 로고 그라디언트만 예외 (사용자 유지) */
+    --logo-purple: #a855f7;
+    --logo-indigo: #6366f1;
+    --logo-cyan: #22d3ee;
+
+    /* Painterly fractalNoise 텍스처 */
+    --paint-texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.16 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
 
 html {
@@ -20,6 +32,10 @@ body {
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    background: var(--bg);
+    background-image: var(--paint-texture);
+    background-blend-mode: overlay;
+    color: var(--text-base);
 }
 
 /* ===== Aurora 배경 무대 ===== */
@@ -29,7 +45,7 @@ body {
     z-index: 0;
     overflow: hidden;
     pointer-events: none;
-    background: #06060a;
+    background: #1e202c;
 }
 
 /* 오로라 빛 띠 (4 layer) — 더 선명하게 */
@@ -46,7 +62,7 @@ body {
     height: 75vh;
     top: -25vh;
     left: 5vw;
-    background: radial-gradient(circle, rgba(168, 85, 247, 0.95), transparent 65%);
+    background: radial-gradient(circle, rgba(96, 81, 155, 0.95), transparent 65%);
     animation: drift 18s ease-in-out infinite alternate;
 }
 
@@ -55,7 +71,7 @@ body {
     height: 65vh;
     top: 5vh;
     right: -15vw;
-    background: radial-gradient(circle, rgba(99, 102, 241, 0.85), transparent 65%);
+    background: radial-gradient(circle, rgba(96, 81, 155, 0.85), transparent 65%);
     animation: drift 22s ease-in-out infinite alternate-reverse;
 }
 
@@ -64,7 +80,7 @@ body {
     height: 55vh;
     bottom: -15vh;
     left: 15vw;
-    background: radial-gradient(circle, rgba(34, 211, 238, 0.7), transparent 65%);
+    background: radial-gradient(circle, rgba(96, 81, 155, 0.7), transparent 65%);
     animation: drift 25s ease-in-out infinite alternate;
 }
 
@@ -111,7 +127,7 @@ body {
 .vignette {
     position: absolute;
     inset: 0;
-    background: radial-gradient(ellipse at center, transparent 30%, #06060a 100%);
+    background: radial-gradient(ellipse at center, transparent 30%, #1e202c 100%);
     pointer-events: none;
 }
 
@@ -228,7 +244,7 @@ body {
     right: 0;
     width: 50vw;
     height: 30vh;
-    background: radial-gradient(ellipse, rgba(99, 102, 241, 0.35), transparent 70%);
+    background: radial-gradient(ellipse, rgba(96, 81, 155, 0.35), transparent 70%);
     animation: cloud-drift 25s ease-in-out infinite alternate-reverse;
 }
 
@@ -246,8 +262,8 @@ body {
     background: linear-gradient(90deg,
         transparent 0%,
         rgba(217, 70, 239, 0.35) 30%,
-        rgba(168, 85, 247, 0.4) 50%,
-        rgba(99, 102, 241, 0.3) 70%,
+        rgba(96, 81, 155, 0.4) 50%,
+        rgba(96, 81, 155, 0.3) 70%,
         transparent 100%
     );
     border-radius: 50%;
@@ -264,9 +280,9 @@ body {
     left: 15vw;
     background: linear-gradient(90deg,
         transparent 0%,
-        rgba(34, 211, 238, 0.3) 30%,
+        rgba(96, 81, 155, 0.3) 30%,
         rgba(20, 184, 166, 0.4) 50%,
-        rgba(168, 85, 247, 0.3) 70%,
+        rgba(96, 81, 155, 0.3) 70%,
         transparent 100%
     );
     border-radius: 50%;
@@ -284,7 +300,7 @@ body {
 
 /* ===== 로고 마크 (홀로그램 글로우) ===== */
 .logo-mark {
-    filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.6));
+    filter: drop-shadow(0 0 8px rgba(96, 81, 155, 0.6));
 }
 
 /* ===== Hero 거대 타이포 (Bodoni Moda — Monica Abstract 풍 고대비 세리프) ===== */
@@ -357,8 +373,8 @@ body {
     background: linear-gradient(
         180deg,
         rgba(6, 6, 10, 0.6) 0%,
-        #06060a 30%,
-        #06060a 100%
+        #1e202c 30%,
+        #1e202c 100%
     );
 }
 
@@ -412,14 +428,14 @@ body {
     overflow: hidden;
     border: 1px solid rgba(255, 255, 255, 0.08);
     background:
-        radial-gradient(ellipse at 30% 20%, rgba(168, 85, 247, 0.18), transparent 60%),
-        radial-gradient(ellipse at 70% 80%, rgba(34, 211, 238, 0.15), transparent 60%),
-        linear-gradient(135deg, #0d0d18, #060610);
+        radial-gradient(ellipse at 30% 20%, rgba(96, 81, 155, 0.18), transparent 60%),
+        radial-gradient(ellipse at 70% 80%, rgba(96, 81, 155, 0.15), transparent 60%),
+        linear-gradient(135deg, #31323e, #1e202c);
     backdrop-filter: blur(20px);
     box-shadow:
         0 1px 0 rgba(255, 255, 255, 0.06) inset,
         0 30px 60px -20px rgba(0, 0, 0, 0.6),
-        0 0 50px -10px rgba(168, 85, 247, 0.15);
+        0 0 50px -10px rgba(96, 81, 155, 0.15);
     transition: transform 0.4s ease, box-shadow 0.4s ease;
 }
 
@@ -428,7 +444,7 @@ body {
     box-shadow:
         0 1px 0 rgba(255, 255, 255, 0.08) inset,
         0 40px 70px -20px rgba(0, 0, 0, 0.7),
-        0 0 80px -10px rgba(168, 85, 247, 0.3);
+        0 0 80px -10px rgba(96, 81, 155, 0.3);
 }
 
 .photo-frame::before {
@@ -440,10 +456,10 @@ body {
     padding: 1px;
     background: linear-gradient(
         135deg,
-        rgba(168, 85, 247, 0.4),
+        rgba(96, 81, 155, 0.4),
         transparent 30%,
         transparent 70%,
-        rgba(34, 211, 238, 0.3)
+        rgba(96, 81, 155, 0.3)
     );
     -webkit-mask:
         linear-gradient(#fff 0 0) content-box,
@@ -566,7 +582,7 @@ body {
     top: 0.7rem;
     width: 0.75rem;
     height: 1px;
-    background: linear-gradient(to right, rgba(168, 85, 247, 0.8), transparent);
+    background: linear-gradient(to right, rgba(96, 81, 155, 0.8), transparent);
 }
 
 .indicator-points li.point-pending {
@@ -592,7 +608,7 @@ body {
     width: 6px;
 }
 ::-webkit-scrollbar-track {
-    background: #06060a;
+    background: #1e202c;
 }
 ::-webkit-scrollbar-thumb {
     background: #1f1f2a;
@@ -608,12 +624,12 @@ body {
 .hero-download-btn {
     /* Aurora 그라디언트 — purple → indigo → cyan (로고와 일관) */
     background: linear-gradient(135deg, #a855f7 0%, #6366f1 50%, #22d3ee 100%);
-    color: #06060a;
+    color: #1e202c;
     font-family: "Space Grotesk", system-ui, sans-serif;
     text-transform: uppercase;
     box-shadow:
-        0 0 20px -4px rgba(168, 85, 247, 0.5),
-        0 4px 16px -4px rgba(34, 211, 238, 0.3);
+        0 0 20px -4px rgba(96, 81, 155, 0.5),
+        0 4px 16px -4px rgba(96, 81, 155, 0.3);
     transition: transform 0.25s ease, box-shadow 0.25s ease, filter 0.25s ease;
     cursor: pointer;
 }
@@ -621,8 +637,8 @@ body {
     transform: translateY(-2px);
     filter: brightness(1.1);
     box-shadow:
-        0 0 32px -4px rgba(168, 85, 247, 0.7),
-        0 8px 24px -4px rgba(34, 211, 238, 0.4);
+        0 0 32px -4px rgba(96, 81, 155, 0.7),
+        0 8px 24px -4px rgba(96, 81, 155, 0.4);
 }
 .hero-download-btn:active {
     transform: translateY(0);
@@ -631,11 +647,11 @@ body {
 /* Nav 우측 작은 Download 링크 — Hero CTA 와 톤 다르게 (subtle) */
 .nav-download-link {
     font-size: 11px;
-    background: rgba(168, 85, 247, 0.08);
+    background: rgba(96, 81, 155, 0.08);
     transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
 }
 .nav-download-link:hover {
-    background: rgba(168, 85, 247, 0.15);
+    background: rgba(96, 81, 155, 0.15);
 }
 
 /* #download anchor 점프 시 viewport 중앙쯤에 오도록 padding.

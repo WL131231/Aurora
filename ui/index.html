@@ -128,6 +128,29 @@
                         </div>
                     </div>
 
+                    <div class="section-title">지표 트리거 상태</div>
+                    <div class="indicator-status-grid" id="indicator-status">
+                        <!-- 6 카테고리 — 상태 4값: 대기 / 활성-롱 / 활성-숏 / 비활성. hint = hover tooltip -->
+                        <div class="indicator-pill" data-cat="EMA" title="가동 조건: 가격이 EMA 라인 ±0.3% 터치 + 거래량 동반">
+                            <span class="ind-name">EMA</span><span class="ind-state">대기</span>
+                        </div>
+                        <div class="indicator-pill" data-cat="RSI" title="가동 조건: 1H TF 다이버전스 발생 (regular/hidden × bull/bear)">
+                            <span class="ind-name">RSI</span><span class="ind-state">대기</span>
+                        </div>
+                        <div class="indicator-pill" data-cat="BB" title="가동 조건: 1H Bollinger 상/하단 터치 (횡보장 특화)">
+                            <span class="ind-name">BB</span><span class="ind-state">대기</span>
+                        </div>
+                        <div class="indicator-pill" data-cat="MA" title="가동 조건: 골크/데크 (HTF 가중치 1H&lt;2H&lt;4H)">
+                            <span class="ind-name">MA</span><span class="ind-state">대기</span>
+                        </div>
+                        <div class="indicator-pill" data-cat="Ichimoku" title="가동 조건: 구름대 Span 터치 (S/R 강도 = 두께)">
+                            <span class="ind-name">Ichimoku</span><span class="ind-state">대기</span>
+                        </div>
+                        <div class="indicator-pill" data-cat="Harmonic" title="가동 조건: 5종 패턴 D 도달 (Bat/Butterfly/Gartley/Crab/Deep Crab)">
+                            <span class="ind-name">Harmonic</span><span class="ind-state">대기</span>
+                        </div>
+                    </div>
+
                     <div class="section-title">자본금</div>
                     <div class="metric-card">
                         <div class="metric-label">현재 자본금 (USDT)</div>
@@ -155,6 +178,7 @@
                             <thead>
                                 <tr>
                                     <th>심볼</th>
+                                    <th>진입 트리거</th>
                                     <th>방향</th>
                                     <th>진입가</th>
                                     <th>수량</th>
@@ -163,7 +187,7 @@
                                 </tr>
                             </thead>
                             <tbody id="pos-tbody">
-                                <tr><td colspan="6" class="pos-empty">열린 포지션 없음</td></tr>
+                                <tr><td colspan="7" class="pos-empty">열린 포지션 없음</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -172,33 +196,57 @@
                     <div class="stat-grid">
                         <div class="stat-card">
                             <div class="stat-label">총 거래</div>
-                            <div class="stat-value">—</div>
+                            <div class="stat-value mono" id="stat-total">—</div>
+                            <div class="stat-sub mono" id="stat-winloss">—</div>
                         </div>
                         <div class="stat-card">
                             <div class="stat-label">승률</div>
-                            <div class="stat-value">—</div>
+                            <div class="stat-value mono" id="stat-winrate">—</div>
                         </div>
                         <div class="stat-card">
                             <div class="stat-label">누적 수익률</div>
-                            <div class="stat-value stat-aurora">—</div>
+                            <div class="stat-value mono stat-aurora" id="stat-cumulative">—</div>
                         </div>
                         <div class="stat-card">
                             <div class="stat-label">최대 DD</div>
-                            <div class="stat-value">—</div>
+                            <div class="stat-value mono" id="stat-dd">—</div>
                         </div>
                         <div class="stat-card">
                             <div class="stat-label">샤프 비율</div>
-                            <div class="stat-value">—</div>
+                            <div class="stat-value mono" id="stat-sharpe">—</div>
                         </div>
                         <div class="stat-card">
                             <div class="stat-label">평균 보유</div>
-                            <div class="stat-value">—</div>
+                            <div class="stat-value mono" id="stat-hold">—</div>
                         </div>
                     </div>
 
-                    <div class="section-title">결과 차트</div>
-                    <div class="metric-card" style="height: 300px; display:flex; align-items:center; justify-content:center">
-                        <p class="text-zinc-600 italic">차트 라이브러리 미통합 — 후속 PR (Lightweight Charts 권장)</p>
+                    <div class="section-title">
+                        거래내역 (P&amp;L)
+                        <span class="trades-period-toggle" id="trades-period-toggle">
+                            <button data-days="7" class="active">7D</button>
+                            <button data-days="30">30D</button>
+                            <button data-days="180">180D</button>
+                        </span>
+                    </div>
+                    <div class="metric-card" style="padding: 0">
+                        <table class="trades-table">
+                            <thead>
+                                <tr>
+                                    <th>Market</th>
+                                    <th>Instrument</th>
+                                    <th>Entry Price</th>
+                                    <th>Traded Price</th>
+                                    <th>Order Qty</th>
+                                    <th>Trade Type</th>
+                                    <th>Realized P&amp;L</th>
+                                    <th>Trade Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="trades-tbody">
+                                <tr><td colspan="8" class="trades-empty">거래내역 없음</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </section>
@@ -445,13 +493,13 @@
                     <div class="section-title">TP / SL 모드</div>
                     <div class="radio-group">
                         <input type="radio" name="tpsl-mode" id="tpsl-fixed" value="fixed_pct" checked />
-                        <label for="tpsl-fixed">Fixed %</label>
+                        <label for="tpsl-fixed">Fixed %<span class="mode-sub">레버리지별 자동 ROI</span></label>
 
                         <input type="radio" name="tpsl-mode" id="tpsl-atr" value="atr" />
-                        <label for="tpsl-atr">ATR Dynamic</label>
+                        <label for="tpsl-atr">ATR Dynamic<span class="mode-sub">변동성 기반 동적</span></label>
 
                         <input type="radio" name="tpsl-mode" id="tpsl-manual" value="manual" />
-                        <label for="tpsl-manual">Manual %</label>
+                        <label for="tpsl-manual">Manual %<span class="mode-sub">사용자 직접 입력</span></label>
                     </div>
 
                     <div class="section-title">분할 익절 (4단계, 합 100)</div>
@@ -486,22 +534,22 @@
                     <div class="section-title">트레일링 모드</div>
                     <div class="radio-group" style="flex-wrap: wrap">
                         <input type="radio" name="trail" id="trail-off" value="off" />
-                        <label for="trail-off">OFF</label>
+                        <label for="trail-off">OFF<span class="mode-sub">트레일링 비활성</span></label>
 
                         <input type="radio" name="trail" id="trail-mt" value="moving_target" checked />
-                        <label for="trail-mt">Moving Target</label>
+                        <label for="trail-mt">Moving Target<span class="mode-sub">SL → 직전 TP 이동</span></label>
 
                         <input type="radio" name="trail" id="trail-m2t" value="moving_2_target" />
-                        <label for="trail-m2t">Moving 2-Target</label>
+                        <label for="trail-m2t">Moving 2-Target<span class="mode-sub">SL → 2 단계 직전 TP</span></label>
 
                         <input type="radio" name="trail" id="trail-be" value="breakeven" />
-                        <label for="trail-be">Breakeven</label>
+                        <label for="trail-be">Breakeven<span class="mode-sub">TP1 도달 시 본전</span></label>
 
                         <input type="radio" name="trail" id="trail-pbt" value="percent_below_triggers" />
-                        <label for="trail-pbt">% Below Triggers</label>
+                        <label for="trail-pbt">% Below Triggers<span class="mode-sub">TP 도달 시 % 거리 lock</span></label>
 
                         <input type="radio" name="trail" id="trail-pbh" value="percent_below_highest" />
-                        <label for="trail-pbh">% Below Highest</label>
+                        <label for="trail-pbh">% Below Highest<span class="mode-sub">최고가 대비 % 거리 추적</span></label>
                     </div>
 
                     <div class="section-title">시드 정책</div>
@@ -639,6 +687,64 @@
         </main>
     </div>
 
+    <!-- ===== PnL 공유 카드 모달 (v0.1.21) ===== -->
+    <!-- 거래내역 행 클릭 시 열림. html2canvas → PNG 다운로드. -->
+    <div id="pnl-modal" class="pnl-modal" role="dialog" aria-modal="true" aria-hidden="true">
+        <button id="pnl-close" class="pnl-modal-close" aria-label="닫기">×</button>
+
+        <div class="pnl-modal-inner">
+            <!-- 캡처 대상 — html2canvas 가 이 노드만 PNG 로 변환 -->
+            <div id="pnl-card" class="pnl-card">
+                <div class="pnl-card-header">
+                    <svg width="22" height="22" viewBox="0 0 28 28" fill="none">
+                        <defs>
+                            <linearGradient id="pnlLogoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stop-color="#a855f7" />
+                                <stop offset="50%" stop-color="#6366f1" />
+                                <stop offset="100%" stop-color="#22d3ee" />
+                            </linearGradient>
+                        </defs>
+                        <path d="M14 2 L26 14 L14 26 L2 14 Z" stroke="url(#pnlLogoGrad)" stroke-width="1.5" fill="none" />
+                        <path d="M14 8 L20 14 L14 20 L8 14 Z" fill="url(#pnlLogoGrad)" opacity="0.6" />
+                    </svg>
+                    <span class="pnl-wordmark">AURORA</span>
+                </div>
+
+                <div class="pnl-card-symbol-row">
+                    <span id="pnl-symbol" class="pnl-card-symbol">—</span>
+                    <span id="pnl-side" class="pnl-card-side long">LONG</span>
+                    <span id="pnl-lev" class="pnl-card-lev">—×</span>
+                </div>
+
+                <div id="pnl-roi" class="pnl-card-roi positive">+0.00%</div>
+                <div id="pnl-pnl-usd" class="pnl-card-pnl">+0.00 USDT</div>
+
+                <div class="pnl-card-prices">
+                    <div class="pnl-card-price-block">
+                        <div class="label">Entry Price</div>
+                        <div class="value" id="pnl-entry">—</div>
+                    </div>
+                    <div class="pnl-card-price-block">
+                        <div class="label">Exit Price</div>
+                        <div class="value" id="pnl-exit">—</div>
+                    </div>
+                </div>
+
+                <div class="pnl-card-footer">
+                    <span id="pnl-time" class="pnl-time">—</span>
+                    <span>github.com/WL131231/Aurora</span>
+                </div>
+            </div>
+
+            <div class="pnl-actions">
+                <button id="pnl-download" class="btn btn-primary">⤓ PNG 저장</button>
+                <button id="pnl-close-btn" class="btn btn-ghost">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- html2canvas (PnL 카드 PNG 캡처) — v1.4.1 CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script src="js/apiClient.js"></script>
     <script src="js/app.js"></script>
 </body>

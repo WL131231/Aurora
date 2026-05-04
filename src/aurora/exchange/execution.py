@@ -20,6 +20,7 @@ Phase 1 단순화 (DESIGN.md E-6):
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from typing import Literal
 
 from aurora.core.risk import (
@@ -35,7 +36,29 @@ logger = logging.getLogger(__name__)
 
 
 # 청산 사유 타입 — should_close 반환값 + close_position 인자 통일
-CloseReason = Literal["sl", "tp_partial", "tp_full", "manual", "exit_signal"]
+CloseReason = Literal["sl", "tp_partial", "tp_full", "manual", "exit_signal", "reverse"]
+
+
+@dataclass(slots=True)
+class ClosedTrade:
+    """청산된 trade 기록 — 거래내역 표 + PnL 카드 표시용 (v0.1.20).
+
+    매 ``close_position`` 호출 시 한 record 생성. 잔여 0 (전량 청산) 만 X — partial
+    청산도 row 한 개 (사용자가 청산 흐름 추적 가능).
+    """
+
+    symbol: str
+    direction: str                       # "long" / "short"
+    leverage: int
+    qty: float                           # 청산된 수량 (이 record 의 close qty)
+    entry_price: float
+    exit_price: float
+    opened_at_ts: int                    # 진입 시각 (ms)
+    closed_at_ts: int                    # 청산 시각 (ms)
+    reason: str                          # CloseReason 또는 "external" 등
+    pnl_usd: float                       # USDT pnl
+    roi_pct: float                       # ROI % (마진 기준)
+    triggered_by: list[str] = field(default_factory=list)  # 진입 트리거 (예: ["EMA"])
 
 
 class Executor:
@@ -69,6 +92,11 @@ class Executor:
         # 활성 포지션 state — open_position 시 채움, close 시 None 으로 reset
         self._plan: RiskPlan | None = None
         self._remaining_qty: float = 0.0
+        # 진입 트리거 (어떤 지표로 진입했는지) — UI 표시용
+        # signal.py 의 EntryDecision.triggered_by 그대로 보존 (예: ["EMA", "RSI"])
+        self._triggered_by: list[str] = []
+        # 진입 시각 (ms) — ClosedTrade.opened_at_ts 에 사용 (v0.1.20)
+        self._opened_at_ts: int = 0
         # 트레일링 SL 입력 — 진입 후 매 step current_market 으로 갱신
         self._highest_since_entry: float = 0.0
         self._lowest_since_entry: float = 0.0
@@ -79,6 +107,34 @@ class Executor:
     def has_position(self) -> bool:
         """현재 활성 포지션 보유 여부 — BotInstance 가 진입 중복 방지에 사용."""
         return self._plan is not None
+
+    @property
+    def triggered_by(self) -> list[str]:
+        """진입 시 발동된 지표 목록 — UI 표시용 (예: ["EMA", "RSI"])."""
+        return list(self._triggered_by)
+
+    def set_client(self, client: ExchangeClient) -> None:
+        """ccxt 세션 재주입 — BotInstance stop/start 사이클 시 사용.
+
+        Why: stop() 이 client.close() 호출하면 이전 async 세션이 죽지만, ``_plan``
+        등 포지션 state 는 보존되어야 자기 진입한 포지션을 잊지 않음.
+        새 client 만 갈아끼우면 SL/TP 트레일링 + 청산 호출 그대로 작동.
+        """
+        self._client = client
+
+    def reset_position(self) -> None:
+        """포지션 state 초기화 — 외부 청산 (사용자 직접 / liquidation) 감지 시 호출.
+
+        Why: 봇이 ``_plan`` 살아있다고 믿는데 거래소 측엔 포지션 없으면 has_position
+        이 영원히 True → 트레일링 + 청산 분기만 돌고 신규 진입 평가 안 함 → 봇 멈춤.
+        BotInstance ``_step`` 가 fetch_position 으로 sync → 사라짐 감지 시 본 메서드.
+        """
+        self._plan = None
+        self._remaining_qty = 0.0
+        self._triggered_by = []
+        self._tp_hits = 0
+        self._highest_since_entry = 0.0
+        self._lowest_since_entry = 0.0
 
     @property
     def remaining_qty(self) -> float:
@@ -94,7 +150,11 @@ class Executor:
     # 진입
     # ============================================================
 
-    async def open_position(self, plan: RiskPlan) -> Order:
+    async def open_position(
+        self,
+        plan: RiskPlan,
+        triggered_by: list[str] | None = None,
+    ) -> Order:
         """진입 — leverage 설정 + 시장가 주문.
 
         Phase 1 = 거래소 측 SL/TP 등록 X (DESIGN.md E-6). SL/TP 는 ``plan``
@@ -103,6 +163,9 @@ class Executor:
         Args:
             plan: ``core.risk.build_risk_plan`` 산출 결과.
                 ``plan.position.coin_amount`` 가 거래소 주문 qty.
+            triggered_by: 진입 발동 지표 목록 (예: ``["EMA", "RSI"]``). UI 표시용.
+                None 이면 빈 list. ``signal.py`` 의 ``EntryDecision.triggered_by``
+                직접 전달 가정.
 
         Returns:
             거래소 응답 Order (paper 모드는 가짜 'filled' Order).
@@ -132,16 +195,19 @@ class Executor:
         )
 
         # 3. state 초기화
+        import time
         self._plan = plan
         self._remaining_qty = qty
+        self._triggered_by = list(triggered_by) if triggered_by else []
+        self._opened_at_ts = int(time.time() * 1000)  # v0.1.20 — ClosedTrade.opened_at_ts
         self._highest_since_entry = plan.entry_price
         self._lowest_since_entry = plan.entry_price
         self._tp_hits = 0
 
         logger.info(
-            "Executor.open_position: %s %s qty=%.6f entry=%.2f sl=%.2f leverage=%dx",
+            "Executor.open_position: %s %s qty=%.6f entry=%.2f sl=%.2f leverage=%dx triggered_by=%s",
             self._symbol, plan.direction, qty,
-            plan.entry_price, plan.sl_price, plan.leverage,
+            plan.entry_price, plan.sl_price, plan.leverage, self._triggered_by,
         )
         return order
 
@@ -239,8 +305,8 @@ class Executor:
         self,
         qty: float | None = None,
         reason: CloseReason = "manual",
-    ) -> Order:
-        """청산 — reduce_only 시장가 주문.
+    ) -> tuple[Order, ClosedTrade]:
+        """청산 — reduce_only 시장가 주문 + ClosedTrade 기록 반환 (v0.1.20).
 
         Args:
             qty: 청산할 수량. ``None`` 이면 잔여 전량 (``_remaining_qty``).
@@ -248,11 +314,14 @@ class Executor:
             reason: 청산 사유 (로그·통계 metadata).
 
         Returns:
-            거래소 응답 Order.
+            ``(Order, ClosedTrade)`` tuple. BotInstance 가 ClosedTrade 를
+            ``_closed_trades`` 에 추가 (rolling buffer).
 
         Raises:
             RuntimeError: 활성 포지션 없음 / qty 가 잔여보다 큼.
         """
+        import time
+
         if self._plan is None:
             raise RuntimeError("close_position 호출했는데 활성 포지션 없음")
 
@@ -273,16 +342,45 @@ class Executor:
             reduce_only=True,
         )
 
+        # ClosedTrade 기록 산출 (state reset 전에 plan 데이터 사용)
+        plan = self._plan
+        is_long = plan.direction == "long"
+        # exit_price = 거래소 응답 price 또는 plan 기준 (paper 모드 대응)
+        exit_price = order.price if order.price is not None else plan.entry_price
+        # raw pnl: long 은 (exit-entry), short 는 (entry-exit)
+        sign = 1.0 if is_long else -1.0
+        pnl_per_coin = (exit_price - plan.entry_price) * sign
+        pnl_usd = pnl_per_coin * close_qty
+        # ROI = pnl / margin × 100. margin = (entry × qty) / leverage
+        margin = (plan.entry_price * close_qty) / max(plan.leverage, 1)
+        roi_pct = (pnl_usd / margin * 100.0) if margin > 0 else 0.0
+
+        closed = ClosedTrade(
+            symbol=self._symbol,
+            direction=plan.direction,
+            leverage=plan.leverage,
+            qty=close_qty,
+            entry_price=plan.entry_price,
+            exit_price=exit_price,
+            opened_at_ts=self._opened_at_ts,
+            closed_at_ts=int(time.time() * 1000),
+            reason=reason,
+            pnl_usd=pnl_usd,
+            roi_pct=roi_pct,
+            triggered_by=list(self._triggered_by),
+        )
+
         self._remaining_qty -= close_qty
         logger.info(
-            "Executor.close_position: %s %s qty=%.6f reason=%s remaining=%.6f",
-            self._symbol, self._plan.direction, close_qty, reason, self._remaining_qty,
+            "Executor.close_position: %s %s qty=%.6f reason=%s pnl=%.4f USDT (%.2f%% ROI) remaining=%.6f",
+            self._symbol, plan.direction, close_qty, reason, pnl_usd, roi_pct,
+            self._remaining_qty,
         )
 
         # 잔여 0 (또는 epsilon 이하) — state 전체 reset
         if self._remaining_qty <= 1e-9:
             self._reset_state()
-        return order
+        return order, closed
 
     # ============================================================
     # 내부
@@ -292,6 +390,7 @@ class Executor:
         """포지션 종료 후 state 초기화 — open_position 가능 상태로 복귀."""
         self._plan = None
         self._remaining_qty = 0.0
+        self._triggered_by = []
         self._highest_since_entry = 0.0
         self._lowest_since_entry = 0.0
         self._tp_hits = 0

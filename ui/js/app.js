@@ -221,6 +221,28 @@ async function refreshDashboard() {
         const extAlert = document.getElementById("external-position-alert");
         if (extAlert) extAlert.style.display = s.external_position ? "" : "none";
 
+        // 지표 트리거 상태 패널 (v0.1.14, v0.1.18 4-state) — long/short/neutral/disabled
+        const indStatus = s.indicator_status || {};
+        document.querySelectorAll(".indicator-pill").forEach((pill) => {
+            const cat = pill.dataset.cat;
+            const state = indStatus[cat];  // "long" | "short" | "neutral" | "disabled"
+            pill.classList.remove("dir-long", "dir-short", "dir-neutral", "dir-disabled");
+            const stEl = pill.querySelector(".ind-state");
+            if (state === "long") {
+                pill.classList.add("dir-long");
+                if (stEl) stEl.textContent = "활성·롱";
+            } else if (state === "short") {
+                pill.classList.add("dir-short");
+                if (stEl) stEl.textContent = "활성·숏";
+            } else if (state === "disabled") {
+                pill.classList.add("dir-disabled");
+                if (stEl) stEl.textContent = "비활성";
+            } else {
+                pill.classList.add("dir-neutral");
+                if (stEl) stEl.textContent = "대기";
+            }
+        });
+
         const lu = document.getElementById("m-last-update");
         if (lu) lu.textContent = toKstString(new Date().toISOString()) + " KST";
 
@@ -228,6 +250,12 @@ async function refreshDashboard() {
 
         // 열린 포지션 표 — /positions 호출 + 행 렌더
         await refreshPositions();
+
+        // 거래내역 (P&L) 표 — /trades 호출 + Bybit 스타일 행 렌더 (v0.1.20)
+        await refreshTrades();
+
+        // 결과 통계 6 카드 (v0.1.24) — /stats 호출, 거래내역 토글과 같은 days 사용
+        await refreshStats();
     } catch (_) {
         connDot.style.background = "#fb7185";
         connDot.style.boxShadow  = "0 0 8px #fb7185";
@@ -249,7 +277,7 @@ async function refreshPositions() {
         return;
     }
     if (!Array.isArray(positions) || positions.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="pos-empty">열린 포지션 없음</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="pos-empty">열린 포지션 없음</td></tr>';
         return;
     }
     const fmtPrice = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -264,9 +292,17 @@ async function refreshPositions() {
         const roiSign = roi >= 0 ? "+" : "";
         return `<span style="color:${color}">${roiSign}${roi.toFixed(2)}% &nbsp;&nbsp;${sign}${n.toFixed(2)} USDT</span>`;
     };
+    // 진입 트리거 — 봇 자기 진입한 포지션만 값 있음. 외부 포지션은 빈 list → "—"
+    const fmtTrigger = (arr) => {
+        if (!Array.isArray(arr) || arr.length === 0) {
+            return '<span style="color:var(--text-3)">—</span>';
+        }
+        return arr.map(t => `<span class="trigger-tag">${t}</span>`).join(" ");
+    };
     tbody.innerHTML = positions.map(p => `
         <tr>
             <td class="mono">${p.symbol}</td>
+            <td>${fmtTrigger(p.triggered_by)}</td>
             <td>${p.direction === "long" ? "롱" : "숏"}</td>
             <td class="mono">${fmtPrice(p.entry_price)}</td>
             <td class="mono">${Number(p.quantity).toFixed(4)}</td>
@@ -275,6 +311,247 @@ async function refreshPositions() {
         </tr>
     `).join("");
 }
+
+// 거래내역 (P&L) 표 갱신 — Bybit 스타일 (v0.1.20 + v0.1.23 기간 필터).
+// /trades?days=N 호출 + tbody 행 렌더. days 는 사용자 토글 (7/30/180) — 기본 7.
+let _tradesPeriodDays = 7;
+
+async function refreshTrades() {
+    const tbody = document.getElementById("trades-tbody");
+    if (!tbody) return;
+    let trades = [];
+    try {
+        trades = await Api.getTrades(200, _tradesPeriodDays, "all");
+    } catch (_) {
+        return;
+    }
+    if (!Array.isArray(trades) || trades.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="trades-empty">거래내역 없음</td></tr>';
+        return;
+    }
+    const fmtPrice = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtTime = (ts) => {
+        const d = new Date(ts);
+        const yy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        const hh = String(d.getHours()).padStart(2, "0");
+        const mi = String(d.getMinutes()).padStart(2, "0");
+        const ss = String(d.getSeconds()).padStart(2, "0");
+        return `${yy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+    };
+    const fmtPnl = (n) => {
+        const v = Number(n);
+        const sign = v >= 0 ? "+" : "";
+        const color = v >= 0 ? "#34d399" : "#fb7185";
+        return `<span style="color:${color}">${sign}${v.toFixed(4)}</span>`;
+    };
+    // Bybit 패턴 — qty 색: short = 빨강 (sell), long = 초록 (buy 진입 → reduce sell 청산)
+    // Aurora 는 Bybit P&L 화면처럼 "방향 = 진입 방향" 기준 표시.
+    const fmtQty = (qty, dir) => {
+        const color = dir === "short" ? "#fb7185" : "#34d399";
+        return `<span style="color:${color}">${Number(qty).toFixed(4)}</span>`;
+    };
+    // Symbol 표시 — "BTC/USDT:USDT" → "BTCUSDT Perp"
+    const fmtSymbol = (s) => {
+        const base = s.split("/")[0] || s;
+        const quote = (s.split("/")[1] || "").split(":")[0] || "USDT";
+        return `${base}${quote} <span class="trade-perp">Perp</span>`;
+    };
+    tbody.innerHTML = trades.map((t, idx) => `
+        <tr class="trade-row" data-trade-idx="${idx}">
+            <td>${fmtSymbol(t.symbol)}</td>
+            <td class="mono">${t.instrument}</td>
+            <td class="mono">${fmtPrice(t.entry_price)}</td>
+            <td class="mono">${fmtPrice(t.exit_price)}</td>
+            <td class="mono">${fmtQty(t.qty, t.direction)}</td>
+            <td>Trade</td>
+            <td class="mono">${fmtPnl(t.pnl_usd)}</td>
+            <td class="mono">${fmtTime(t.closed_at_ts)}</td>
+        </tr>
+    `).join("");
+    // v0.1.21 — 행 클릭 시 PnL 공유 카드 모달 오픈
+    tbody.querySelectorAll("tr.trade-row").forEach((row) => {
+        row.addEventListener("click", () => {
+            const idx = parseInt(row.dataset.tradeIdx, 10);
+            const t = trades[idx];
+            if (t) openPnlCard(t);
+        });
+    });
+}
+
+// 거래내역 기간 토글 (v0.1.23) — 7D / 30D / 180D
+(() => {
+    const toggle = document.getElementById("trades-period-toggle");
+    if (!toggle) return;
+    toggle.querySelectorAll("button[data-days]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            _tradesPeriodDays = parseInt(btn.dataset.days, 10);
+            toggle.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+            btn.classList.add("active");
+            // 봇 자기 거래 + 거래소 history 합쳐 즉시 다시 조회
+            refreshTrades();
+            // v0.1.24 — 통계 카드도 같은 기간으로 즉시 갱신
+            refreshStats();
+        });
+    });
+})();
+
+// 결과 통계 6 카드 갱신 (v0.1.24) — /stats?days=N 호출 + 카드 값 채우기.
+async function refreshStats() {
+    let s;
+    try {
+        s = await Api.getStats(_tradesPeriodDays);
+    } catch (_) {
+        return;
+    }
+    const $ = (id) => document.getElementById(id);
+
+    // 데이터 없으면 모두 "—" (n=0 → 의미 없는 0/0 보다 깔끔)
+    if (!s || s.total_trades === 0) {
+        ["stat-total", "stat-winrate", "stat-cumulative", "stat-dd", "stat-sharpe", "stat-hold"]
+            .forEach((id) => { const el = $(id); if (el) el.textContent = "—"; });
+        const wl = $("stat-winloss");
+        if (wl) wl.textContent = "—";
+        return;
+    }
+
+    $("stat-total").textContent = String(s.total_trades);
+    $("stat-winloss").textContent = `${s.win_count}W / ${s.loss_count}L`;
+    $("stat-winrate").textContent = `${s.win_rate_pct.toFixed(1)}%`;
+
+    // 누적 수익률 — USDT + 평균 ROI (양수=초록, 음수=빨강)
+    const pnl = s.cumulative_pnl_usd;
+    const sign = pnl >= 0 ? "+" : "";
+    const color = pnl >= 0 ? "#34d399" : "#fb7185";
+    const cum = $("stat-cumulative");
+    cum.innerHTML =
+        `<span style="color:${color}">${sign}${pnl.toFixed(2)} USDT</span>` +
+        `<span class="stat-aux mono">${s.avg_roi_pct >= 0 ? "+" : ""}${s.avg_roi_pct.toFixed(2)}% avg</span>`;
+
+    $("stat-dd").textContent = `${s.max_drawdown_pct.toFixed(2)}%`;
+    $("stat-sharpe").textContent = s.sharpe_ratio.toFixed(2);
+
+    // 평균 보유 — 분 → 시:분 또는 분 단위
+    const m = s.avg_hold_minutes;
+    const hold = m >= 60 ? `${Math.floor(m / 60)}h ${Math.round(m % 60)}m` : `${m.toFixed(1)}m`;
+    $("stat-hold").textContent = hold;
+}
+
+// ============================================================
+// 6b. PnL 공유 카드 (v0.1.21) — 모달 + html2canvas PNG 다운로드
+// ============================================================
+
+// 트레이드 객체 → 카드 채움 + 모달 열기.
+//   trade = TradeDTO (api.py) — symbol, direction, leverage, entry_price, exit_price,
+//                                pnl_usd, roi_pct, opened_at_ts, closed_at_ts, ...
+function openPnlCard(trade) {
+    const modal = document.getElementById("pnl-modal");
+    if (!modal) return;
+
+    // 심볼 — "BTC/USDT:USDT" → "BTCUSDT Perp"
+    const symRaw = trade.symbol || "";
+    const base = symRaw.split("/")[0] || symRaw;
+    const quote = (symRaw.split("/")[1] || "").split(":")[0] || "USDT";
+    document.getElementById("pnl-symbol").textContent = `${base}${quote} Perp`;
+
+    // 방향 + 레버리지
+    const sideEl = document.getElementById("pnl-side");
+    sideEl.textContent = trade.direction === "short" ? "SHORT" : "LONG";
+    sideEl.className = `pnl-card-side ${trade.direction === "short" ? "short" : "long"}`;
+    document.getElementById("pnl-lev").textContent = `${trade.leverage}×`;
+
+    // ROI (큼지막) + PnL USDT
+    const roi = Number(trade.roi_pct || 0);
+    const pnl = Number(trade.pnl_usd || 0);
+    const roiEl = document.getElementById("pnl-roi");
+    const roiSign = roi >= 0 ? "+" : "";
+    roiEl.textContent = `${roiSign}${roi.toFixed(2)}%`;
+    roiEl.className = `pnl-card-roi ${roi >= 0 ? "positive" : "negative"}`;
+    const pnlSign = pnl >= 0 ? "+" : "";
+    document.getElementById("pnl-pnl-usd").textContent = `${pnlSign}${pnl.toFixed(4)} USDT`;
+
+    // 진입가 / 청산가
+    const fmtP = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    document.getElementById("pnl-entry").textContent = fmtP(trade.entry_price);
+    document.getElementById("pnl-exit").textContent = fmtP(trade.exit_price);
+
+    // 청산 시간 (KST)
+    const d = new Date(trade.closed_at_ts);
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    document.getElementById("pnl-time").textContent = `${yy}-${mm}-${dd} ${hh}:${mi} KST`;
+
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+}
+
+function closePnlCard() {
+    const modal = document.getElementById("pnl-modal");
+    if (!modal) return;
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+}
+
+// PnL 카드 → PNG 다운로드.
+// html2canvas 로 #pnl-card 노드를 캡처. backgroundColor: null = 카드 자체 배경 사용.
+async function downloadPnlCard() {
+    const card = document.getElementById("pnl-card");
+    const btn = document.getElementById("pnl-download");
+    if (!card || typeof html2canvas !== "function") return;
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "캡처 중...";
+    try {
+        const canvas = await html2canvas(card, {
+            backgroundColor: null,
+            scale: 2,            // 고해상도 (2x = 960x1200)
+            useCORS: true,
+            logging: false,
+        });
+        // 파일명 — symbol_KSTtime.png
+        const sym = (document.getElementById("pnl-symbol").textContent || "trade").replace(/[^A-Za-z0-9]/g, "");
+        const ts = (document.getElementById("pnl-time").textContent || "")
+                       .replace(/[^0-9]/g, "").slice(0, 12);
+        const fname = `Aurora_${sym}_${ts}.png`;
+        canvas.toBlob((blob) => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = fname;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, "image/png");
+    } catch (e) {
+        console.error("PnL 카드 캡처 실패:", e);
+        alert(`캡처 실패: ${e.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+    }
+}
+
+// 모달 이벤트 — 백드롭 클릭 / X 버튼 / 닫기 버튼 / ESC 키 / 다운로드 버튼
+(() => {
+    const modal = document.getElementById("pnl-modal");
+    if (!modal) return;
+    // 백드롭 클릭 (카드 외부) — 카드 자체 클릭은 stopPropagation 으로 무시
+    modal.addEventListener("click", (e) => {
+        if (e.target === modal) closePnlCard();
+    });
+    document.getElementById("pnl-close")?.addEventListener("click", closePnlCard);
+    document.getElementById("pnl-close-btn")?.addEventListener("click", closePnlCard);
+    document.getElementById("pnl-download")?.addEventListener("click", downloadPnlCard);
+    // ESC 키
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && modal.classList.contains("open")) closePnlCard();
+    });
+})();
 
 // 제어 버튼 인라인 피드백 — success: 3초, error: 5초 + × 닫기
 function showCtrlMsg(text, ok) {

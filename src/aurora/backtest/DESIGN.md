@@ -534,6 +534,7 @@ def atr_wilder(df: pd.DataFrame, period: int = 14) -> pd.Series:
 - **D-3 등간격 분할** (10-d): TP 4 단계는 `[tp_min, tp_min + 1/3·range, tp_min + 2/3·range, tp_max]` 등간격. `tp_allocations` 는 `TpSlConfig` 디폴트 (25/25/25/25) 그대로.
 - **early return** (5 단계): 어떤 TF도 닫힘 없는 1 분봉은 신호 평가 skip. 성능 + 동일 시점 중복 평가 방지.
 - **포지션 보유 시 갱신 우선** (2-4 단계): 닫힌 TF 봉 도착 전이라도 매 1 분봉 SL 갱신 + 청산 체크 (gap-fill 가격 누락 방지).
+- **`_check_exits` 시그니처 `close` 매개변수 미사용** (3 단계): 본 구현 (`engine.py` L677) `del close` 패턴 — slip 산출은 `self._last_close` 사용 (`step()` 진입점 L283-285 갱신). 매개변수 보존은 호출자 OHLC 4 인자 일관성 — direction lowercase 통일 (D-19 `cost.Direction` Literal 격리) 후속 PR 에서 함께 검토 (장수+WooJae 합의 2026-05-04 Stage 1D 마무리).
 
 ---
 
@@ -731,10 +732,10 @@ PR-1 13 개 / PR-2 18 개 / Stage 1A 14 개 / Stage 1B 32 개 (cost 16 + stats 1
 
 ### 8.4 커버리지 갭 (인지된 후속)
 
-- **REVERSE step() 통합** (Q1) — synthetic OHLCV + `ema_periods=(2,3)` 튜닝으로 EMA touch 반대 방향 신호 유발. step() REVERSE 분기 line coverage 는 Stage 1D ETHUSDT sanity 또는 후속 PR 자연 보강. B6 `_close(REVERSE)` 단위 + `test_signal.compose_exit` 기존 케이스로 의미 보존.
-- **멀티 trade end-to-end** (100~200 봉, 신호 발동) — 후속 통합 시나리오 PR. Group 3 범위는 단위 회귀 보호.
-- **regime breakdown** — D-5 (regime 분류 정책 PR-3 범위 외) 정합. `TradeRecord.regime` 필드는 박혀 있고 후속 PR 채움 자연.
-- **min_seed_pct=0.40 16% 증폭 시나리오** (D-1) — `risk_pct=0.01` 호출이 `min_seed_pct` 발동 시 실 손실 노출 16% 검증은 통합 시나리오 PR 자연 영역.
+- ✅ **해소 (Stage 1D 단계 2, 219d7a0)** — **REVERSE step() 통합** (Q1): synthetic 1m 300 봉 + `ema_periods=(2,3)` + `_close` self-spy 패턴 (mock 외부 의존 X — `engine._close` wrapper 로 호출 인자 캡처) → `test_step_reverse_branch_synthetic_ohlcv` 통합 line coverage. `compose_exit(LONG, [SHORT signals])` True 분기 (engine.py L351-354) 검증.
+- ✅ **해소 (Stage 1D 단계 3, c1086a4)** — **멀티 trade end-to-end** (1m 300 봉, 8 단계 라이프사이클): LONG entry → TP1 partial → TP2 partial → BE close → SHORT entry → REVERSE close → LONG entry → FORCE_END close → `test_run_multi_trade_end_to_end_scenario`. self-spy 확장 (`_close` + `_partial_close` 둘 다, D-21 partial idx 추적) + assertion 8 가지 (D-2 reason 매핑 / direction 분포 LONG 4 + SHORT 1 / consec_sl 흐름).
+- 🟡 **잔존 — regime breakdown** (D-5): regime 분류 정책 PR-3 범위 외. `TradeRecord.regime` 필드 박혀 있고 후속 PR 채움 자연. 별도 Issue 등록 예정.
+- 🟡 **잔존 — min_seed_pct=0.40 16% 증폭 시나리오** (D-1): `risk_pct=0.01` 호출이 `min_seed_pct` 발동 시 실 손실 노출 16% 검증은 통합 시나리오 PR 자연 영역. 별도 Issue 등록 예정.
 
 ---
 
@@ -900,4 +901,5 @@ PR-3 description 본문에 박을 Decisions 항목 미리보기. 본 design doc 
 - 2026-05-03 (오후): §3.1.1 시그니처 truth / §3.3.1 옵션 a 검증 + 신호↔리스크 독립 / §4 정독 확정 + ROI 17.3% / §5 모듈 spec + atr_wilder 위임 / §6 신설 (engine.step() 10단계) / 절번호 시프트 / §3.2 Bybit→Binance 정정.
 - 2026-05-03 (저녁, Stage 1C 단계 3): §6.2 8 단계 정정 (`strategy.evaluate` 통합 함수 부재 → `detect_ema_touch + detect_rsi_divergence + evaluate_selectable` 3 함수 합본 명시) / §9 BotInstance ↔ BacktestEngine 책임 경계 환기 추가 / §11 D-24 본문화 (REVERSE 분기 = `compose_exit` 활용).
 - 2026-05-03 (밤, Stage 1C Group 3): §8 본문화 — `tests/test_engine.py` 22 함수 / 23 collected (5 그룹 A~E + D-N 매핑 + sanity → pytest 변환 + 커버리지 갭). pytest baseline 385 → 408.
+- 2026-05-04 (Stage 1D 마무리, 단계 4): §8.4 커버리지 갭 갱신 — REVERSE step() 통합 (단계 2 219d7a0) + 멀티 trade end-to-end (단계 3 c1086a4) 2 건 ✅ 해소, regime breakdown (D-5) + min_seed_pct 16% 증폭 (D-1) 2 건 🟡 잔존 (별도 Issue 예정). §6.3 `_check_exits` `del close` 환기 추가 (D-19 direction lowercase 통일 후속 PR 함께 검토 — 장수+WooJae 합의). pytest baseline 408 → 472 (+64, main 머지 신규 테스트 흡수 + 단계 2/3 회귀 +2).
 - 다음 보강 예정: §10 review 발송 준비 (시프트 후), §11 PR description Decisions 미리보기 (D-1~D-8 + D-4 보강), 동기화 매트릭스 별도 파일 신설.

@@ -625,3 +625,113 @@ def test_run_multi_trade_end_to_end_scenario() -> None:
     # balance 변동 — 누적 손실 (BE 청산 + SHORT REVERSE pnl 음수 + fee)
     assert engine.balance < cfg.initial_capital
     assert engine.position is None                          # FORCE_END 후 정리
+
+
+# ============================================================
+# Group H — D-1 min_seed_pct floor 16배 증폭 통합 (1, DESIGN §11 D-1 ✅ 해소)
+# ============================================================
+
+
+def test_min_seed_amplification_floor_scenario() -> None:
+    """``min_seed_pct=0.40`` floor 발동 → R 약속 16배 증폭 통합 검증 (D-1).
+
+    DESIGN §11 D-1 canonical 시나리오 — `risk_pct=0.01` (R 약속 1%) 호출이
+    floor 발동 시 실 손실 노출 최대 **16배 증폭** (10x lev, sl 가격 4%, balance
+    1_000) 통합 검증. PR-3 Stage 1A→1D 단위 검증으로 미진했던 "통합 시나리오
+    16배 trade-off" 본질 검증 (Issue #111).
+
+    산식 (build_risk_plan + cost.apply_costs 정합):
+
+        - 자연 margin = balance × risk_pct / sl_dist_pct / leverage
+                      = 1_000 × 0.01 / 0.04 / 10 = 25 USD (= 2.5% balance)
+        - floor 임계 = balance × min_seed_pct = 1_000 × 0.40 = 400 USD
+        - 25 < 400 → floor 발동 → margin = 400, notional = 4_000 (10× lev)
+        - SL 도달 raw_pnl_pct = -0.04 (LONG, 4% 가격 하락)
+        - slip(NORMAL) + fee 적용 후: lev_pnl ≈ -0.163968 (= -16.40% balance)
+        - clamp 한도 = -size_pct(0.4) = -0.40 → -0.164 > -0.40 → clamp 미발동
+                      (순수 증폭 검증, Stage 1B clamp 영역 분리)
+        - R 약속 = balance × risk_pct = 10 USD = 1%
+        - 증폭 ratio = abs(lev_pnl) / risk_pct ≈ 16.40배
+
+    self-spy on `_open` (plan 캡처) + `_close` (TradeRecord 캡처) — Stage 1D
+    단계 2/3 패턴 정합 (CLAUDE.md self-spy 정책 + mock 0).
+
+    DESIGN.md §8.4 잔존 (D-1) ✅ 해소 + §11 D-1 통합 검증 결과 본문화 정합.
+    """
+    # FIXED_PCT 모드 + fixed_sl_pct=40.0 (ROI %) → sl_dist 가격 변동 4%
+    # (= 40 / 10 / 100). 시나리오 결정론성 ↑ — ATR 모드 합성 OHLCV 의존도 X.
+    cfg = BacktestConfig(
+        initial_capital=1_000.0,
+        leverage=10,
+        risk_pct=0.01,
+        risk_config=TpSlConfig(
+            mode=TpSlMode.FIXED_PCT,
+            fixed_sl_pct=40.0,                              # ROI % → 가격 4%
+            fixed_tp_pcts=[10.0, 20.0, 30.0, 40.0],         # ROI % → 1/2/3/4%
+            trailing_mode=TrailingMode.OFF,                 # SL 단순 트리거
+        ),
+    )
+    engine = BacktestEngine(cfg)
+
+    # self-spy — _open (plan 캡처) + _close (TradeRecord 캡처)
+    captured_plans: list[RiskPlan] = []
+    original_open = engine._open
+
+    def spy_open(*, plan: RiskPlan, ts_ms: int) -> None:
+        captured_plans.append(plan)
+        return original_open(plan=plan, ts_ms=ts_ms)
+
+    engine._open = spy_open                                 # type: ignore[method-assign]
+
+    captured_trades: list[TradeRecord] = []
+    original_close = engine._close
+
+    def spy_close(*, fill: float, ts_ms: int, reason: str) -> TradeRecord:
+        trade = original_close(fill=fill, ts_ms=ts_ms, reason=reason)
+        captured_trades.append(trade)
+        return trade
+
+    engine._close = spy_close                               # type: ignore[method-assign]
+
+    # 진입 — _open_long 헬퍼 (build_risk_plan + _open 위임, spy_open 통과)
+    _open_long(engine, entry=100.0, ts_ms=1_700_000_000_000)
+
+    # (1) D-1 floor 발동 verify — 자연 margin 25 USD < 임계 400 USD → 400 박힘
+    assert len(captured_plans) == 1
+    plan = captured_plans[0]
+    assert plan.position.margin_usd == pytest.approx(400.0)         # 1_000 × 0.40
+    assert plan.position.notional_usd == pytest.approx(4_000.0)     # 400 × 10
+    assert plan.sl_price == pytest.approx(96.0)                     # 100 - 4 (4% drop)
+    sl_dist_pct = (plan.entry_price - plan.sl_price) / plan.entry_price
+    assert sl_dist_pct == pytest.approx(0.04)                       # 가격 변동 4%
+
+    # 다음 1m 봉 — SL 도달 (low ≤ 96) + slip NORMAL 분류 (range 0.42% < 0.5%)
+    # Why: high=96.4 / low=96.0 → (high-low)/close = 0.42% < VOLATILE_THRESHOLD
+    # → NORMAL slip 0.0002 박힘 → canonical 16.40배 증폭 결정론성 보장.
+    engine._last_high = 96.4
+    engine._last_low = 96.0
+    engine._last_close = 96.0
+    trade = engine._check_exits(
+        ts_ms=1_700_000_060_000, open_=96.4, high=96.4, low=96.0,
+    )
+
+    # (2) SL 청산 분기 verify — reason="SL" (tp_hits=0 → BE 분기 아님)
+    assert trade is not None
+    assert captured_trades == [trade]
+    assert trade.direction == "long"
+    assert engine.consec_sl == 1                                    # D-2 SL ++
+
+    # (3) D-1 16배 증폭 본질 verify — pnl ratio (시드 비율) vs risk_pct (R 약속)
+    # 산식: lev_pnl = raw_pnl_pct × notional_pct − fee_loss
+    #     = -0.040192 × 4.0 − 2 × 0.0004 × 4.0 = -0.163968
+    assert trade.pnl == pytest.approx(-0.163968, abs=1e-4)
+    amplification = abs(trade.pnl) / cfg.risk_pct
+    assert amplification == pytest.approx(16.40, abs=0.05)          # canonical 16배 ±0.05
+
+    # (4) clamp 미발동 verify — Stage 1B clamp 영역 분리 (순수 증폭 검증)
+    margin_clamp = -plan.position.margin_usd / cfg.initial_capital  # -0.40
+    assert trade.pnl > margin_clamp                                 # -0.164 > -0.40
+
+    # (5) balance 갱신 verify — 1_000 → 836.03 (R 약속 10 USD 대비 ~16배 손실)
+    assert engine.balance == pytest.approx(836.03, abs=0.1)
+    assert engine.position is None                                  # SL 청산 후 정리

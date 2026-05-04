@@ -751,6 +751,33 @@ def test_log_signal_evaluation_includes_diagnostic_line(caplog) -> None:
     assert "RSI@1H=58.4" in diag
 
 
+def test_apply_live_config_updates_tpsl_fields() -> None:
+    """v0.1.38 — tpsl_mode / tp_allocations / manual_tp_pcts / manual_sl_pct 갱신."""
+    from aurora.core.risk import TpSlMode
+
+    bot = bot_instance.get_instance()
+    bot.apply_live_config({
+        "tpsl_mode": "manual",
+        "tp_allocations": [100.0, 0.0, 0.0, 0.0],  # 단일 TP
+        "manual_tp_pcts": [0.8, 1.5, 2.5, 3.5],
+        "manual_sl_pct": 1.5,
+    })
+    assert bot._tpsl_config.mode == TpSlMode.MANUAL
+    assert bot._tpsl_config.tp_allocations == [100.0, 0.0, 0.0, 0.0]
+    assert bot._tpsl_config.manual_tp_pcts == [0.8, 1.5, 2.5, 3.5]
+    assert bot._tpsl_config.manual_sl_pct == 1.5
+
+
+def test_apply_live_config_invalid_tpsl_mode_silent() -> None:
+    """v0.1.38 — 유효하지 않은 tpsl_mode 는 silent skip (기존 mode 보존)."""
+    from aurora.core.risk import TpSlMode
+
+    bot = bot_instance.get_instance()
+    bot._tpsl_config.mode = TpSlMode.FIXED_PCT
+    bot.apply_live_config({"tpsl_mode": "garbage_value"})
+    assert bot._tpsl_config.mode == TpSlMode.FIXED_PCT  # 보존
+
+
 def test_apply_live_config_partial_dict_only_updates_keys_present() -> None:
     """일부 키만 들어와도 그 키만 갱신 (나머지 보존)."""
     bot = bot_instance.get_instance()

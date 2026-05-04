@@ -233,14 +233,48 @@ class BotInstance:
         if "full_seed" in cfg:
             self._full_seed = bool(cfg["full_seed"])
 
-        # v0.1.33: 적용 결과 dedup key — 같으면 silent (중복 INFO 노이즈 차단)
+        # v0.1.38: TpSlConfig 통합 — tpsl_mode / tp_allocations / manual_*
+        # 다음 진입부터 새 plan 산출에 사용 (현재 보유 포지션 plan 보존).
+        from aurora.core.risk import TpSlMode
+
+        if "tpsl_mode" in cfg:
+            mode_str = str(cfg["tpsl_mode"]).lower()
+            try:
+                self._tpsl_config.mode = TpSlMode(mode_str)
+            except (ValueError, KeyError):
+                pass  # 유효하지 않은 mode 는 silent skip
+        if "tp_allocations" in cfg:
+            allocs = cfg["tp_allocations"]
+            if isinstance(allocs, list) and len(allocs) == 4:
+                try:
+                    self._tpsl_config.tp_allocations = [float(x) for x in allocs]
+                except (ValueError, TypeError):
+                    pass
+        if "manual_tp_pcts" in cfg:
+            tps = cfg["manual_tp_pcts"]
+            if isinstance(tps, list) and len(tps) == 4:
+                try:
+                    self._tpsl_config.manual_tp_pcts = [float(x) for x in tps]
+                except (ValueError, TypeError):
+                    pass
+        if "manual_sl_pct" in cfg:
+            try:
+                self._tpsl_config.manual_sl_pct = float(cfg["manual_sl_pct"])
+            except (ValueError, TypeError):
+                pass
+
+        # v0.1.33 + v0.1.38: 적용 결과 dedup key — 같으면 silent (중복 INFO 노이즈 차단)
         new_key = (
             f"bb={self._strategy_config.use_bollinger}|"
             f"ma={self._strategy_config.use_ma_cross}|"
             f"ichi={self._strategy_config.use_ichimoku}|"
             f"harm={self._strategy_config.use_harmonic}|"
             f"lev={self._leverage}|risk={self._risk_pct:.4f}|"
-            f"full={self._full_seed}"
+            f"full={self._full_seed}|"
+            f"mode={self._tpsl_config.mode.value}|"
+            f"alloc={self._tpsl_config.tp_allocations}|"
+            f"mtp={self._tpsl_config.manual_tp_pcts}|"
+            f"msl={self._tpsl_config.manual_sl_pct:.4f}"
         )
         if new_key == self._last_applied_config_key:
             return
@@ -248,12 +282,13 @@ class BotInstance:
 
         logger.info(
             "BotInstance.apply_live_config: use_bb=%s use_ma=%s use_ichi=%s use_harm=%s "
-            "lev=%d risk_pct=%.4f full_seed=%s",
+            "lev=%d risk_pct=%.4f full_seed=%s | tpsl_mode=%s alloc=%s",
             self._strategy_config.use_bollinger,
             self._strategy_config.use_ma_cross,
             self._strategy_config.use_ichimoku,
             self._strategy_config.use_harmonic,
             self._leverage, self._risk_pct, self._full_seed,
+            self._tpsl_config.mode.value, self._tpsl_config.tp_allocations,
         )
 
     def _compute_diagnostic_line(
@@ -819,14 +854,19 @@ class BotInstance:
                     self._persist_active()
                     return  # 다음 step 부터 진입 평가 분기 진입
 
-                # 3-2. qty sync — 사용자 직접 추가 진입 / 부분 청산 인지 (v0.1.8).
+                # 3-2. qty sync — 사용자 직접 추가 진입 / 부분 청산 인지 (v0.1.8 + v0.1.38).
                 # Why: 봇 기록 _remaining_qty 와 거래소 실제 qty 가 다르면 SL 청산 시
                 # reduce_only 위반 또는 잔여 위험 노출. 보수적으로 min 으로 갱신.
-                if abs(actual.qty - self._executor._remaining_qty) > 1e-6:
+                # v0.1.38: 임계 1e-6 → 1e-3 (0.001 BTC) 상향. Bybit step size 라운딩
+                # (~0.0001~0.001) 차이는 silent — 사용자 직접 거래 (>0.001) 만 WARNING.
+                qty_diff = abs(actual.qty - self._executor._remaining_qty)
+                if qty_diff > 1e-3:
                     logger.warning(
-                        "qty 불일치: 봇 %.4f / 거래소 %.4f → min(봇, 거래소) 로 보수 갱신",
-                        self._executor._remaining_qty, actual.qty,
+                        "qty 불일치: 봇 %.4f / 거래소 %.4f (차이 %.4f) → min 보수 갱신",
+                        self._executor._remaining_qty, actual.qty, qty_diff,
                     )
+                if qty_diff > 1e-6:
+                    # 작은 라운딩 차이 (1e-6~1e-3) 도 min 갱신은 함 (silent)
                     self._executor._remaining_qty = min(
                         self._executor._remaining_qty, actual.qty,
                     )
@@ -995,6 +1035,10 @@ class BotInstance:
             risk_pct=self._risk_pct,
             full_seed=self._full_seed,
         )
+        # v0.1.38: 진입 시점 EMA/BB/RSI 진단 1줄 — 차트와 비교 가능 (사용자 검증용)
+        diag_entry = self._compute_diagnostic_line(df_by_tf, current_price)
+        if diag_entry:
+            logger.info("[진입 진단] %s", diag_entry)
         try:
             await self._executor.open_position(plan, triggered_by=decision.triggered_by)
         except ccxt.InsufficientFunds as e:

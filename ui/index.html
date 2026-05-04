@@ -526,18 +526,54 @@
 
                     <div class="section-title">TP / SL 모드</div>
                     <div class="radio-group">
-                        <input type="radio" name="tpsl-mode" id="tpsl-fixed" value="fixed_pct" checked />
+                        <input type="radio" name="tpsl-mode" id="tpsl-fixed" value="fixed_pct" data-config="tpsl_mode" checked />
                         <label for="tpsl-fixed">Fixed %<span class="mode-sub">레버리지별 자동 ROI</span></label>
 
-                        <input type="radio" name="tpsl-mode" id="tpsl-atr" value="atr" />
+                        <input type="radio" name="tpsl-mode" id="tpsl-atr" value="atr" data-config="tpsl_mode" />
                         <label for="tpsl-atr">ATR Dynamic<span class="mode-sub">변동성 기반 동적</span></label>
 
-                        <input type="radio" name="tpsl-mode" id="tpsl-manual" value="manual" />
+                        <input type="radio" name="tpsl-mode" id="tpsl-manual" value="manual" data-config="tpsl_mode" />
                         <label for="tpsl-manual">Manual %<span class="mode-sub">사용자 직접 입력</span></label>
                     </div>
 
-                    <div class="section-title">분할 익절 (4단계, 합 100)</div>
-                    <div class="metric-card">
+                    <!-- v0.1.38 — Manual % 모드 시 직접 입력 (TP1~4 ROI + SL ROI) -->
+                    <div id="manual-tpsl-block" class="metric-card" style="display:none">
+                        <div class="metric-label">Manual % 직접 입력 (ROI 단위)</div>
+                        <div class="grid grid-cols-2 gap-4 mt-3">
+                            <div class="input-row">
+                                <label class="input-label">TP1 ROI %</label>
+                                <input type="number" class="input-field" id="manual-tp1" value="0.5" min="0.1" max="20" step="0.1" />
+                            </div>
+                            <div class="input-row">
+                                <label class="input-label">TP2 ROI %</label>
+                                <input type="number" class="input-field" id="manual-tp2" value="1.0" min="0.1" max="20" step="0.1" />
+                            </div>
+                            <div class="input-row">
+                                <label class="input-label">TP3 ROI %</label>
+                                <input type="number" class="input-field" id="manual-tp3" value="1.5" min="0.1" max="20" step="0.1" />
+                            </div>
+                            <div class="input-row">
+                                <label class="input-label">TP4 ROI %</label>
+                                <input type="number" class="input-field" id="manual-tp4" value="2.0" min="0.1" max="20" step="0.1" />
+                            </div>
+                            <div class="input-row">
+                                <label class="input-label">SL ROI %</label>
+                                <input type="number" class="input-field" id="manual-sl" value="1.0" min="0.1" max="10" step="0.1" data-config="manual_sl_pct" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- v0.1.38 — TP 분할 모드 토글 (분할 4단계 vs 단일 TP1) -->
+                    <div class="section-title">TP 분할 모드</div>
+                    <div class="radio-group">
+                        <input type="radio" name="tp-split-mode" id="tp-split" value="split" checked />
+                        <label for="tp-split">분할 (4단계)<span class="mode-sub">TP1~4 비율 청산</span></label>
+                        <input type="radio" name="tp-split-mode" id="tp-single" value="single" />
+                        <label for="tp-single">단일 TP<span class="mode-sub">TP1 도달 시 100% 청산</span></label>
+                    </div>
+
+                    <div class="section-title" id="tp-split-title">분할 익절 (4단계, 합 100)</div>
+                    <div class="metric-card" id="tp-split-block">
                         <div class="slider-row">
                             <label class="slider-label">TP1</label>
                             <span class="slider-value" id="tp1-val">25%</span>

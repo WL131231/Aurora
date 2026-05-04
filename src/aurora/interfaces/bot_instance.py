@@ -121,10 +121,13 @@ class BotInstance:
         # 0 = 아직 한 번도 step 실행 X. running 시작 후 첫 step 부터 ms epoch 갱신.
         self._last_step_ts: int = 0
 
-        # v0.1.31: primary TF 봉 닫힘 detection — 매 봉 닫힘 1번만 신호 평가 로그 출력.
-        # _step 은 매 1초 호출이지만 신호 의미는 봉 닫힘 시점에만 변화. primary TF (보통
-        # 15m) 마지막 봉 ts 추적 → 변화 시점에만 logger.info("[신호 평가] ...") 출력.
-        self._last_evaluated_bar_ts: int = 0
+        # v0.1.31 + v0.1.32: 신호 평가 로그 throttle.
+        # - 변화 시 즉시 출력 (카테고리/score 변화)
+        # - 변화 없어도 60초 마다 heartbeat 1줄 (살아있음 표시 + 답답함 해소)
+        # primary TF 봉 닫힘 ts 는 사용 X (15m 면 너무 드뭄, 매 step 평가 흐름 노출이 의도)
+        self._last_evaluated_bar_ts: int = 0  # 호환성 보존 (v0.1.31 호출자 영향 X)
+        self._last_signal_log_key: str = ""    # 직전 평가 dedup key
+        self._last_signal_log_ts: int = 0      # 마지막 로그 출력 ms (heartbeat)
 
         # 거래내역 (v0.1.20) — close_position 마다 ClosedTrade 추가 (rolling 100).
         # GUI "거래내역" 표 표시 + Telegram 알림 + PnL 카드 데이터 source.
@@ -232,21 +235,25 @@ class BotInstance:
         bar_ts: int,
         in_position: bool = False,
     ) -> None:
-        """신호 평가 결과 1줄 요약 로그 (v0.1.31).
+        """신호 평가 결과 1줄 요약 로그 (v0.1.31 + v0.1.32 throttle).
 
-        primary TF 봉 닫힘 시점에만 INFO 출력 — 매 step 출력하면 로그 폭주
-        (1초 당 1줄). 봉 닫힘 시 의미 변화이므로 그때만 충분.
+        v0.1.32 빈도 ↑ — 매 _step 호출에서 본 함수 호출되지만 출력은 throttle:
+            1. 직전 평가와 결과 (카테고리/score/enter) 변화 시 → 즉시 출력
+            2. 변화 없어도 60초 경과 시 → heartbeat 출력 (살아있음 표시)
+            3. 둘 다 아니면 silent — 로그 폭주 방지
 
         형식 예:
-            [신호평가] EMA=L@1H(1.0) | RSI=- | BB=- | MA=- | Ichi=- | Harm=-
-                | score: long=1.0 short=0.0 enter=False (보유X)
+            [신호평가 보유X·진입 평가] EMA=L@1H(1.0) | RSI=- | BB=S@1H(1.5)
+                | MA=- | Ichimoku=- | Harmonic=- | score: long=1.0 short=1.5 | enter=SHORT
 
         Args:
             signals: ``EntrySignal`` list (compose_entry 입력).
             decision: ``CompositeDecision`` (compose_entry 결과).
-            bar_ts: 평가 대상 primary TF 봉 ms epoch.
+            bar_ts: 평가 대상 primary TF 봉 ms epoch (호환성 보존, throttle 에 사용 X).
             in_position: 보유 중인지 (REVERSE 신호 평가 vs 신규 진입 평가 표시).
         """
+        import time as _t
+
         # 카테고리별 신호 그룹핑 — 한 카테고리에 여러 TF 신호 가능 (EMA/RSI/MA 등)
         cat_signals: dict[str, list[str]] = {}
         for sig in signals:
@@ -264,20 +271,34 @@ class BotInstance:
                 parts.append(f"{cat}={'/'.join(cat_signals[cat])}")
             else:
                 parts.append(f"{cat}=-")
+        joined = " | ".join(parts)
 
         ctx = "보유중·REVERSE 평가" if in_position else "보유X·진입 평가"
         if decision.enter and decision.direction is not None:
             verdict = f"enter={decision.direction.value.upper()}"
         else:
             verdict = "enter=False"
-        logger.info(
-            "[신호평가 %s] %s | score: long=%.2f short=%.2f | %s",
-            ctx,
-            " | ".join(parts),
-            decision.long_score,
-            decision.short_score,
-            verdict,
+
+        # dedup key — 컨텍스트 + 신호 분포 + score + 결정. 동일 key 면 변화 X.
+        key = (
+            f"{ctx}|{joined}|"
+            f"L={decision.long_score:.2f}|S={decision.short_score:.2f}|{verdict}"
         )
+        now_ms = int(_t.time() * 1000)
+        changed = key != self._last_signal_log_key
+        elapsed_ms = now_ms - self._last_signal_log_ts
+        # 60초 = heartbeat 주기. 첫 호출 (last_ts=0) 도 즉시 출력 (사용자 시각 피드백)
+        heartbeat = elapsed_ms >= 60_000 or self._last_signal_log_ts == 0
+        if not changed and not heartbeat:
+            return
+
+        suffix = "" if changed else " (heartbeat)"
+        logger.info(
+            "[신호평가 %s] %s | score: long=%.2f short=%.2f | %s%s",
+            ctx, joined, decision.long_score, decision.short_score, verdict, suffix,
+        )
+        self._last_signal_log_key = key
+        self._last_signal_log_ts = now_ms
         self._last_evaluated_bar_ts = bar_ts
 
     def _record_closed(self, closed: ClosedTrade) -> None:
@@ -765,13 +786,12 @@ class BotInstance:
                     ),
                 )
                 cur_dir = self._executor._plan.direction
-                # v0.1.31: 보유 중 REVERSE 평가 결과도 봉 닫힘 시점 로그
+                # v0.1.32: 보유 중 REVERSE 평가도 매 step throttle (변화 + 60초 heartbeat)
                 bar_ts_pos = int(primary_df.index[-1].value // 1_000_000)
-                if bar_ts_pos != self._last_evaluated_bar_ts:
-                    rev_decision = compose_entry(rev_signals)
-                    self._log_signal_evaluation(
-                        rev_signals, rev_decision, bar_ts_pos, in_position=True,
-                    )
+                rev_decision = compose_entry(rev_signals)
+                self._log_signal_evaluation(
+                    rev_signals, rev_decision, bar_ts_pos, in_position=True,
+                )
                 if compose_exit(cur_dir, rev_signals):
                     logger.info("REVERSE 신호 (%s) → 청산 (다음 step 진입 평가)", cur_dir)
                     _, closed = await self._executor.close_position(reason="reverse")
@@ -832,11 +852,10 @@ class BotInstance:
 
         decision = compose_entry(signals)
 
-        # v0.1.31: primary TF 봉 닫힘 시점에만 신호 평가 결과 로그 (06 로그 view 가시화).
-        # _step 매 1초 호출이지만 신호 의미는 봉 닫힘 시점에만 변화 → 봉 ts 변화 감지.
+        # v0.1.32: 매 step 평가 결과를 _log_signal_evaluation 에 전달.
+        # throttle 은 함수 내부 (변화 시 즉시 + 60초 heartbeat) — 봉 닫힘 시점 제약 X.
         bar_ts = int(primary_df.index[-1].value // 1_000_000)
-        if bar_ts != self._last_evaluated_bar_ts:
-            self._log_signal_evaluation(signals, decision, bar_ts, in_position=False)
+        self._log_signal_evaluation(signals, decision, bar_ts, in_position=False)
 
         if not decision.enter or decision.direction is None:
             return

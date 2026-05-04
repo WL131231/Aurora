@@ -695,6 +695,62 @@ async def test_step_updates_last_step_ts() -> None:
     assert ts2 >= ts1
 
 
+def test_apply_live_config_silent_on_unchanged_cfg(caplog) -> None:
+    """v0.1.33 — 같은 cfg 두 번째 호출은 silent (UI debounce 중복 방지)."""
+    import logging
+
+    bot = bot_instance.get_instance()
+    cfg = {"use_bollinger": True, "use_ma_cross": True, "leverage": 10, "risk_pct": 0.01,
+           "full_seed": False, "use_ichimoku": False, "use_harmonic": False}
+
+    caplog.set_level(logging.INFO, logger="aurora.interfaces.bot_instance")
+    bot.apply_live_config(cfg)
+    first_count = sum(1 for r in caplog.records if "apply_live_config" in r.message)
+    bot.apply_live_config(cfg)  # 같은 cfg 재호출
+    second_count = sum(1 for r in caplog.records if "apply_live_config" in r.message)
+
+    assert first_count == 1
+    assert second_count == 1  # 두 번째 호출은 silent (count 안 증가)
+
+
+def test_apply_live_config_logs_again_on_real_change(caplog) -> None:
+    """v0.1.33 — 실제 값 변화 시 다시 로그 출력 (silent 안 됨)."""
+    import logging
+
+    bot = bot_instance.get_instance()
+    caplog.set_level(logging.INFO, logger="aurora.interfaces.bot_instance")
+    bot.apply_live_config({"use_bollinger": False, "leverage": 10})
+    bot.apply_live_config({"use_bollinger": True, "leverage": 10})  # 변화
+
+    count = sum(1 for r in caplog.records if "apply_live_config" in r.message)
+    assert count == 2
+
+
+def test_log_signal_evaluation_includes_diagnostic_line(caplog) -> None:
+    """v0.1.33 — diagnostic 인자 전달 시 [지표진단] 라인 추가 출력."""
+    import logging
+
+    from aurora.core.signal import CompositeDecision
+
+    bot = bot_instance.get_instance()
+    decision = CompositeDecision(enter=False, direction=None, score=0.0,
+                                 long_score=0.0, short_score=0.0)
+
+    caplog.set_level(logging.INFO, logger="aurora.interfaces.bot_instance")
+    bot._log_signal_evaluation(
+        [], decision, bar_ts=1, in_position=False,
+        diagnostic="EMA200@1H=+0.42% | BB@1H[w=1.85%,up=+0.30% lo=-0.55%] | RSI@1H=58.4",
+    )
+
+    msgs = [r.message for r in caplog.records]
+    assert any("[신호평가" in m for m in msgs)
+    assert any("[지표진단]" in m for m in msgs)
+    diag = next(m for m in msgs if "[지표진단]" in m)
+    assert "EMA200@1H=+0.42%" in diag
+    assert "BB@1H" in diag
+    assert "RSI@1H=58.4" in diag
+
+
 def test_apply_live_config_partial_dict_only_updates_keys_present() -> None:
     """일부 키만 들어와도 그 키만 갱신 (나머지 보존)."""
     bot = bot_instance.get_instance()

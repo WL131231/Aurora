@@ -100,11 +100,7 @@
                     <span id="conn-dot" class="inline-block w-1.5 h-1.5 rounded-full bg-zinc-600"></span>
                     <span id="conn-label">CONNECTING...</span>
                 </div>
-                <div class="mb-2"><span id="version-label">v—</span> · MODE <span id="mode-label">—</span></div>
-                <button id="btn-ui-update" class="text-[10px] tracking-[0.2em] text-zinc-500 hover:text-zinc-200 transition-colors cursor-pointer">
-                    🔄 UI 업데이트
-                </button>
-                <div id="ui-update-msg" class="text-[10px] mt-1 text-zinc-600"></div>
+                <div><span id="version-label">v—</span> · MODE <span id="mode-label">—</span></div>
             </div>
         </aside>
 
@@ -125,6 +121,11 @@
                         <div class="metric-card">
                             <div class="metric-label">상태</div>
                             <div id="m-status" class="status-badge badge-stopped">중지</div>
+                            <!-- v0.1.29: 봇 활동 indicator — running 시 매 step 마다 펄스, stale 시 정체 표시 -->
+                            <div id="m-activity" class="bot-activity" style="display:none">
+                                <span class="activity-dot"></span>
+                                <span class="activity-text" id="m-activity-text">평가 중</span>
+                            </div>
                             <div class="metric-line"></div>
                         </div>
                         <div class="metric-card">

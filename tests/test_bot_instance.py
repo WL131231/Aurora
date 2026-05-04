@@ -512,6 +512,23 @@ def test_apply_live_config_updates_leverage_and_risk_pct() -> None:
     assert bot._full_seed is True
 
 
+@pytest.mark.asyncio
+async def test_step_updates_last_step_ts() -> None:
+    """v0.1.29 — _step 호출 직후 last_step_ts 갱신 (configure 안 됐어도)."""
+    bot = bot_instance.get_instance()
+    assert bot.last_step_ts == 0  # 초기값
+
+    # configure 안 한 상태에서도 _step 호출 → last_step_ts 갱신 (살아있음 표시)
+    await bot._step()
+    ts1 = bot.last_step_ts
+    assert ts1 > 0
+
+    # 다시 호출 → 더 큰 ts (또는 같음)
+    await bot._step()
+    ts2 = bot.last_step_ts
+    assert ts2 >= ts1
+
+
 def test_apply_live_config_partial_dict_only_updates_keys_present() -> None:
     """일부 키만 들어와도 그 키만 갱신 (나머지 보존)."""
     bot = bot_instance.get_instance()

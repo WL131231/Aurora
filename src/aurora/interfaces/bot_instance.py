@@ -116,6 +116,11 @@ class BotInstance:
         # 형식: {"EMA": "long" | "short" | None, "RSI": ..., "BB": ..., ...}
         self._last_indicator_status: dict[str, str | None] = {}
 
+        # v0.1.29: 매 _step 호출 직후 갱신 — UI "봇이 살아있는지 / 평가 중인지" 가시성.
+        # /status 응답에 last_step_ts 노출 → 프론트에서 last_step_ago 계산.
+        # 0 = 아직 한 번도 step 실행 X. running 시작 후 첫 step 부터 ms epoch 갱신.
+        self._last_step_ts: int = 0
+
         # 거래내역 (v0.1.20) — close_position 마다 ClosedTrade 추가 (rolling 100).
         # GUI "거래내역" 표 표시 + Telegram 알림 + PnL 카드 데이터 source.
         # v0.1.25: 디스크에서 영속화된 record 복원 → 봇 재시작 후 표 / 통계 유지.
@@ -259,6 +264,15 @@ class BotInstance:
             list[ClosedTrade] — 신→구 (가장 최근 trade 가 마지막).
         """
         return list(self._closed_trades)
+
+    @property
+    def last_step_ts(self) -> int:
+        """매 _step 호출 직후 갱신되는 타임스탬프 (ms epoch). v0.1.29.
+
+        UI 가 ``last_step_ago = now - last_step_ts`` 으로 봇 활동 여부 표시.
+        running 중인데 last_step_ts 가 stale (10초 이상) 이면 "정체" 인디케이터.
+        """
+        return self._last_step_ts
 
     @property
     def last_indicator_status(self) -> dict[str, str | None]:
@@ -585,6 +599,11 @@ class BotInstance:
 
         configure 안 됐으면 즉시 return (noop).
         """
+        # v0.1.29: 봇 활동 indicator — 매 step 진입 직후 ts 갱신.
+        # configure 안 됐어도 _run_loop 가 호출하므로 살아있음 표시.
+        import time as _t
+        self._last_step_ts = int(_t.time() * 1000)
+
         if self._cache is None or self._executor is None or self._client is None:
             return
 

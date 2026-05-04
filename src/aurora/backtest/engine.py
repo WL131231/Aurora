@@ -36,7 +36,7 @@ from aurora.core.risk import (
     TpSlMode,
     build_risk_plan,
     sl_pct_for_leverage,
-    tp_pct_range_for_leverage,
+    tp_pct_4_levels_for_leverage,
     update_trailing_sl,
 )
 from aurora.core.signal import compose_entry, compose_exit
@@ -83,9 +83,9 @@ class BacktestConfig:
             동작.
         risk_config: ``TpSlConfig`` (mode + tp/sl pcts + trailing). ``None`` 이면
             ``BacktestEngine.__init__`` 시점에 ``sl_pct_for_leverage`` /
-            ``tp_pct_range_for_leverage`` 그래디언트 + D-3 등간격 분할로 자동
-            산출 → ``self._risk_config`` 박음 (config 인스턴스 mutate X — 외부
-            재사용 안전).
+            ``tp_pct_4_levels_for_leverage`` (v0.1.13 신규, D-3 등간격 4 분할)
+            그래디언트로 자동 산출 → ``self._risk_config`` 박음 (config 인스턴스
+            mutate X — 외부 재사용 안전).
         strategy_config: ``StrategyConfig`` (EMA / RSI Div / Selectable 지표
             on/off + 파라미터). ``None`` 이면 ``__init__`` 시점에
             ``StrategyConfig()`` 디폴트 (Fixed only) 자동 산출 → ``self.
@@ -184,24 +184,16 @@ class BacktestEngine:
         """
         self.config = config
 
-        # risk_config 자동 산출 (D-3 등간격 + sl_pct_for_leverage / tp_pct_range)
-        # — config mutate X 보장 위해 self._risk_config 별도 박음.
+        # risk_config 자동 산출 — sl_pct_for_leverage + tp_pct_4_levels_for_leverage
+        # (v0.1.13 신규, D-3 등간격 4 분할). config mutate X 보장 위해 self.
+        # _risk_config 별도 박음.
         if config.risk_config is not None:
             self._risk_config: TpSlConfig = config.risk_config
         else:
-            sl_pct = sl_pct_for_leverage(config.leverage)
-            tp_min, tp_max = tp_pct_range_for_leverage(config.leverage)
-            tp_range = tp_max - tp_min
-            fixed_tp_pcts = [
-                tp_min,
-                tp_min + tp_range / 3.0,
-                tp_min + 2.0 * tp_range / 3.0,
-                tp_max,                                  # D-3 등간격 4 분할
-            ]
             self._risk_config = TpSlConfig(
                 mode=TpSlMode.FIXED_PCT,
-                fixed_tp_pcts=fixed_tp_pcts,
-                fixed_sl_pct=sl_pct,
+                fixed_tp_pcts=tp_pct_4_levels_for_leverage(config.leverage),
+                fixed_sl_pct=sl_pct_for_leverage(config.leverage),
             )
 
         # strategy_config 디폴트 — None 시 StrategyConfig() (Fixed only)

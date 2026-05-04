@@ -220,9 +220,25 @@
                         </div>
                     </div>
 
-                    <div class="section-title">결과 차트</div>
-                    <div class="metric-card" style="height: 300px; display:flex; align-items:center; justify-content:center">
-                        <p class="text-zinc-600 italic">차트 라이브러리 미통합 — 후속 PR (Lightweight Charts 권장)</p>
+                    <div class="section-title">거래내역 (P&amp;L)</div>
+                    <div class="metric-card" style="padding: 0">
+                        <table class="trades-table">
+                            <thead>
+                                <tr>
+                                    <th>Market</th>
+                                    <th>Instrument</th>
+                                    <th>Entry Price</th>
+                                    <th>Traded Price</th>
+                                    <th>Order Qty</th>
+                                    <th>Trade Type</th>
+                                    <th>Realized P&amp;L</th>
+                                    <th>Trade Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="trades-tbody">
+                                <tr><td colspan="8" class="trades-empty">거래내역 없음</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </section>

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 
 from aurora.config import settings
 from aurora.core.risk import TpSlConfig, build_risk_plan
@@ -39,7 +40,7 @@ from aurora.core.strategy import (
 )
 from aurora.exchange.base import ExchangeClient
 from aurora.exchange.data import MultiTfCache
-from aurora.exchange.execution import Executor
+from aurora.exchange.execution import ClosedTrade, Executor
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,10 @@ class BotInstance:
         # 형식: {"EMA": "long" | "short" | None, "RSI": ..., "BB": ..., ...}
         self._last_indicator_status: dict[str, str | None] = {}
 
+        # 거래내역 (v0.1.20) — close_position 마다 ClosedTrade 추가 (rolling 100).
+        # GUI "거래내역" 표 표시 + Telegram 알림 + PnL 카드 데이터 source.
+        self._closed_trades: deque[ClosedTrade] = deque(maxlen=100)
+
         self._symbol: str = _DEFAULT_SYMBOL
         self._timeframes: list[str] = list(_DEFAULT_TIMEFRAMES)
         self._strategy_config: StrategyConfig = StrategyConfig()
@@ -152,6 +157,15 @@ class BotInstance:
         True 면 Aurora 가 진입 skip 중. UI 알림 표시 / API 응답 노출용.
         """
         return self._external_position
+
+    @property
+    def closed_trades(self) -> list:
+        """거래내역 list — 최근 100개 (rolling). UI "거래내역" 표 / PnL 카드 데이터.
+
+        Returns:
+            list[ClosedTrade] — 신→구 (가장 최근 trade 가 마지막).
+        """
+        return list(self._closed_trades)
 
     @property
     def last_indicator_status(self) -> dict[str, str | None]:
@@ -452,9 +466,10 @@ class BotInstance:
                     )
                     if partial_qty > 1e-9:
                         try:
-                            await self._executor.close_position(
+                            _, closed = await self._executor.close_position(
                                 qty=partial_qty, reason="tp_partial",
                             )
+                            self._closed_trades.append(closed)
                             logger.info(
                                 "TP%d 부분 청산: qty=%.6f (allocation=%.1f%%)",
                                 new_tp_idx + 1, partial_qty, allocations[new_tp_idx],
@@ -466,7 +481,8 @@ class BotInstance:
             if self._executor.has_position:
                 reason = self._executor.should_close(current_price)
                 if reason is not None:
-                    await self._executor.close_position(reason=reason)
+                    _, closed = await self._executor.close_position(reason=reason)
+                    self._closed_trades.append(closed)
                     return
 
             # 3-6. REVERSE 신호 (v0.1.8) — 보유 중 반대 방향 신호 → 청산.
@@ -487,7 +503,8 @@ class BotInstance:
                 cur_dir = self._executor._plan.direction
                 if compose_exit(cur_dir, rev_signals):
                     logger.info("REVERSE 신호 (%s) → 청산 (다음 step 진입 평가)", cur_dir)
-                    await self._executor.close_position(reason="reverse")
+                    _, closed = await self._executor.close_position(reason="reverse")
+                    self._closed_trades.append(closed)
             return
 
         # 4. 외부 포지션 detect (v0.1.9 — 신호 평가 전으로 위치 변경)

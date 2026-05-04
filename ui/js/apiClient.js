@@ -53,6 +53,10 @@ const status = () => _request("/status");
 
 const getPositions = () => _request("/positions");
 
+// ─── Trades (거래내역 v0.1.20) ────────────────────
+
+const getTrades = (limit = 50) => _request(`/trades?limit=${limit}`);
+
 // ─── Config ─────────────────────────────────────────
 
 const getConfig = () => _request("/config");
@@ -134,6 +138,7 @@ window.AuroraApi = {
     health,
     status,
     getPositions,
+    getTrades,
     getConfig,
     updateConfig,
     startBot,

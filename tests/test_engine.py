@@ -240,12 +240,11 @@ def test_check_exits_long_gap_fill_unfavorable_sl() -> None:
     open_ = sl_price - 1.0
     low = sl_price - 3.0
     high = sl_price - 0.5
-    close = sl_price - 1.0
     engine._last_high = high
     engine._last_low = low
-    engine._last_close = close
+    engine._last_close = sl_price - 1.0
     trade = engine._check_exits(
-        ts_ms=1_700_000_010_000, open_=open_, high=high, low=low, close=close,
+        ts_ms=1_700_000_010_000, open_=open_, high=high, low=low,
     )
     assert trade is not None
     # gap-fill 적용 → exit_price 가 SL 보다 명확히 아래 (open 부근 + slip)

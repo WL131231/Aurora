@@ -308,7 +308,6 @@ class BacktestEngine:
                 open_=float(bar_1m["open"]),
                 high=self._last_high,
                 low=self._last_low,
-                close=self._last_close,
             )
             # 4. 청산 X 시 high/low 갱신 — 다음 봉 트레일링 입력
             if record is None and self.position is not None:
@@ -616,7 +615,6 @@ class BacktestEngine:
         open_: float,
         high: float,
         low: float,
-        close: float,
     ) -> TradeRecord | None:
         """매 1 분봉 SL/TP 도달 검사 — gap-fill 적용 + 4 단계 분할 일반화.
 
@@ -637,13 +635,14 @@ class BacktestEngine:
             open_: 1 분봉 open.
             high: 1 분봉 high.
             low: 1 분봉 low.
-            close: 1 분봉 close (의도적으로 매개변수 — 호출자 OHLC 4 인자 일관성.
-                slip 산출은 ``self._last_*`` 사용, ``step()`` 진입점에서 갱신).
+
+        Note:
+            close 는 매개변수에서 제외 — slip 산출은 ``self._last_close``
+            (``step()`` 진입점 L283-285 갱신) 사용. 장수+WooJae 합의 2026-05-04.
 
         Returns:
             청산 발생 시 ``TradeRecord``, 미청산이면 ``None``.
         """
-        del close   # 함수 내부 미사용 — slip 은 self._last_* 사용 (step 갱신)
         if self.position is None:
             return None
         p = self.position

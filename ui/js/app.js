@@ -1361,6 +1361,69 @@ const Logs = (() => {
             setStatus(`화면 비움 (버퍼 ${buffer.length}줄 유지)`, true);
         });
 
+        // v0.1.35 — 로그 복사: 보이는 줄 (필터 적용된 visible) 만 텍스트로 클립보드.
+        // Why: pywebview 환경에서 마우스 드래그 select 가 직관적이지 않을 수 있음 →
+        // 한 클릭 복사 + ts/level/msg 탭 구분 → 외부 (텔레그램/이슈) 붙여넣기 깔끔.
+        function _formatLogText() {
+            const lines = Array.from(box.querySelectorAll(".log-line"))
+                .filter((el) => el.style.display !== "none");
+            return lines.map((el) => {
+                const ts = el.querySelector(".log-line-ts")?.textContent || "";
+                const lvl = (el.querySelector(".log-line-level")?.textContent || "").trim();
+                const msg = el.querySelector(".log-line-msg")?.textContent || "";
+                return `${ts}\t${lvl}\t${msg}`;
+            }).join("\n");
+        }
+
+        $("log-copy")?.addEventListener("click", async () => {
+            const text = _formatLogText();
+            if (!text) {
+                setStatus("복사 X — 표시된 로그 없음", false);
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(text);
+                const lineCount = text.split("\n").length;
+                setStatus(`✓ 클립보드 복사 (${lineCount}줄)`, true);
+            } catch (e) {
+                // 권한 거부 / 비-secure context — fallback: 임시 textarea
+                const ta = document.createElement("textarea");
+                ta.value = text;
+                ta.style.position = "fixed";
+                ta.style.left = "-9999px";
+                document.body.appendChild(ta);
+                ta.select();
+                let ok = false;
+                try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
+                document.body.removeChild(ta);
+                if (ok) {
+                    setStatus(`✓ 클립보드 복사 (${text.split("\n").length}줄)`, true);
+                } else {
+                    setStatus(`복사 실패: ${e.message}`, false);
+                }
+            }
+        });
+
+        $("log-download")?.addEventListener("click", () => {
+            const text = _formatLogText();
+            if (!text) {
+                setStatus("저장 X — 표시된 로그 없음", false);
+                return;
+            }
+            const ts = new Date();
+            const fname = `aurora_log_${ts.getFullYear()}${String(ts.getMonth()+1).padStart(2,"0")}${String(ts.getDate()).padStart(2,"0")}_${String(ts.getHours()).padStart(2,"0")}${String(ts.getMinutes()).padStart(2,"0")}.txt`;
+            const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = fname;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            setStatus(`✓ 저장됨 (${fname})`, true);
+        });
+
         // 초기 catch-up: /logs 폴링으로 최근 100 줄 가져오고, 자동 토글 켜져있으면 LIVE 시작.
         pollOnce(100).then(() => {
             if ($autoStream()?.checked) startLive();

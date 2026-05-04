@@ -30,7 +30,7 @@ import logging
 
 from aurora.config import settings
 from aurora.core.risk import TpSlConfig, build_risk_plan
-from aurora.core.signal import compose_entry
+from aurora.core.signal import compose_entry, compose_exit
 from aurora.core.strategy import (
     StrategyConfig,
     detect_ema_touch,
@@ -367,13 +367,10 @@ class BotInstance:
             return
         current_price = float(primary_df["close"].iloc[-1])
 
-        # 3. 활성 포지션 — 트레일링 + 청산 검사 (진입 평가 X)
-        # Why: 동시에 진입 + 청산 평가하면 같은 봉에서 close + open 가능.
-        # Aurora 정책 (페어당 1개) 위반 방지 위해 분기 mutually exclusive.
+        # 3. 활성 포지션 — 트레일링 + 청산 + REVERSE 검사 (진입 평가는 분기 별)
+        # Aurora 정책 (페어당 1개) — 보유 중엔 SL/TP/REVERSE 청산만, 신규 진입 X.
         if self._executor.has_position:
-            # 거래소 측 sync — 사용자 직접 청산 / liquidation 감지.
-            # Why: 봇 _plan 살아있는데 거래소엔 없으면 has_position 영원히 True →
-            # 트레일링만 돌고 신규 진입 평가 안 함 → 봇 멈춤 (v0.1.6 검증).
+            # 3-1. 거래소 측 sync — 사용자 직접 청산 / liquidation 감지 (v0.1.7).
             actual = await self._client.fetch_position(self._symbol)
             if actual is None:
                 logger.info(
@@ -382,11 +379,78 @@ class BotInstance:
                 )
                 self._executor.reset_position()
                 return  # 다음 step 부터 진입 평가 분기 진입
-            # 정상 트레일링 + 청산
+
+            # 3-2. qty sync — 사용자 직접 추가 진입 / 부분 청산 인지 (v0.1.8).
+            # Why: 봇 기록 _remaining_qty 와 거래소 실제 qty 가 다르면 SL 청산 시
+            # reduce_only 위반 또는 잔여 위험 노출. 보수적으로 min 으로 갱신.
+            if abs(actual.qty - self._executor._remaining_qty) > 1e-6:
+                logger.warning(
+                    "qty 불일치: 봇 %.4f / 거래소 %.4f → min(봇, 거래소) 로 보수 갱신",
+                    self._executor._remaining_qty, actual.qty,
+                )
+                self._executor._remaining_qty = min(
+                    self._executor._remaining_qty, actual.qty,
+                )
+                if self._executor._remaining_qty <= 1e-9:
+                    # 거래소 측 0 (사용자 전량 청산) — reset
+                    self._executor.reset_position()
+                    return
+
+            # 3-3. 트레일링 SL 갱신 + tp_hits 카운트
+            prev_tp_hits = self._executor._tp_hits
             await self._executor.update_trailing_sl(current_price)
-            reason = self._executor.should_close(current_price)
-            if reason is not None:
-                await self._executor.close_position(reason=reason)
+
+            # 3-4. TP 단계별 부분 청산 (v0.1.8) — tp_hits 변화 감지.
+            # tp_hits 0→1: 25% 청산, 1→2: 25%, 2→3: 25%, 3→4: tp_full (should_close).
+            # Why: 백테스트 엔진과 라이브 동작 일치 (PF 괴리 방지).
+            if self._executor._tp_hits > prev_tp_hits and self._executor.has_position:
+                new_tp_idx = self._executor._tp_hits - 1  # 새로 도달한 단계 (0-indexed)
+                allocations = self._tpsl_config.tp_allocations
+                # 마지막 단계는 tp_full 이 처리 — partial 은 마지막 직전까지만
+                if 0 <= new_tp_idx < len(allocations) - 1:
+                    entry_qty = self._executor._plan.position.coin_amount
+                    partial_qty = min(
+                        entry_qty * (allocations[new_tp_idx] / 100.0),
+                        self._executor._remaining_qty,
+                    )
+                    if partial_qty > 1e-9:
+                        try:
+                            await self._executor.close_position(
+                                qty=partial_qty, reason="tp_partial",
+                            )
+                            logger.info(
+                                "TP%d 부분 청산: qty=%.6f (allocation=%.1f%%)",
+                                new_tp_idx + 1, partial_qty, allocations[new_tp_idx],
+                            )
+                        except RuntimeError as e:
+                            logger.warning("TP 부분 청산 실패: %s", e)
+
+            # 3-5. SL / tp_full 청산 (포지션 살아있으면)
+            if self._executor.has_position:
+                reason = self._executor.should_close(current_price)
+                if reason is not None:
+                    await self._executor.close_position(reason=reason)
+                    return
+
+            # 3-6. REVERSE 신호 (v0.1.8) — 보유 중 반대 방향 신호 → 청산.
+            # Why: 백테스트 D-24 정합 (engine.py L353). 라이브 누락 시 PF 괴리.
+            if self._executor.has_position:
+                rev_signals = []
+                rev_signals.extend(detect_ema_touch(df_by_tf, self._strategy_config))
+                df_1h = df_by_tf.get("1H")
+                if df_1h is not None and not df_1h.empty:
+                    rev_signals.extend(
+                        detect_rsi_divergence(df_1h, self._strategy_config),
+                    )
+                rev_signals.extend(
+                    evaluate_selectable(
+                        df_by_tf, self._strategy_config, symbol=self._symbol,
+                    ),
+                )
+                cur_dir = self._executor._plan.direction
+                if compose_exit(cur_dir, rev_signals):
+                    logger.info("REVERSE 신호 (%s) → 청산 (다음 step 진입 평가)", cur_dir)
+                    await self._executor.close_position(reason="reverse")
             return
 
         # 4. 진입 신호 평가 (무포지션)

@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 # 청산 사유 타입 — should_close 반환값 + close_position 인자 통일
-CloseReason = Literal["sl", "tp_partial", "tp_full", "manual", "exit_signal"]
+CloseReason = Literal["sl", "tp_partial", "tp_full", "manual", "exit_signal", "reverse"]
 
 
 class Executor:

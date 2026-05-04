@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aurora Launcher</title>
+    <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+    <div class="aurora-bg">
+        <div class="aurora-band band-1"></div>
+        <div class="aurora-band band-2"></div>
+        <div class="aurora-band band-3"></div>
+    </div>
+
+    <main class="launcher">
+        <header class="launcher-header">
+            <div class="logo-block">
+                <div class="logo-mark"></div>
+                <h1>AURORA</h1>
+            </div>
+            <div class="version-info">
+                <div>설치됨: <span id="local-ver">—</span></div>
+                <div>최신: <span id="latest-ver">—</span></div>
+            </div>
+        </header>
+
+        <section class="status-area">
+            <div id="status-msg">시작 중...</div>
+        </section>
+
+        <section class="actions">
+            <button id="btn-check" class="btn btn-secondary">🔄 업데이트 체크</button>
+            <button id="btn-launch" class="btn btn-primary">▶ Aurora 시작</button>
+        </section>
+
+        <section class="log-area">
+            <div class="log-title">로그</div>
+            <ul id="log-list"></ul>
+        </section>
+
+        <footer class="launcher-footer">
+            <span>Launcher v<span id="launcher-ver">—</span></span>
+        </footer>
+    </main>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

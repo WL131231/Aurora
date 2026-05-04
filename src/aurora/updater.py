@@ -72,6 +72,15 @@ def _is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+def _launched_from_launcher() -> bool:
+    """Aurora-launcher 가 띄운 본체인지 — env ``AURORA_FROM_LAUNCHER=1`` 마커.
+
+    Why: launcher 가 swap 책임을 인계 받은 환경에서는 본체 자기-swap 중복 X.
+    direct 실행 (사용자가 본체 .exe 더블클릭) 시 자기-swap 그대로 작동 — fallback.
+    """
+    return os.environ.get("AURORA_FROM_LAUNCHER") == "1"
+
+
 def _parse_version(raw: str) -> tuple[int, ...]:
     """``"v0.1.0"`` → ``(0, 1, 0)`` — semantic 비교용.
 
@@ -162,6 +171,11 @@ def apply_pending_update() -> bool:
 
     if platform.system() != "Windows":
         # macOS .app swap 은 본 모듈 미지원 — 사용자가 release 페이지 수동 다운로드
+        return False
+
+    # Launcher 가 띄운 본체면 swap 책임 인계 — 자기-swap skip (중복 방지).
+    if _launched_from_launcher():
+        logger.debug("apply_pending_update: launcher 사용 환경 — 본체 자기-swap skip")
         return False
 
     exe = _exe_path()
@@ -348,8 +362,12 @@ def start_background_check() -> None:
     """백그라운드 thread 에서 update check + 다운로드 실행 — main.py 가 호출.
 
     Daemon thread 라 메인 종료 시 같이 죽음 (다운로드 진행 중이면 부분 파일 정리).
+    Launcher 환경에서는 launcher 가 책임 인계 — skip.
     """
     if not _is_frozen():
         return  # dev 에서는 시동 비용 없음
+    if _launched_from_launcher():
+        logger.debug("start_background_check: launcher 사용 환경 — skip")
+        return
     t = threading.Thread(target=_check_and_download_sync, daemon=True, name="updater")
     t.start()

@@ -203,3 +203,83 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Launcher 미니 .exe — 사용자가 launcher 만 다운받아 본체 자동 업데이트.
+  # 본체 (Aurora.exe) 의 자기-swap race condition 회피 + 원신 런처 스타일 UX.
+  build-launcher:
+    name: Build Launcher (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset_name: Aurora-launcher.exe
+            artifact_path: dist/Aurora-launcher.exe
+          - os: macos-latest
+            asset_name: Aurora-launcher-macOS.zip
+            artifact_path: dist/Aurora-launcher-macOS.zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        id: setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install minimal deps (pywebview + pyinstaller)
+        shell: bash
+        run: |
+          PY="${{ steps.setup.outputs.python-path }}"
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install pywebview pyinstaller
+
+      - name: Build Aurora-launcher
+        shell: bash
+        run: |
+          "${{ steps.setup.outputs.python-path }}" scripts/build_launcher.py
+
+      - name: Verify Windows launcher
+        if: matrix.os == 'windows-latest'
+        run: |
+          if (-not (Test-Path "dist/Aurora-launcher.exe")) {
+              Write-Error "dist/Aurora-launcher.exe 생성 실패"
+              exit 1
+          }
+          $size = (Get-Item "dist/Aurora-launcher.exe").Length / 1MB
+          Write-Host "Aurora-launcher.exe size: $([math]::Round($size, 1)) MB"
+        shell: pwsh
+
+      - name: Verify + zip macOS launcher
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          if [ ! -d "dist/Aurora-launcher.app" ] && [ ! -f "dist/Aurora-launcher" ]; then
+              echo "macOS launcher artifact missing"
+              ls -la dist/
+              exit 1
+          fi
+          cd dist
+          if [ -d "Aurora-launcher.app" ]; then
+              zip -r -y Aurora-launcher-macOS.zip Aurora-launcher.app
+          else
+              zip -y Aurora-launcher-macOS.zip Aurora-launcher
+          fi
+
+      - name: Attach launcher to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact_path }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

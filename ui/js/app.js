@@ -913,6 +913,36 @@ async function loadConfigToToggles() {
                 if (meta) meta.textContent = isSelected ? "SELECTED" : "—";
             });
         }
+        // v0.1.38 — tp_allocations 4 슬라이더 복원 + 단일 모드 자동 감지
+        if (Array.isArray(cfg.tp_allocations) && cfg.tp_allocations.length === 4) {
+            const allocs = cfg.tp_allocations;
+            // [100, 0, 0, 0] = 단일 모드 — 토글 자동 set
+            const isSingle = (allocs[0] === 100 && allocs[1] === 0 && allocs[2] === 0 && allocs[3] === 0);
+            const singleRadio = document.getElementById("tp-single");
+            const splitRadio = document.getElementById("tp-split");
+            if (isSingle && singleRadio) {
+                singleRadio.checked = true;
+            } else if (splitRadio) {
+                splitRadio.checked = true;
+                ["tp1", "tp2", "tp3", "tp4"].forEach((id, i) => {
+                    const el = document.getElementById(id);
+                    if (el) {
+                        el.value = String(allocs[i]);
+                        el.dispatchEvent(new Event("input"));
+                    }
+                });
+            }
+            if (typeof _applyTpSplitModeUI === "function") _applyTpSplitModeUI();
+        }
+        // v0.1.38 — manual_tp_pcts 4 입력 복원
+        if (Array.isArray(cfg.manual_tp_pcts) && cfg.manual_tp_pcts.length === 4) {
+            ["manual-tp1", "manual-tp2", "manual-tp3", "manual-tp4"].forEach((id, i) => {
+                const el = document.getElementById(id);
+                if (el) el.value = String(cfg.manual_tp_pcts[i]);
+            });
+        }
+        // v0.1.38 — Manual % 모드 block show/hide (cfg.tpsl_mode 따라)
+        if (typeof _applyTpslModeUI === "function") _applyTpslModeUI();
     } catch (_) {
         /* 미연결 시 default 유지 */
     }
@@ -998,6 +1028,26 @@ async function _collectAndSaveConfig() {
     if (firstSelected) {
         cfg.primary_symbol = `${firstSelected.dataset.pair}:USDT`;
     }
+
+    // v0.1.38 — tp_allocations 4 슬라이더 합쳐서 list 로 보냄.
+    // TP 분할 모드 = "단일" 시 [100, 0, 0, 0] 강제 (UI 슬라이더 값 무시).
+    const splitMode = document.querySelector('input[name="tp-split-mode"]:checked')?.value;
+    if (splitMode === "single") {
+        cfg.tp_allocations = [100.0, 0.0, 0.0, 0.0];
+    } else {
+        const tp1 = parseFloat(document.getElementById("tp1")?.value || "25");
+        const tp2 = parseFloat(document.getElementById("tp2")?.value || "25");
+        const tp3 = parseFloat(document.getElementById("tp3")?.value || "25");
+        const tp4 = parseFloat(document.getElementById("tp4")?.value || "25");
+        cfg.tp_allocations = [tp1, tp2, tp3, tp4];
+    }
+
+    // v0.1.38 — manual_tp_pcts 4 입력 합쳐서 list 로 (Manual % 모드 시 사용)
+    const mtp1 = parseFloat(document.getElementById("manual-tp1")?.value || "0.5");
+    const mtp2 = parseFloat(document.getElementById("manual-tp2")?.value || "1.0");
+    const mtp3 = parseFloat(document.getElementById("manual-tp3")?.value || "1.5");
+    const mtp4 = parseFloat(document.getElementById("manual-tp4")?.value || "2.0");
+    cfg.manual_tp_pcts = [mtp1, mtp2, mtp3, mtp4];
     try {
         await Api.updateConfig(cfg);
         if (msg) {
@@ -1026,6 +1076,54 @@ document.querySelectorAll("[data-config]").forEach((input) => {
 // 페어 카드 click 도 라이브 저장 트리거
 document.querySelectorAll(".pair-card").forEach((card) => {
     card.addEventListener("click", saveLiveConfig);
+});
+
+// v0.1.38 — TP 분할 모드 토글 (분할 4단계 vs 단일 TP1)
+function _applyTpSplitModeUI() {
+    const mode = document.querySelector('input[name="tp-split-mode"]:checked')?.value;
+    const splitBlock = document.getElementById("tp-split-block");
+    const splitTitle = document.getElementById("tp-split-title");
+    if (!splitBlock) return;
+    if (mode === "single") {
+        // 단일 TP — 슬라이더 숨김 + 안내 텍스트
+        splitBlock.style.display = "none";
+        if (splitTitle) splitTitle.style.display = "none";
+    } else {
+        splitBlock.style.display = "";
+        if (splitTitle) splitTitle.style.display = "";
+    }
+}
+document.querySelectorAll('input[name="tp-split-mode"]').forEach((radio) => {
+    radio.addEventListener("change", () => {
+        _applyTpSplitModeUI();
+        saveLiveConfig();
+    });
+});
+_applyTpSplitModeUI();  // 초기 상태 반영
+
+// v0.1.38 — TP/SL 모드 토글 (Manual % 시 직접 입력 block show/hide)
+function _applyTpslModeUI() {
+    const mode = document.querySelector('input[name="tpsl-mode"]:checked')?.value;
+    const manualBlock = document.getElementById("manual-tpsl-block");
+    if (!manualBlock) return;
+    manualBlock.style.display = (mode === "manual") ? "" : "none";
+}
+document.querySelectorAll('input[name="tpsl-mode"]').forEach((radio) => {
+    radio.addEventListener("change", () => {
+        _applyTpslModeUI();
+        // saveLiveConfig 는 data-config="tpsl_mode" change 이벤트로 자동 호출됨
+    });
+});
+_applyTpslModeUI();  // 초기 상태 반영
+
+// Manual % 입력 변경 시 saveLiveConfig 트리거 (data-config 없는 input 이라 수동 연결)
+["manual-tp1", "manual-tp2", "manual-tp3", "manual-tp4"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("input", saveLiveConfig);
+});
+
+// 분할 익절 슬라이더 (data-config 없음, tp_allocations 로 묶어 전송)
+["tp1", "tp2", "tp3", "tp4"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("input", saveLiveConfig);
 });
 
 document.getElementById("btn-save-config")?.addEventListener("click", async () => {

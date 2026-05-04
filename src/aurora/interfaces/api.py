@@ -102,6 +102,16 @@ class ConfigDTO(BaseModel):
     risk_pct: float = 0.01
     full_seed: bool = False
 
+    # ===== TP/SL 통합 (v0.1.38) =====
+    # tpsl_mode: "fixed_pct" (자동 그래디언트 — 레버리지별 ROI), "atr" (변동성),
+    #            "manual" (사용자 직접 입력)
+    tpsl_mode: str = "fixed_pct"
+    # tp_allocations: 4단계 청산 비율 (합 100). 단일 TP = [100, 0, 0, 0].
+    tp_allocations: list[float] = [25.0, 25.0, 25.0, 25.0]
+    # Manual % 모드 시 TP/SL ROI 직접 입력 (4단계 + 1 SL)
+    manual_tp_pcts: list[float] = [0.5, 1.0, 1.5, 2.0]
+    manual_sl_pct: float = 1.0
+
     # ===== 거래소 / 페어 / TF (Stage 2E C 통합) =====
     # default_exchange 는 .env 에서도 읽을 수 있지만 GUI 에서 전환 가능
     default_exchange: str = "bybit"

@@ -48,9 +48,12 @@ HTTP_TIMEOUT_SEC = 5
 # 본체 .exe 이름 — release.yml 의 Aurora-windows.exe 와 정합
 AURORA_EXE_NAME = "Aurora.exe"
 
-# 본체 + .new + .old + .aurora_version 모두 격리 폴더 (v0.1.17).
-# 사용자에게 launcher.exe 만 보이고 본체 파일들은 _aurora/ 안에 숨김.
+# 본체 데이터 격리 폴더 이름 — v0.1.17~v0.1.21 launcher 옆 ``_aurora/``.
+# v0.1.22 부터 ``%LOCALAPPDATA%\Aurora\`` (Windows 표준 hidden 위치) 로 이전.
+# 본 상수는 (a) legacy migration 시 launcher 옆 ``_aurora/`` 탐색,
+# (b) Windows 가 아닌 dev 환경 fallback — 두 용도로만 사용.
 AURORA_DATA_DIR = "_aurora"
+AURORA_LOCALAPPDATA_NAME = "Aurora"
 
 # 본체에 전달할 env 마커 — 본체 자기-swap 중복 방지
 LAUNCHER_ENV_MARKER = "AURORA_FROM_LAUNCHER"
@@ -75,26 +78,68 @@ def _launcher_dir() -> Path:
 
 
 def _aurora_data_dir() -> Path:
-    """본체 데이터 격리 폴더 — ``<launcher_dir>/_aurora/`` (v0.1.17).
+    """본체 데이터 격리 폴더 — ``%LOCALAPPDATA%\\Aurora\\`` (v0.1.22).
 
-    사용자에게 launcher.exe 만 보이고 본체 .exe / .new / .old / .aurora_version
-    은 모두 본 폴더 안에 숨김.
+    이전 (v0.1.17 ~ v0.1.21): ``<launcher_dir>/_aurora/``
+    현재 (v0.1.22~):          ``%LOCALAPPDATA%\\Aurora\\``
+
+    Why: launcher.exe 옆에 ``_aurora/`` 폴더가 보이지 않도록 OS 표준 hidden 위치
+    (Windows LocalAppData) 로 이동. launcher.exe 만 사용자 눈에 보임.
+
+    플랫폼:
+        - Windows: ``%LOCALAPPDATA%\\Aurora`` (= ``C:\\Users\\<user>\\AppData\\Local\\Aurora``)
+        - Windows 가 아니거나 ``LOCALAPPDATA`` env 미설정: launcher 옆 ``_aurora/``
+          (dev 환경 + 비-Windows fallback)
     """
+    if platform.system() == "Windows":
+        local_app = os.environ.get("LOCALAPPDATA")
+        if local_app:
+            return Path(local_app) / AURORA_LOCALAPPDATA_NAME
     return _launcher_dir() / AURORA_DATA_DIR
 
 
 def _aurora_exe_path() -> Path:
-    """본체 Aurora.exe 절대 경로 — _aurora/ 폴더 안 (v0.1.17 격리)."""
+    """본체 Aurora.exe 절대 경로 — 격리 폴더 안."""
     return _aurora_data_dir() / AURORA_EXE_NAME
 
 
 def _migrate_legacy_layout() -> None:
-    """v0.1.16 이전 layout (launcher 옆 Aurora.exe) → _aurora/ 로 이전.
+    """legacy layout → 현재 격리 폴더로 자동 이전 (best-effort).
 
-    Why: 기존 사용자가 v0.1.17 launcher 받으면 _aurora/ 에 본체 없음 → 다시 다운.
-    legacy Aurora.exe 가 launcher 옆에 있으면 자동으로 _aurora/ 안으로 이동 →
-    재다운 비용 절감 + .new / .old 잔재 정리.
+    두 단계 마이그레이션:
+        1. v0.1.16 이전: ``<launcher>/Aurora.exe`` → 격리 폴더
+        2. v0.1.21 이전: ``<launcher>/_aurora/`` 폴더 통째 → ``%LOCALAPPDATA%\\Aurora\\``
+
+    실패해도 launcher 시작 차단 X (재다운으로 복구 가능).
     """
+    new_data_dir = _aurora_data_dir()
+    legacy_data_dir = _launcher_dir() / AURORA_DATA_DIR  # <launcher>/_aurora/
+
+    # ── 1단계: legacy ``<launcher>/_aurora/`` 폴더 → 새 위치 (v0.1.22 이전).
+    # 새 위치와 legacy 가 같으면 (Windows 아닌 fallback) skip.
+    if (
+        legacy_data_dir.exists()
+        and legacy_data_dir.resolve() != new_data_dir.resolve()
+        and not new_data_dir.exists()
+    ):
+        try:
+            new_data_dir.parent.mkdir(parents=True, exist_ok=True)
+            new_data_dir.mkdir(parents=True, exist_ok=True)
+            for item in legacy_data_dir.iterdir():
+                target = new_data_dir / item.name
+                try:
+                    item.rename(target)
+                except OSError as e:
+                    logger.warning("legacy 파일 이전 실패 (%s): %s", item.name, e)
+            try:
+                legacy_data_dir.rmdir()  # 빈 폴더면 정리
+            except OSError:
+                pass  # 일부 파일 남아 있으면 그냥 둠
+            logger.info("legacy %s → %s 이전 완료", legacy_data_dir, new_data_dir)
+        except OSError as e:
+            logger.warning("legacy data_dir 이전 실패: %s", e)
+
+    # ── 2단계: launcher 옆 잔재 (v0.1.16 이전) → 새 위치.
     legacy_exe = _launcher_dir() / AURORA_EXE_NAME
     new_exe = _aurora_exe_path()
     if legacy_exe.exists() and not new_exe.exists():
@@ -103,8 +148,8 @@ def _migrate_legacy_layout() -> None:
             legacy_exe.rename(new_exe)
             logger.info("legacy %s → %s 이전 완료", legacy_exe, new_exe)
         except OSError as e:
-            logger.warning("legacy 이전 실패 (재다운 필요): %s", e)
-    # legacy .new / .old / .aurora_version 잔재 정리 (best-effort)
+            logger.warning("legacy exe 이전 실패 (재다운 필요): %s", e)
+    # launcher 옆 잔재 (.new / .old / .aurora_version) 정리
     for name in ("Aurora.exe.new", "Aurora.exe.old", ".aurora_version"):
         legacy = _launcher_dir() / name
         if legacy.exists():

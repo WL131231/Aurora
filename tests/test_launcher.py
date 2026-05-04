@@ -80,11 +80,16 @@ def test_fetch_latest_release_returns_none_on_network_error():
 
 
 def test_apply_swap_replaces_exe(tmp_path, monkeypatch):
-    """다운로드된 .new → _aurora/Aurora.exe 와 swap (v0.1.17 격리)."""
-    monkeypatch.setattr(launcher, "_launcher_dir", lambda: tmp_path)
+    """다운로드된 .new → 격리 폴더의 Aurora.exe 와 swap.
 
-    aurora_dir = tmp_path / launcher.AURORA_DATA_DIR
+    v0.1.22: 격리 폴더가 ``%LOCALAPPDATA%\\Aurora`` 로 이동. 테스트는 ``_aurora_data_dir``
+    을 ``tmp_path/_aurora`` 로 직접 mock — 사용자 LocalAppData 오염 방지.
+    """
+    aurora_dir = tmp_path / "_aurora"
     aurora_dir.mkdir()
+    monkeypatch.setattr(launcher, "_launcher_dir", lambda: tmp_path)
+    monkeypatch.setattr(launcher, "_aurora_data_dir", lambda: aurora_dir)
+
     exe = aurora_dir / "Aurora.exe"
     exe.write_bytes(b"old-exe-content")
     new = tmp_path / "Aurora.exe.new"
@@ -97,14 +102,16 @@ def test_apply_swap_replaces_exe(tmp_path, monkeypatch):
 
 
 def test_apply_swap_when_no_existing_exe(tmp_path, monkeypatch):
-    """_aurora/ 미존재 (첫 다운로드) — 폴더 자동 생성 + .new 가 본체 자리로."""
+    """격리 폴더 미존재 (첫 다운로드) — 폴더 자동 생성 + .new 가 본체 자리로."""
+    aurora_dir = tmp_path / "_aurora"  # 일부러 미생성 — apply_swap 이 만들어야 함
     monkeypatch.setattr(launcher, "_launcher_dir", lambda: tmp_path)
+    monkeypatch.setattr(launcher, "_aurora_data_dir", lambda: aurora_dir)
 
     new = tmp_path / "Aurora.exe.new"
     new.write_bytes(b"first-time")
 
     assert launcher.apply_swap(new) is True
-    assert (tmp_path / launcher.AURORA_DATA_DIR / "Aurora.exe").read_bytes() == b"first-time"
+    assert (aurora_dir / "Aurora.exe").read_bytes() == b"first-time"
 
 
 # ============================================================

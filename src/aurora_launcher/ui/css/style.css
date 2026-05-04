@@ -132,36 +132,40 @@ body {
     letter-spacing: 0.02em;
 }
 
-/* Start 버튼 — 큰 시네마틱 버튼 */
+/* Trading Start 버튼 — 우측 하단 시네마틱 (visual 영역 absolute, v0.1.16). */
 .btn-start {
+    position: absolute;
+    right: 56px;
+    bottom: 48px;
     display: inline-flex;
     align-items: center;
-    gap: 16px;
-    padding: 16px 40px;
-    border: 1px solid var(--text-2);
-    background: rgba(0, 0, 0, 0.25);
-    color: var(--text-1);
+    gap: 14px;
+    padding: 16px 36px;
+    border: 1px solid var(--text-base);
+    background: var(--text-base);
+    color: var(--bg);
     font-family: "Bodoni Moda", serif;
-    font-size: 16px;
-    letter-spacing: 0.32em;
-    font-weight: 500;
+    font-size: 15px;
+    letter-spacing: 0.28em;
+    font-weight: 600;
     cursor: pointer;
     transition: all 0.25s ease;
     border-radius: 0;
     backdrop-filter: blur(8px);
+    box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.5);
 }
 .btn-start:hover:not(:disabled) {
-    background: rgba(0, 0, 0, 0.45);
-    border-color: var(--text-1);
-    transform: translateX(4px);
+    background: #d8d9e8;
+    transform: translateY(-2px);
+    box-shadow: 0 12px 32px -8px rgba(168, 85, 247, 0.4);
 }
 .btn-start:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }
 .btn-arrow {
-    color: var(--text-1);
-    font-size: 14px;
+    color: var(--bg);
+    font-size: 12px;
 }
 
 #status-line {
@@ -196,12 +200,13 @@ body {
     color: var(--logo-purple);
 }
 
-/* ===== 우측 거대 다이아몬드 비주얼 ===== */
+/* ===== 우측 거대 다이아몬드 비주얼 + Trading Start 버튼 컨테이너 ===== */
 .visual {
-    position: relative;
+    position: relative;        /* btn-start absolute 기준 */
     display: flex;
     align-items: center;
     justify-content: center;
+    height: 100%;
 }
 
 .diamond-stage {

@@ -33,6 +33,7 @@ from pydantic import BaseModel
 
 from aurora import __version__
 from aurora.config import settings
+from aurora.core.stats import compute_stats
 from aurora.interfaces import bot_instance, config_store, log_buffer
 
 logger = logging.getLogger(__name__)
@@ -153,6 +154,27 @@ class TradeDTO(BaseModel):
     closed_at_ts: int
     reason: str
     triggered_by: list[str] = []
+
+
+class StatsDTO(BaseModel):
+    """``GET /stats`` — 거래 결과 통계 6 메트릭 (v0.1.24).
+
+    UI 대시보드 `결과 통계` 6 카드 (총 거래 / 승률 / 누적 수익률 / 최대 DD / 샤프 / 평균 보유)
+    + 보조 (win/loss count, cumulative PnL).
+
+    소스: 봇 자기 거래 (``BotInstance._closed_trades``) + 거래소 history
+    (``client.fetch_closed_positions``) — ``days`` 파라미터에 따라 조합.
+    """
+
+    total_trades: int
+    win_count: int
+    loss_count: int
+    win_rate_pct: float
+    cumulative_pnl_usd: float
+    avg_roi_pct: float
+    max_drawdown_pct: float
+    sharpe_ratio: float
+    avg_hold_minutes: float
 
 
 class UiUpdateResponse(BaseModel):
@@ -423,6 +445,52 @@ def create_app() -> FastAPI:
         merged = bot_records + ex_records
         merged.sort(key=lambda t: t.closed_at_ts, reverse=True)
         return merged[:limit]
+
+    # ───── Stats (결과 통계, v0.1.24) ──────────────────
+
+    @app.get("/stats", response_model=StatsDTO)
+    async def stats_endpoint(days: int = 0) -> StatsDTO:
+        """거래 결과 통계 — 봇 자기 거래 + 거래소 history (v0.1.24).
+
+        Args:
+            days: 기간 필터 (일). 0 = 봇 buffer 전체 (거래소 fetch X).
+                7 / 30 / 180 = 거래소 history 도 ``now - days`` 이후 fetch 후 합쳐서 통계.
+
+        UI ``거래내역 (P&L)`` 표 토글과 같은 ``days`` 사용 — 표 / 통계 일관.
+        """
+        bot = bot_instance.get_instance()
+        now_ms = int(time.time() * 1000)
+        since_ms = (now_ms - days * 24 * 60 * 60 * 1000) if days > 0 else None
+
+        # 봇 buffer (필요 시 기간 필터)
+        bot_records = list(bot.closed_trades)
+        if since_ms is not None:
+            bot_records = [t for t in bot_records if t.closed_at_ts >= since_ms]
+
+        # 거래소 history (days>0 일 때만)
+        ex_records: list = []
+        if days > 0 and bot.client is not None:
+            try:
+                ex_records = await bot.client.fetch_closed_positions(
+                    since_ms=since_ms, limit=200,
+                )
+            except Exception as e:  # noqa: BLE001 — UI 안전 (봇 buffer 만으로 통계)
+                logger.warning("/stats fetch_closed_positions 실패: %s", e)
+
+        # compute_stats 는 _TradeLike Protocol — 두 source 합쳐서 한 번에 계산.
+        merged = bot_records + ex_records
+        s = compute_stats(merged)
+        return StatsDTO(
+            total_trades=s.total_trades,
+            win_count=s.win_count,
+            loss_count=s.loss_count,
+            win_rate_pct=s.win_rate_pct,
+            cumulative_pnl_usd=s.cumulative_pnl_usd,
+            avg_roi_pct=s.avg_roi_pct,
+            max_drawdown_pct=s.max_drawdown_pct,
+            sharpe_ratio=s.sharpe_ratio,
+            avg_hold_minutes=s.avg_hold_minutes,
+        )
 
     # ───── Config ───────────────────────────────────
 

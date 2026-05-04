@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import threading
@@ -149,8 +150,14 @@ def _migrate_legacy_layout() -> None:
             logger.info("legacy %s → %s 이전 완료", legacy_exe, new_exe)
         except OSError as e:
             logger.warning("legacy exe 이전 실패 (재다운 필요): %s", e)
-    # launcher 옆 잔재 (.new / .old / .aurora_version) 정리
-    for name in ("Aurora.exe.new", "Aurora.exe.old", ".aurora_version"):
+    # launcher 옆 잔재 (.new / .old / .aurora_version) 정리.
+    # v0.1.24: launcher.exe.old 는 swap 직후 unlink 되지만 release 잔재 가능 → 정리.
+    # legacy launcher.exe.new 는 apply_pending_launcher_update 가 호환 처리하므로
+    # 여기선 unlink X (swap 흐름 방해 방지).
+    for name in (
+        "Aurora.exe.new", "Aurora.exe.old", ".aurora_version",
+        "Aurora-launcher.exe.old",
+    ):
         legacy = _launcher_dir() / name
         if legacy.exists():
             try:
@@ -254,11 +261,23 @@ def _launcher_exe_path() -> Path:
     return Path(sys.executable).resolve()
 
 
+def _launcher_new_path() -> Path:
+    """다운된 launcher.new 임시 위치 — 격리 폴더 안 (v0.1.24).
+
+    v0.1.23 이전: launcher 옆 ``Aurora-launcher.exe.new``  ← 사용자 눈에 보임
+    v0.1.24~:    ``%LOCALAPPDATA%\\Aurora\\Aurora-launcher.exe.new``  ← 숨김
+    """
+    return _aurora_data_dir() / "Aurora-launcher.exe.new"
+
+
 def apply_pending_launcher_update() -> bool:
     """직전 다운된 launcher.new 가 있으면 swap → 새 launcher 재시작 (race fix).
 
     main() 가장 처음 호출. swap 시 race condition 회피를 위해 PR #71 의
     _spawn_clean_env 패턴 차용 (env 정리 + DETACHED + CREATE_BREAKAWAY_FROM_JOB).
+
+    v0.1.24: ``.new`` 가 LocalAppData 격리 폴더에 있을 수도, legacy (launcher 옆) 일 수도.
+    호환성 위해 두 위치 모두 체크 — 어느쪽이든 발견 시 swap.
 
     Returns:
         True (실제로는 도달 X — sys.exit). False — 해당 없음 / 실패.
@@ -266,15 +285,26 @@ def apply_pending_launcher_update() -> bool:
     if not _is_frozen() or platform.system() != "Windows":
         return False
     exe = _launcher_exe_path()
-    new_path = exe.with_suffix(exe.suffix + ".new")
+    new_path = _launcher_new_path()                          # LocalAppData (v0.1.24~)
+    legacy_new = exe.with_suffix(exe.suffix + ".new")        # launcher 옆 (v0.1.23 이전 호환)
     old_path = exe.with_suffix(exe.suffix + ".old")
-    if not new_path.exists():
+
+    # v0.1.24 위치 우선, 없으면 legacy 위치 (마이그레이션 호환).
+    src: Path | None = None
+    if new_path.exists():
+        src = new_path
+    elif legacy_new.exists():
+        src = legacy_new
+    if src is None:
         return False
+
     try:
         if old_path.exists():
             old_path.unlink()
         exe.rename(old_path)
-        new_path.rename(exe)
+        # ``.new`` 가 다른 볼륨 (LocalAppData = C:, launcher.exe = D: 가능) 일 수 있음 →
+        # ``rename()`` 대신 ``shutil.move()`` 사용. 같은 볼륨이면 rename 으로 fast path.
+        shutil.move(str(src), str(exe))
         logger.info("launcher self-update applied: %s 재시작", exe.name)
 
         # 새 launcher 분리 spawn (race fix — PR #71 패턴)
@@ -316,11 +346,13 @@ def _check_and_download_launcher_update() -> None:
     url = find_launcher_url(release)
     if url is None:
         return
-    target = _launcher_exe_path().with_suffix(_launcher_exe_path().suffix + ".new")
+    # v0.1.24: launcher 옆 X → 격리 폴더 (LocalAppData) 에 다운로드 (사용자 눈에 안 보임)
+    target = _launcher_new_path()
     if target.exists():
         logger.info("launcher %s 이미 다운 완료 — 다음 시작 시 적용", tag)
         return
-    logger.info("launcher %s 발견 → 백그라운드 다운로드", tag)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("launcher %s 발견 → 백그라운드 다운로드 (%s)", tag, target)
     if download_to(url, target):
         logger.info("launcher %s 다운 완료 → 다음 시작 시 자동 swap", tag)
 

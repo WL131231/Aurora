@@ -72,20 +72,20 @@ def test_slip_pct_close_negative_fallback(caplog):
 
 
 # ============================================================
-# apply_slippage — 4 조합 (LONG/SHORT × entry/exit) + slip=0 (2)
+# apply_slippage — 4 조합 (long/short × entry/exit) + slip=0 (2)
 # ============================================================
 
 
 def test_apply_slippage_four_combinations():
-    """4 조합 모두 unfavorable 방향 — LONG entry / SHORT exit ↑, LONG exit / SHORT entry ↓."""
+    """4 조합 모두 unfavorable 방향 — long entry / short exit ↑, long exit / short entry ↓."""
     base = 100.0
     slip = 0.001
     # (direction, side, expected_price_after_slippage)
     cases = [
-        ("LONG",  "entry", base * (1 + slip)),  # 사야 함 → 비싸게
-        ("LONG",  "exit",  base * (1 - slip)),  # 팔아야 함 → 싸게
-        ("SHORT", "entry", base * (1 - slip)),  # 빌려 팔아야 함 → 싸게
-        ("SHORT", "exit",  base * (1 + slip)),  # 환매 → 비싸게
+        ("long",  "entry", base * (1 + slip)),  # 사야 함 → 비싸게
+        ("long",  "exit",  base * (1 - slip)),  # 팔아야 함 → 싸게
+        ("short", "entry", base * (1 - slip)),  # 빌려 팔아야 함 → 싸게
+        ("short", "exit",  base * (1 + slip)),  # 환매 → 비싸게
     ]
     for direction, side, expected in cases:
         result = apply_slippage(base, direction, side, slip)  # type: ignore[arg-type]
@@ -97,7 +97,7 @@ def test_apply_slippage_four_combinations():
 def test_apply_slippage_zero_slip_unchanged():
     """slip=0 경계 — 가격 변화 X (4 조합 모두)."""
     base = 100.0
-    for direction in ("LONG", "SHORT"):
+    for direction in ("long", "short"):
         for side in ("entry", "exit"):
             result = apply_slippage(base, direction, side, 0.0)  # type: ignore[arg-type]
             assert result == base, f"{direction} {side} slip=0: got {result}"

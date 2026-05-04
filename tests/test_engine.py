@@ -1,12 +1,12 @@
-"""engine.py 단위 테스트 — 22 함수 / 23 collected (DESIGN.md §6.2 + §11 D-1~D-26 정합).
+"""engine.py 단위 테스트 — 20 함수 / 21 collected (DESIGN.md §6.2 + §11 D-1~D-26 정합).
 
 mock 0 — 결정론적 합성 입력만 사용. 외부 네트워크 X.
 
 BacktestConfig + Position dataclass + BacktestEngine ``__init__`` / ``step()`` /
-``run()`` + 헬퍼 9 개 (``_to_record_direction`` / ``_open`` / ``_close`` /
-``_partial_close`` / ``_check_exits`` / ``_update_peak`` / ``_check_max_dd`` /
-``_tick_pause`` / ``_force_close_at_end``) 단위 회귀. 0 거래 / sl_distance=0 /
-clamp / 가드 분기 모두 caplog 또는 직접 assertion 으로 검증.
+``run()`` + 헬퍼 8 개 (``_open`` / ``_close`` / ``_partial_close`` /
+``_check_exits`` / ``_update_peak`` / ``_check_max_dd`` / ``_tick_pause`` /
+``_force_close_at_end``) 단위 회귀. 0 거래 / sl_distance=0 / clamp / 가드
+분기 모두 caplog 또는 직접 assertion 으로 검증.
 
 sanity 22 inline (단계 1·2·3) → 정식 pytest 변환. DESIGN §8 본문 매핑.
 
@@ -167,26 +167,6 @@ def test_engine_init_explicit_risk_config_passthrough_no_mutate() -> None:
 # ============================================================
 
 
-def test_to_record_direction_normalization() -> None:
-    """direction 격리 — 'long'/'LONG'/'Long' → 'LONG' (D-19 cost.Direction Literal)."""
-    engine = BacktestEngine(BacktestConfig())
-    assert engine._to_record_direction("long") == "LONG"
-    assert engine._to_record_direction("LONG") == "LONG"
-    assert engine._to_record_direction("Long") == "LONG"
-    assert engine._to_record_direction("short") == "SHORT"
-    assert engine._to_record_direction("SHORT") == "SHORT"
-    assert engine._to_record_direction("sHoRt") == "SHORT"
-
-
-def test_to_record_direction_invalid_raises() -> None:
-    """direction 불정 입력 → ``ValueError`` + 한국어 메시지."""
-    engine = BacktestEngine(BacktestConfig())
-    with pytest.raises(ValueError, match="잘못된 direction"):
-        engine._to_record_direction("buy")
-    with pytest.raises(ValueError, match="잘못된 direction"):
-        engine._to_record_direction("")
-
-
 def test_open_guards_double_position() -> None:
     """이미 보유 중 ``_open`` → ``RuntimeError`` (D-20 페어당 1 포지션 정책)."""
     engine = BacktestEngine(BacktestConfig())
@@ -210,7 +190,7 @@ def test_close_tp4_resets_consec_sl() -> None:
     trade = engine._close(fill=104.0, ts_ms=1_700_000_010_000, reason="TP4")
     assert engine.consec_sl == 0
     assert engine.position is None
-    assert trade.direction == "LONG"
+    assert trade.direction == "long"
     assert engine.trades == [trade]
 
 
@@ -505,8 +485,8 @@ def test_step_reverse_branch_synthetic_ohlcv() -> None:
 
     # trade 시퀀스 — LONG REVERSE close → 신규 SHORT → FORCE_END close
     assert len(trades) == 2
-    assert trades[0].direction == "LONG"
-    assert trades[1].direction == "SHORT"
+    assert trades[0].direction == "long"
+    assert trades[1].direction == "short"
 
     # bar 3 닫힘 시점 청산 verify (마지막 봉 ts 가 아님 → FORCE_END 아님)
     bar3_close_ts = 1_700_000_000_000 + 227 * 60_000        # 봉 227 = bar 3 닫힘
@@ -622,9 +602,9 @@ def test_run_multi_trade_end_to_end_scenario() -> None:
 
     # (4) 방향 분포 — LONG 4 (TP1/TP2/BE/FORCE_END) + SHORT 1 (REVERSE)
     directions = [t.direction for t in trades]
-    assert directions == ["LONG", "LONG", "LONG", "SHORT", "LONG"]
-    assert directions.count("LONG") == 4
-    assert directions.count("SHORT") == 1
+    assert directions == ["long", "long", "long", "short", "long"]
+    assert directions.count("long") == 4
+    assert directions.count("short") == 1
 
     # (5) trades[0/1] LONG TP partial — exit > entry (익절)
     assert trades[0].entry_price == pytest.approx(100.0)
@@ -637,7 +617,7 @@ def test_run_multi_trade_end_to_end_scenario() -> None:
 
     # (7) trades[3] SHORT REVERSE close — bar 3 닫힘 시점 (봉 227)
     bar3_close_ts = 1_700_000_000_000 + 227 * 60_000
-    assert trades[3].direction == "SHORT"
+    assert trades[3].direction == "short"
     assert trades[3].exit_ts == bar3_close_ts
 
     # (8) consec_sl == 0 — _partial_close reset → BE/REVERSE/FORCE_END 유지

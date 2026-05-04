@@ -363,6 +363,54 @@ async def test_close_calls_ccxt_close():
 
 
 @pytest.mark.asyncio
+async def test_fetch_ticker_paper_returns_none():
+    """v0.1.39 — paper 모드는 fetch_ticker 실 호출 X (None 반환)."""
+    with patch("aurora.exchange.ccxt_client.settings") as mock_settings:
+        mock_settings.run_mode = "paper"
+        client = _make_client()
+        result = await client.fetch_ticker("BTC/USDT:USDT")
+        assert result is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_ticker_returns_last_price():
+    """v0.1.39 — ccxt fetch_ticker 응답의 'last' 필드 → float."""
+    with patch("aurora.exchange.ccxt_client.settings") as mock_settings:
+        mock_settings.run_mode = "demo"
+        client = _make_client()
+        client._mock_ex.fetch_ticker = AsyncMock(  # type: ignore[attr-defined]
+            return_value={"last": 78845.50, "bid": 78840.0, "ask": 78850.0},
+        )
+        result = await client.fetch_ticker("BTC/USDT:USDT")
+        assert result == 78845.50
+
+
+@pytest.mark.asyncio
+async def test_fetch_ticker_returns_none_on_missing_last():
+    """'last' 누락 / None 시 fallback 위해 None 반환."""
+    with patch("aurora.exchange.ccxt_client.settings") as mock_settings:
+        mock_settings.run_mode = "demo"
+        client = _make_client()
+        client._mock_ex.fetch_ticker = AsyncMock(  # type: ignore[attr-defined]
+            return_value={"bid": 78840.0, "ask": 78850.0},  # 'last' 없음
+        )
+        assert await client.fetch_ticker("BTC/USDT:USDT") is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_ticker_returns_none_on_network_error():
+    """v0.1.39 — 네트워크 에러 raise 안 하고 None (호출자 close fallback)."""
+    import ccxt
+    with patch("aurora.exchange.ccxt_client.settings") as mock_settings:
+        mock_settings.run_mode = "demo"
+        client = _make_client()
+        client._mock_ex.fetch_ticker = AsyncMock(  # type: ignore[attr-defined]
+            side_effect=ccxt.NetworkError("network down"),
+        )
+        assert await client.fetch_ticker("BTC/USDT:USDT") is None
+
+
+@pytest.mark.asyncio
 async def test_fetch_closed_positions_paper_returns_empty():
     """paper 모드 = 빈 리스트 (실 호출 X)."""
     with patch("aurora.exchange.ccxt_client.settings") as mock_settings:

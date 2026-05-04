@@ -333,6 +333,32 @@ class CcxtClient:
         await self._ex.cancel_all_orders(symbol)
 
     # ============================================================
+    # Real-time ticker (v0.1.39) — SL/TP 청산 폴링용 (봉 wick 즉시 반응)
+    # ============================================================
+
+    async def fetch_ticker(self, symbol: str) -> float | None:
+        """현재 시장가 (last trade) 실시간 조회 — ccxt fetch_ticker 'last' 필드.
+
+        BotInstance 가 보유 중일 때 매 step 호출 → 봉 wick 도달 시점에 SL/TP 청산.
+        paper 모드 / 실패 / 'last' 누락 시 ``None`` (호출자 close fallback).
+        """
+        if settings.run_mode == "paper":
+            return None
+        await self._ensure_init()
+        try:
+            ticker = await self._ex.fetch_ticker(symbol)
+        except (ccxt.NetworkError, ccxt.ExchangeError) as e:
+            logger.debug("fetch_ticker(%s) 실패 — close fallback: %s", symbol, e)
+            return None
+        last = ticker.get("last") if isinstance(ticker, dict) else None
+        if last is None:
+            return None
+        try:
+            return float(last)
+        except (ValueError, TypeError):
+            return None
+
+    # ============================================================
     # Closed positions history (v0.1.23) — 거래소 측 거래내역 fetch
     # ============================================================
 

@@ -839,6 +839,18 @@ class BotInstance:
         # 3. 활성 포지션 — 트레일링 + 청산 + REVERSE 검사 (진입 평가는 분기 별)
         # Aurora 정책 (페어당 1개) — 보유 중엔 SL/TP/REVERSE 청산만, 신규 진입 X.
         if self._executor.has_position:
+            # v0.1.39: real-time ticker 가격 (SL/TP 청산 폴링용 — 봉 wick 시점 즉시 반응).
+            # 봉 닫힘 close 만 사용하면 진행 중 봉 wick 가 SL/TP 통과해도 close 회복 시
+            # 청산 안 되는 문제 (사용자 보고 2026-05-04). ticker.last 매 1초 폴링으로 해결.
+            # paper 모드 / 실패 시 close fallback.
+            if settings.run_mode != "paper":
+                try:
+                    rt_price = await self._client.fetch_ticker(self._symbol)
+                    if rt_price is not None:
+                        current_price = rt_price
+                except Exception as e:  # noqa: BLE001 — ticker 실패 시 close fallback
+                    logger.debug("fetch_ticker 실패 (close fallback): %s", e)
+
             # 3-1. 거래소 측 sync — 사용자 직접 청산 / liquidation 감지 (v0.1.7).
             # paper 모드는 fetch_position 항상 None 반환 (정책) → sync skip
             # (v0.1.9 fix: 안 그러면 paper 진입 직후 즉시 reset 무한 루프).

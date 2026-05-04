@@ -136,6 +136,17 @@ class ExchangeClient(Protocol):
         """전체 주문 취소."""
         ...
 
+    async def fetch_ticker(self, symbol: str) -> float | None:
+        """현재 시장가 (last trade price) 실시간 조회 (v0.1.39).
+
+        SL/TP 청산 폴링용 — 봉 닫힘 close 보다 빠른 반응 (wick 시점 청산 가능).
+        Aurora ``BotInstance._step`` 가 보유 중일 때 매 1초 호출.
+
+        Returns:
+            ``float`` 마지막 거래 가격 / ``None`` 호출 실패 (호출자가 close fallback).
+        """
+        ...
+
     async def fetch_closed_positions(
         self,
         since_ms: int | None = None,

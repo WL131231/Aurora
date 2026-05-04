@@ -24,7 +24,17 @@
 
 from __future__ import annotations
 
+import argparse
+
 from aurora.config import settings
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Aurora 자동매매 봇")
+    parser.add_argument("--headless", action="store_true", help="pywebview 없이 uvicorn 만 실행 (Termux / Linux)")
+    parser.add_argument("--host", default=None, help="API 바인딩 호스트 (headless 전용, 기본 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=None, help="API 포트 (headless 전용, 기본 8765)")
+    return parser.parse_args()
 
 
 def main() -> None:
@@ -45,9 +55,11 @@ def main() -> None:
     """
     # 함수 내부 import: ``webview.py`` 는 ``import uvicorn`` 등 의존성 무거움.
     # 모듈 import 자체에 비용 없게 하려고 main() 호출 시점에만 로드.
+    args = _parse_args()
+
     from aurora import __version__, updater
     from aurora.interfaces import bot_instance
-    from aurora.interfaces.webview import launch
+    from aurora.interfaces.webview import launch, launch_headless
 
     # 1. 자동 업데이트 적용 (직전 실행에서 다운된 .new 가 있으면 swap + 재시작)
     updater.apply_pending_update()
@@ -55,7 +67,8 @@ def main() -> None:
     # 2. 백그라운드 update check (새 버전 있으면 다운로드, 다음 시작 시 적용)
     updater.start_background_check()
 
-    print(f"Aurora v{__version__} — run_mode={settings.run_mode} — GUI 기동")
+    mode_label = "headless" if args.headless else "GUI"
+    print(f"Aurora v{__version__} — run_mode={settings.run_mode} — {mode_label} 기동")
 
     # BotInstance 자동 configure — settings + config_store 결합
     # Why: GUI ▶ 시작 누를 때마다 configure 안 해도 진입점에서 한 번 처리.
@@ -74,7 +87,10 @@ def main() -> None:
     _bi_mod.register_trade_alert_callback(get_bot().on_trade_alert)
     launch_in_background()
 
-    launch()
+    if args.headless:
+        launch_headless(host=args.host, port=args.port)
+    else:
+        launch()
 
 
 if __name__ == "__main__":

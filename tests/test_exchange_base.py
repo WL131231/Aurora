@@ -108,6 +108,9 @@ class _MockClient:
     ) -> list:
         return []
 
+    async def fetch_ticker(self, symbol: str) -> float | None:
+        return None
+
 
 def test_mock_client_satisfies_protocol():
     """_MockClient 가 ExchangeClient Protocol 만족 (structural typing).

@@ -55,26 +55,23 @@ body {
     opacity: 0.7;
 }
 
-/* 두 손 배경 (NEXORA 톤 — 흰 배경 자동 제거 + 보라 톤). v0.1.16.
-   v0.1.17: 사용자가 NEXORA 전체 스크린샷 제공 → 상단 텍스트 영역 clip-path 로 잘라내고
-   손 영역만 보이게. 정확도는 사용자가 cropped PNG 다시 제공하면 ↑. */
+/* 두 손 배경 — cropped 이미지 (좌 로봇 / 우 인간). v0.1.17 사용자 cropped PNG 제공.
+   흰 배경 + 검정/회색 도트 손 → invert + screen 으로 흰=투명 / 손=흰 효과. */
 .bg-hands {
     position: fixed;
     inset: 0;
     z-index: 2;
     pointer-events: none;
     background-image: url("../img/launcher-bg-hands.png");
-    /* 손이 이미지 하단 ~50% 영역. cover + position bottom 으로 손이 화면 중앙. */
-    background-size: 110% auto;
-    background-position: center 105%;
+    /* 손 이미지 1200×750 (가로) — 화면 중앙에 contain 으로 자연 fit. */
+    background-size: contain;
+    background-position: center 60%;
     background-repeat: no-repeat;
-    /* clip-path — 상단 텍스트(네비/타이틀/Get In Touch) 영역 잘라내기.
-       NEXORA 스크린샷 비율 기준 상단 ~52%, 하단 ~12% 자름 → 손만 노출. */
-    clip-path: inset(52% 0 12% 0);
-    /* invert + screen blend — 흰 배경 → 투명, 검정 손 → 흰/보라. */
+    /* invert: 흰 → 검정, 검정 손 → 흰. screen: 검정 → 투명 → 어두운 그라디언트
+       위에 흰/보라 손만 보임. */
     filter: invert(1) sepia(0.4) hue-rotate(220deg) saturate(1.4) brightness(0.95);
     mix-blend-mode: screen;
-    opacity: 0.28;
+    opacity: 0.32;
 }
 
 /* ===== 시네마틱 레이아웃 (좌 hero / 우 visual) ===== */

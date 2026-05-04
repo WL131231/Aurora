@@ -65,6 +65,17 @@
 - 다른 사람 영역 수정은 사전 공지 + PR
 - 커밋 prefix: `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `test:`
 
+## 테스트 정책
+- **mock 0** — 결정론적 합성 입력만 사용. 외부 네트워크/거래소 호출 X.
+- **self-spy 패턴** (장수 권고 2026-05-04 PR #102 review 4번):
+  - 외부 mock 라이브러리 (pytest-mock 등) 사용 X
+  - 테스트 대상 인스턴스의 메서드를 같은 시그니처 wrapper 로 교체
+  - wrapper = 호출 인자/결과 캡처 + 원 메서드 위임 (대상 객체 동작 비변경)
+  - 자기 객체 wrapper (외부 의존 X) — mock 0 정책 정합
+  - **적용 site**: dataclass 필드 부재로 분기 식별이 호출 인자 추적으로만 가능한 케이스
+  - **모범 적용** (Stage 1D PR #102 단계 2/3): `engine._close` / `_partial_close` wrapper 교체로 `close_reasons` / `partial_idx_log` 캡처
+  - 다른 영역 (interfaces / core) 테스트 재사용 가능
+
 ## Phase 계획
 - **Phase 1 (현재)**: 단일 사용자 가정, 룰 기반 봇 + 백테스트 모듈 동시 개발
 - **Phase 2**: Demo 거래 + 소액 실거래 검증

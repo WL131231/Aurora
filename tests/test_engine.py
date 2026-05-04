@@ -21,6 +21,7 @@ import pandas as pd
 import pytest
 
 from aurora.backtest.engine import BacktestConfig, BacktestEngine
+from aurora.backtest.stats import TradeRecord
 from aurora.core.risk import (
     PositionSize,
     RiskPlan,
@@ -38,11 +39,34 @@ from aurora.core.strategy import StrategyConfig
 
 def _make_synthetic_1m_df(
     start_ms: int = 1_700_000_000_000, n: int = 5, price: float = 100.0,
+    prices: list[float] | None = None,
 ) -> pd.DataFrame:
-    """평탄 OHLCV 1m DataFrame — 신호 비유발 (EMA 터치 X 보장).
+    """평탄 OHLCV 1m DataFrame — 신호 비유발 (EMA 터치 X 보장) 또는 가격
+    시퀀스 engineering (REVERSE 분기 발동 등).
 
     DatetimeIndex (ms epoch 기반) — ``BacktestEngine.run()`` 입력 정합.
+
+    Args:
+        start_ms: 첫 1m 봉 ts (ms epoch). default 1_700_000_000_000 = 2023-11-14
+            22:13:20 UTC (1H bucket open=22:00 → 첫 1H 닫힘은 봉 47, ts 23:00).
+        n: 봉 수 (``prices`` 미지정 시만 사용).
+        price: 평탄 봉 가격 (``prices`` 미지정 시만 사용).
+        prices: 봉별 close 시퀀스 (volume=1.0, OHLC=close 평탄). 지정 시 ``n``
+            은 ``len(prices)`` 로 override. REVERSE 분기 시나리오 등 1m 별 가격
+            engineering 용.
     """
+    if prices is not None:
+        n = len(prices)
+        idx = pd.DatetimeIndex(
+            [pd.Timestamp(start_ms + i * 60_000, unit="ms") for i in range(n)],
+        )
+        return pd.DataFrame(
+            {
+                "open": prices, "high": prices, "low": prices, "close": prices,
+                "volume": [1.0] * n,
+            },
+            index=idx,
+        )
     idx = pd.DatetimeIndex(
         [pd.Timestamp(start_ms + i * 60_000, unit="ms") for i in range(n)],
     )
@@ -416,3 +440,209 @@ def test_engine_init_explicit_strategy_config_passthrough() -> None:
     engine = BacktestEngine(cfg)
     assert engine._strategy_config is custom
     assert cfg.strategy_config is custom
+
+
+# ============================================================
+# Group F — step() REVERSE 분기 통합 (1, DESIGN §8.4 커버리지 갭 해소)
+# ============================================================
+
+
+def test_step_reverse_branch_synthetic_ohlcv() -> None:
+    """``step()`` REVERSE 분기 (D-24, engine.py:351-354) 통합 line coverage.
+
+    합성 1m 300 봉 + ``StrategyConfig(ema_periods=(2,3))`` (EMA 안정 ~5 봉,
+    default 200/480 대비 ~100 배 빠름) + ``timeframes=["1H"]`` (1m 60→1H 1봉,
+    5 회 닫힘) 시나리오:
+
+        bar 0 닫힘 (봉 47, ts 23:00:20): close=100, EMA=100, distance=0 →
+            LONG EMA touch (close ≥ EMA) → ``_open(LONG @ 100)``
+        bar 1·2 닫힘: close=100 평탄 → 자기 방향 LONG signal → REVERSE X
+        bar 3 닫힘 (봉 227, ts 02:00:20): bar3 OHLC ``open=100/high=100/
+            low=99.85/close=99.85`` (180 봉~ 100→99.85 하락). EMA(2)≈99.9 +
+            close 99.85 < EMA → distance 0.05% ≤ 0.3% → SHORT signal →
+            ``compose_exit(LONG, [SHORT])`` True → ``_close(reason="REVERSE")``
+        bar 3 직후: ``position=None``, 다음 1m 부터 신규 진입 가능 (D-20)
+        bar 4 닫힘 (봉 287): SHORT signal 지속 → ``_open(SHORT @ 99.85)``
+        마지막 봉 (봉 299): ``_force_close_at_end(reason="FORCE_END")``
+
+    가격 하락 폭 0.15% 는 v0.1.13 ROI 단위 SL 2% / leverage 10 = 가격 변동
+    0.2% 임계 미달 → SL 미발동 → REVERSE 분기 도달 보장 (가격 0.5% 하락 시
+    SL 99.8 통과 → REVERSE 진입 전 SL 청산).
+
+    DESIGN §8.4 커버리지 갭 1 건 해소. ``_close`` reason self-spy 로 직접
+    검증 (mock 외부 의존 X — 자기 객체 wrapper 패턴, ``test_engine.py``
+    mock 0 정책 정합).
+    """
+    cfg = BacktestConfig(
+        timeframes=["1H"],
+        strategy_config=StrategyConfig(
+            ema_periods=(2, 3),
+            ema_touch_tolerance=0.003,
+        ),
+    )
+    engine = BacktestEngine(cfg)
+    engine.consec_sl = 1                                    # REVERSE 후 유지 verify
+
+    # _close reason 캡처 — self-spy (mock X, 자기 객체 wrapper 패턴).
+    # Why: TradeRecord 에 reason 필드 부재 → 분기 식별 위해 호출 인자 추적.
+    close_reasons: list[str] = []
+    original_close = engine._close
+
+    def spy_close(*, fill: float, ts_ms: int, reason: str) -> TradeRecord:
+        close_reasons.append(reason)
+        return original_close(fill=fill, ts_ms=ts_ms, reason=reason)
+
+    engine._close = spy_close                               # type: ignore[method-assign]
+
+    prices = [100.0] * 180 + [99.85] * 120
+    df = _make_synthetic_1m_df(prices=prices)
+
+    trades = engine.run(df)
+
+    # REVERSE 분기 발동 verify — 첫 청산 = REVERSE
+    assert "REVERSE" in close_reasons
+    assert close_reasons[0] == "REVERSE"
+
+    # trade 시퀀스 — LONG REVERSE close → 신규 SHORT → FORCE_END close
+    assert len(trades) == 2
+    assert trades[0].direction == "LONG"
+    assert trades[1].direction == "SHORT"
+
+    # bar 3 닫힘 시점 청산 verify (마지막 봉 ts 가 아님 → FORCE_END 아님)
+    bar3_close_ts = 1_700_000_000_000 + 227 * 60_000        # 봉 227 = bar 3 닫힘
+    last_bar_ts = 1_700_000_000_000 + 299 * 60_000          # 마지막 봉
+    assert trades[0].exit_ts == bar3_close_ts
+    assert trades[0].exit_ts != last_bar_ts
+
+    # consec_sl 유지 — D-2 봇 능동 카테고리 (REVERSE / FORCE_END 둘 다)
+    assert engine.consec_sl == 1
+
+
+def test_run_multi_trade_end_to_end_scenario() -> None:
+    """``run()`` 멀티 trade end-to-end 통합 — DESIGN §8.4 커버리지 갭 1 건 추가.
+
+    LONG entry → TP1 partial → TP2 partial → BE close → SHORT entry →
+    REVERSE close → LONG entry → FORCE_END close 의 8 단계 라이프사이클을
+    한 ``run()`` 호출로 검증. 단계 2 self-spy 패턴 정합 — ``_close`` +
+    ``_partial_close`` 둘 다 wrapper 로 호출 인자 캡처 (mock 외부 의존 X).
+
+    가격 시퀀스 (v0.1.13 ROI 단위, leverage=10 → SL 가격 0.2% / TP[0] 가격
+    0.28% 임계 정합):
+
+        봉 0~46:    close=100.0 평탄 (bar 0 진행)
+        봉 47:      close=100.0 → bar 0 닫힘 → LONG entry @ 100
+                    (SL=99.8, TPs=[100.28, 100.31, 100.35, 100.38])
+        봉 48:      close=100.30 → high ≥ TP1 → _partial_close(idx=0).
+                    tp_hits=1, trailing MOVING_TARGET → SL=entry=100
+        봉 49:      close=100.32 → high ≥ TP2 → _partial_close(idx=1).
+                    tp_hits=2, trailing → SL=tp[0]=100.28
+        봉 50:      close=99.78 → low ≤ SL 100.28 → _close(reason="BE")
+                    (tp_hits=2 ≥ 1 → BE 분류, D-2 봇 능동 카운트 유지)
+        봉 51~106:  close=99.50 평탄 (position=None)
+        봉 107:     bar 1 닫힘 → close 99.50 < EMA(2) 99.667 → SHORT
+                    entry @ 99.50 (SL=99.70, TP1=99.22)
+        봉 108~166: close=99.50 평탄 (SHORT 보유 — SL/TP 미달)
+        봉 167:     bar 2 닫힘 → SHORT signal (자기 방향 → REVERSE X)
+        봉 168~226: close=99.65 평탄 (high 99.65 < SHORT SL 99.70)
+        봉 227:     bar 3 닫힘 → close 99.65 > EMA(2) ≈ 99.61 → LONG
+                    signal → compose_exit(SHORT, [LONG]) True →
+                    _close(reason="REVERSE")
+        봉 228~286: close=99.65 평탄 (position=None)
+        봉 287:     bar 4 닫힘 → LONG entry @ 99.65
+        봉 288~298: close=99.65 평탄
+        봉 299:     마지막 봉 → _force_close_at_end(reason="FORCE_END")
+
+    Assertion 8 가지 — D-2 reason 매핑 + 멀티 trade 누적 + 방향 분포 +
+    consec_sl 흐름 + balance 변동:
+        - partial_idx_log == [0, 1]      # TP1 → TP2 순차 partial
+        - close_reasons == ["BE", "REVERSE", "FORCE_END"]
+        - len(trades) == 5               # partial 2 + close 3
+        - 방향 분포 LONG 4 (TP1/TP2/BE/FORCE_END) + SHORT 1 (REVERSE)
+        - trades[0/1] partial: entry=100 + exit > entry (LONG TP)
+        - trades[2] BE: exit < entry (LONG SL trail)
+        - trades[3] SHORT REVERSE: bar 3 닫힘 시점 == 봉 227 ts
+        - consec_sl == 0 (TP1/TP2 partial reset → BE/REVERSE/FORCE_END
+                          모두 카운트 유지 → 0 그대로)
+        - balance < initial_capital     # 누적 손실 (단일 BE + 두 SHORT
+                                        # 사이 변동 + FORCE_END 마이너 fee)
+    """
+    cfg = BacktestConfig(
+        timeframes=["1H"],
+        strategy_config=StrategyConfig(
+            ema_periods=(2, 3),
+            ema_touch_tolerance=0.003,
+        ),
+    )
+    engine = BacktestEngine(cfg)
+
+    # self-spy — _close 와 _partial_close 둘 다 캡처 (D-21 partial idx 추적)
+    close_reasons: list[str] = []
+    original_close = engine._close
+
+    def spy_close(*, fill: float, ts_ms: int, reason: str) -> TradeRecord:
+        close_reasons.append(reason)
+        return original_close(fill=fill, ts_ms=ts_ms, reason=reason)
+
+    engine._close = spy_close                               # type: ignore[method-assign]
+
+    partial_idx_log: list[int] = []
+    original_partial = engine._partial_close
+
+    def spy_partial(*, idx: int, fill: float, ts_ms: int) -> TradeRecord:
+        partial_idx_log.append(idx)
+        return original_partial(idx=idx, fill=fill, ts_ms=ts_ms)
+
+    engine._partial_close = spy_partial                     # type: ignore[method-assign]
+
+    prices = (
+        [100.0] * 47                                        # 봉 0~46
+        + [100.0]                                           # 봉 47, bar 0 닫힘
+        + [100.30]                                          # 봉 48, TP1
+        + [100.32]                                          # 봉 49, TP2
+        + [99.78]                                           # 봉 50, BE close
+        + [99.50] * 56                                      # 봉 51~106
+        + [99.50] * 60                                      # 봉 107~166
+        + [99.65] * 60                                      # 봉 167~226
+        + [99.65] * 60                                      # 봉 227~286
+        + [99.65] * 13                                      # 봉 287~299
+    )
+    assert len(prices) == 300                               # 사전 계산 verify
+    df = _make_synthetic_1m_df(prices=prices)
+
+    trades = engine.run(df)
+
+    # (1) D-21 TP partial 순차 — TP1 → TP2 (한 봉 1 청산 한계 정합)
+    assert partial_idx_log == [0, 1]
+
+    # (2) D-2 close reason 매핑 — BE / REVERSE / FORCE_END
+    assert close_reasons == ["BE", "REVERSE", "FORCE_END"]
+
+    # (3) trade 누적 — partial 2 + close 3 = 5 (>= 4 사용자 임계)
+    assert len(trades) == 5
+
+    # (4) 방향 분포 — LONG 4 (TP1/TP2/BE/FORCE_END) + SHORT 1 (REVERSE)
+    directions = [t.direction for t in trades]
+    assert directions == ["LONG", "LONG", "LONG", "SHORT", "LONG"]
+    assert directions.count("LONG") == 4
+    assert directions.count("SHORT") == 1
+
+    # (5) trades[0/1] LONG TP partial — exit > entry (익절)
+    assert trades[0].entry_price == pytest.approx(100.0)
+    assert trades[0].exit_price > trades[0].entry_price
+    assert trades[1].exit_price > trades[1].entry_price
+
+    # (6) trades[2] LONG BE close — exit < entry (SL trail 100.28 통과 청산)
+    assert trades[2].entry_price == pytest.approx(100.0)
+    assert trades[2].exit_price < trades[2].entry_price
+
+    # (7) trades[3] SHORT REVERSE close — bar 3 닫힘 시점 (봉 227)
+    bar3_close_ts = 1_700_000_000_000 + 227 * 60_000
+    assert trades[3].direction == "SHORT"
+    assert trades[3].exit_ts == bar3_close_ts
+
+    # (8) consec_sl == 0 — _partial_close reset → BE/REVERSE/FORCE_END 유지
+    assert engine.consec_sl == 0
+
+    # balance 변동 — 누적 손실 (BE 청산 + SHORT REVERSE pnl 음수 + fee)
+    assert engine.balance < cfg.initial_capital
+    assert engine.position is None                          # FORCE_END 후 정리

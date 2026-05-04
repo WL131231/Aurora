@@ -130,13 +130,25 @@
 
                     <div class="section-title">지표 트리거 상태</div>
                     <div class="indicator-status-grid" id="indicator-status">
-                        <!-- 6 카테고리 카드 — JS 가 색깔/방향 갱신 -->
-                        <div class="indicator-pill" data-cat="EMA"><span class="ind-name">EMA</span><span class="ind-dir">—</span></div>
-                        <div class="indicator-pill" data-cat="RSI"><span class="ind-name">RSI</span><span class="ind-dir">—</span></div>
-                        <div class="indicator-pill" data-cat="BB"><span class="ind-name">BB</span><span class="ind-dir">—</span></div>
-                        <div class="indicator-pill" data-cat="MA"><span class="ind-name">MA</span><span class="ind-dir">—</span></div>
-                        <div class="indicator-pill" data-cat="Ichimoku"><span class="ind-name">Ichimoku</span><span class="ind-dir">—</span></div>
-                        <div class="indicator-pill" data-cat="Harmonic"><span class="ind-name">Harmonic</span><span class="ind-dir">—</span></div>
+                        <!-- 6 카테고리 — 상태 4값: 대기 / 활성-롱 / 활성-숏 / 비활성. hint = hover tooltip -->
+                        <div class="indicator-pill" data-cat="EMA" title="가동 조건: 가격이 EMA 라인 ±0.3% 터치 + 거래량 동반">
+                            <span class="ind-name">EMA</span><span class="ind-state">대기</span>
+                        </div>
+                        <div class="indicator-pill" data-cat="RSI" title="가동 조건: 1H TF 다이버전스 발생 (regular/hidden × bull/bear)">
+                            <span class="ind-name">RSI</span><span class="ind-state">대기</span>
+                        </div>
+                        <div class="indicator-pill" data-cat="BB" title="가동 조건: 1H Bollinger 상/하단 터치 (횡보장 특화)">
+                            <span class="ind-name">BB</span><span class="ind-state">대기</span>
+                        </div>
+                        <div class="indicator-pill" data-cat="MA" title="가동 조건: 골크/데크 (HTF 가중치 1H&lt;2H&lt;4H)">
+                            <span class="ind-name">MA</span><span class="ind-state">대기</span>
+                        </div>
+                        <div class="indicator-pill" data-cat="Ichimoku" title="가동 조건: 구름대 Span 터치 (S/R 강도 = 두께)">
+                            <span class="ind-name">Ichimoku</span><span class="ind-state">대기</span>
+                        </div>
+                        <div class="indicator-pill" data-cat="Harmonic" title="가동 조건: 5종 패턴 D 도달 (Bat/Butterfly/Gartley/Crab/Deep Crab)">
+                            <span class="ind-name">Harmonic</span><span class="ind-state">대기</span>
+                        </div>
                     </div>
 
                     <div class="section-title">자본금</div>

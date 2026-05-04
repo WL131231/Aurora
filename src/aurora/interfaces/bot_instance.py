@@ -121,6 +121,11 @@ class BotInstance:
         # 0 = 아직 한 번도 step 실행 X. running 시작 후 첫 step 부터 ms epoch 갱신.
         self._last_step_ts: int = 0
 
+        # v0.1.31: primary TF 봉 닫힘 detection — 매 봉 닫힘 1번만 신호 평가 로그 출력.
+        # _step 은 매 1초 호출이지만 신호 의미는 봉 닫힘 시점에만 변화. primary TF (보통
+        # 15m) 마지막 봉 ts 추적 → 변화 시점에만 logger.info("[신호 평가] ...") 출력.
+        self._last_evaluated_bar_ts: int = 0
+
         # 거래내역 (v0.1.20) — close_position 마다 ClosedTrade 추가 (rolling 100).
         # GUI "거래내역" 표 표시 + Telegram 알림 + PnL 카드 데이터 source.
         # v0.1.25: 디스크에서 영속화된 record 복원 → 봇 재시작 후 표 / 통계 유지.
@@ -219,6 +224,61 @@ class BotInstance:
             self._strategy_config.use_harmonic,
             self._leverage, self._risk_pct, self._full_seed,
         )
+
+    def _log_signal_evaluation(
+        self,
+        signals: list,
+        decision,
+        bar_ts: int,
+        in_position: bool = False,
+    ) -> None:
+        """신호 평가 결과 1줄 요약 로그 (v0.1.31).
+
+        primary TF 봉 닫힘 시점에만 INFO 출력 — 매 step 출력하면 로그 폭주
+        (1초 당 1줄). 봉 닫힘 시 의미 변화이므로 그때만 충분.
+
+        형식 예:
+            [신호평가] EMA=L@1H(1.0) | RSI=- | BB=- | MA=- | Ichi=- | Harm=-
+                | score: long=1.0 short=0.0 enter=False (보유X)
+
+        Args:
+            signals: ``EntrySignal`` list (compose_entry 입력).
+            decision: ``CompositeDecision`` (compose_entry 결과).
+            bar_ts: 평가 대상 primary TF 봉 ms epoch.
+            in_position: 보유 중인지 (REVERSE 신호 평가 vs 신규 진입 평가 표시).
+        """
+        # 카테고리별 신호 그룹핑 — 한 카테고리에 여러 TF 신호 가능 (EMA/RSI/MA 등)
+        cat_signals: dict[str, list[str]] = {}
+        for sig in signals:
+            cat = _categorize_source(sig.source)
+            if cat is None:
+                continue
+            dir_short = sig.direction.value[0].upper()  # L / S
+            cat_signals.setdefault(cat, []).append(
+                f"{dir_short}@{sig.timeframe}({sig.strength:.1f})",
+            )
+        # 카테고리 6개 모두 표시 (없으면 "-")
+        parts = []
+        for cat in _INDICATOR_CATEGORIES:
+            if cat in cat_signals:
+                parts.append(f"{cat}={'/'.join(cat_signals[cat])}")
+            else:
+                parts.append(f"{cat}=-")
+
+        ctx = "보유중·REVERSE 평가" if in_position else "보유X·진입 평가"
+        if decision.enter and decision.direction is not None:
+            verdict = f"enter={decision.direction.value.upper()}"
+        else:
+            verdict = "enter=False"
+        logger.info(
+            "[신호평가 %s] %s | score: long=%.2f short=%.2f | %s",
+            ctx,
+            " | ".join(parts),
+            decision.long_score,
+            decision.short_score,
+            verdict,
+        )
+        self._last_evaluated_bar_ts = bar_ts
 
     def _record_closed(self, closed: ClosedTrade) -> None:
         """ClosedTrade 메모리 buffer + 디스크 영속화 통합 (v0.1.25).
@@ -705,6 +765,13 @@ class BotInstance:
                     ),
                 )
                 cur_dir = self._executor._plan.direction
+                # v0.1.31: 보유 중 REVERSE 평가 결과도 봉 닫힘 시점 로그
+                bar_ts_pos = int(primary_df.index[-1].value // 1_000_000)
+                if bar_ts_pos != self._last_evaluated_bar_ts:
+                    rev_decision = compose_entry(rev_signals)
+                    self._log_signal_evaluation(
+                        rev_signals, rev_decision, bar_ts_pos, in_position=True,
+                    )
                 if compose_exit(cur_dir, rev_signals):
                     logger.info("REVERSE 신호 (%s) → 청산 (다음 step 진입 평가)", cur_dir)
                     _, closed = await self._executor.close_position(reason="reverse")
@@ -764,6 +831,12 @@ class BotInstance:
                 self._last_indicator_status[cat] = sig.direction.value
 
         decision = compose_entry(signals)
+
+        # v0.1.31: primary TF 봉 닫힘 시점에만 신호 평가 결과 로그 (06 로그 view 가시화).
+        # _step 매 1초 호출이지만 신호 의미는 봉 닫힘 시점에만 변화 → 봉 ts 변화 감지.
+        bar_ts = int(primary_df.index[-1].value // 1_000_000)
+        if bar_ts != self._last_evaluated_bar_ts:
+            self._log_signal_evaluation(signals, decision, bar_ts, in_position=False)
 
         if not decision.enter or decision.direction is None:
             return

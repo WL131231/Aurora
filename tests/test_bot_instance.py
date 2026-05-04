@@ -512,6 +512,67 @@ def test_apply_live_config_updates_leverage_and_risk_pct() -> None:
     assert bot._full_seed is True
 
 
+def test_log_signal_evaluation_writes_info_with_categories(caplog) -> None:
+    """v0.1.31 — _log_signal_evaluation 가 카테고리별 신호 + score 1줄 INFO 출력."""
+    import logging
+
+    from aurora.core.signal import compose_entry
+    from aurora.core.strategy import Direction, EntrySignal
+
+    bot = bot_instance.get_instance()
+    signals = [
+        EntrySignal(direction=Direction.LONG, timeframe="1H", source="ema_touch_200",
+                    strength=1.0, note="", bar_timestamp=0),
+        EntrySignal(direction=Direction.SHORT, timeframe="1H", source="bollinger_upper",
+                    strength=1.0, note="", bar_timestamp=0),
+    ]
+    decision = compose_entry(signals)
+    caplog.set_level(logging.INFO, logger="aurora.interfaces.bot_instance")
+    bot._log_signal_evaluation(signals, decision, bar_ts=1735000000000, in_position=False)
+
+    msgs = [r.message for r in caplog.records]
+    assert any("[신호평가" in m for m in msgs)
+    log = next(m for m in msgs if "[신호평가" in m)
+    # 6 카테고리 모두 표시 (없으면 "-", 있으면 방향@TF(strength))
+    assert "EMA=L@1H(1.0)" in log
+    assert "BB=S@1H(1.0)" in log
+    assert "RSI=-" in log
+    assert "MA=-" in log
+    assert "Ichimoku=-" in log
+    assert "Harmonic=-" in log
+    # score 분포 표시
+    assert "long=" in log and "short=" in log
+    # last_evaluated_bar_ts 갱신
+    assert bot._last_evaluated_bar_ts == 1735000000000
+
+
+def test_log_signal_evaluation_marks_in_position_context() -> None:
+    """보유 중 REVERSE 평가 vs 보유X 진입 평가 — 컨텍스트 라벨 구분."""
+    import logging
+
+    from aurora.core.signal import CompositeDecision
+
+    bot = bot_instance.get_instance()
+    decision = CompositeDecision(enter=False, direction=None, score=0.0,
+                                 long_score=0.0, short_score=0.0)
+
+    # caplog 으로 두 호출 비교
+    caplog_records = []
+    handler = logging.Handler()
+    handler.emit = lambda r: caplog_records.append(r.getMessage())
+    log = logging.getLogger("aurora.interfaces.bot_instance")
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    try:
+        bot._log_signal_evaluation([], decision, bar_ts=1, in_position=False)
+        bot._log_signal_evaluation([], decision, bar_ts=2, in_position=True)
+    finally:
+        log.removeHandler(handler)
+
+    assert any("보유X·진입 평가" in m for m in caplog_records)
+    assert any("보유중·REVERSE 평가" in m for m in caplog_records)
+
+
 @pytest.mark.asyncio
 async def test_step_updates_last_step_ts() -> None:
     """v0.1.29 — _step 호출 직후 last_step_ts 갱신 (configure 안 됐어도)."""

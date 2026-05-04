@@ -241,14 +241,24 @@ def test_bb_holds_on_close_outside() -> None:
 
 
 def test_bb_touch_short_when_high_in_upper_zone() -> None:
-    """high 가 upper zone 진입 + 종가 안쪽 → SHORT (강도 1.0)."""
+    """high 가 upper zone 진입 + 종가 안쪽 → SHORT (강도 1.0).
+
+    v0.1.28: wick reversal tier 도입 후 high 가 upper outside 면 그쪽이 우선 잡힘.
+    proximity touch 검증 위해 high 를 명시 계산된 zone 중앙 (upper 안쪽) 으로 설정.
+    """
+    import pandas as pd
+
+    from aurora.core.indicators import bollinger_bands
     rng = np.random.RandomState(11)
     closes = list(rng.randn(40) * 1.0 + 100)
-    # 직전 봉(인덱스 -1) 안쪽, 마지막 봉의 high 가 upper 근처, close 안쪽
-    last_close = float(np.mean(closes[-20:]))  # 안쪽 (middle 근처)
+    last_close = float(np.mean(closes[-20:]))
     closes.append(last_close)
-    # 마지막 봉 high 만 upper 위쪽까지 spike
-    highs = list(closes[:-1]) + [last_close + 5.0]
+    # BB upper 계산 → high 를 zone 안 (zone_start ~ upper) 중앙에 고정
+    bb_calc = bollinger_bands(pd.Series(closes), period=20, std=2.0)
+    upper_val = float(bb_calc["upper"].iloc[-1])
+    zone_start = upper_val * (1.0 - 0.005)
+    spike_high = (zone_start + upper_val) / 2.0  # zone 중앙 (upper 아래 inside)
+    highs = list(closes[:-1]) + [spike_high]
     lows = list(closes)
     df = _bb_df(closes, highs=highs, lows=lows)
     config = StrategyConfig()
@@ -262,13 +272,24 @@ def test_bb_touch_short_when_high_in_upper_zone() -> None:
 
 
 def test_bb_touch_long_when_low_in_lower_zone() -> None:
-    """low 가 lower zone 진입 + 종가 안쪽 → LONG (강도 1.0)."""
+    """low 가 lower zone 진입 + 종가 안쪽 → LONG (강도 1.0).
+
+    v0.1.28: wick reversal tier 도입 후 low 가 lower outside 면 그쪽이 우선 잡힘.
+    proximity touch 검증 위해 low 를 명시 계산된 zone 중앙 (lower 안쪽) 으로 설정.
+    """
+    import pandas as pd
+
+    from aurora.core.indicators import bollinger_bands
     rng = np.random.RandomState(13)
     closes = list(rng.randn(40) * 1.0 + 100)
     last_close = float(np.mean(closes[-20:]))
     closes.append(last_close)
+    bb_calc = bollinger_bands(pd.Series(closes), period=20, std=2.0)
+    lower_val = float(bb_calc["lower"].iloc[-1])
+    zone_end = lower_val * (1.0 + 0.005)
+    spike_low = (lower_val + zone_end) / 2.0  # zone 중앙 (lower 위 inside)
     highs = list(closes)
-    lows = list(closes[:-1]) + [last_close - 5.0]
+    lows = list(closes[:-1]) + [spike_low]
     df = _bb_df(closes, highs=highs, lows=lows)
     config = StrategyConfig()
     signals = detect_bollinger_touch(df, config)
@@ -276,6 +297,55 @@ def test_bb_touch_long_when_low_in_lower_zone() -> None:
         s.direction == Direction.LONG
         and s.source == "bollinger_lower"
         and s.strength == 1.0
+        for s in signals
+    )
+
+
+# ─── Tier 3: Wick reversal (v0.1.28 신규) ───
+
+
+def test_bb_wick_reversal_short_high_outside_close_inside() -> None:
+    """단일 봉 wick 가 upper outside + close inside → SHORT wick reversal (강도 1.5).
+
+    사용자 차트 진단 (BTCUSDT 1H, 봉 wick 만 상단 위로 overshoot, close 안으로 회귀)
+    정합 — 직전 봉 close inside 여도 발동.
+    """
+    rng = np.random.RandomState(17)
+    closes = list(rng.randn(40) * 1.0 + 100)
+    last_close = float(np.mean(closes[-20:]))  # middle 근처 (close inside)
+    closes.append(last_close)
+    # 직전 봉 close 도 명시적 middle 근처 강제 (tier 2 reversal 우연 발동 방지)
+    closes[-2] = last_close
+    # 마지막 봉 high 만 upper 위로 명백히 spike (outside 보장)
+    highs = list(closes[:-1]) + [last_close + 10.0]
+    lows = list(closes)
+    df = _bb_df(closes, highs=highs, lows=lows)
+    config = StrategyConfig()
+    signals = detect_bollinger_touch(df, config)
+    assert any(
+        s.direction == Direction.SHORT
+        and s.source == "bollinger_wick_reversal_upper"
+        and s.strength == 1.5
+        for s in signals
+    )
+
+
+def test_bb_wick_reversal_long_low_outside_close_inside() -> None:
+    """단일 봉 wick 가 lower outside + close inside → LONG wick reversal (강도 1.5)."""
+    rng = np.random.RandomState(19)
+    closes = list(rng.randn(40) * 1.0 + 100)
+    last_close = float(np.mean(closes[-20:]))
+    closes.append(last_close)
+    closes[-2] = last_close  # 직전 봉 close 도 inside 강제 (tier 2 우연 방지)
+    highs = list(closes)
+    lows = list(closes[:-1]) + [last_close - 10.0]
+    df = _bb_df(closes, highs=highs, lows=lows)
+    config = StrategyConfig()
+    signals = detect_bollinger_touch(df, config)
+    assert any(
+        s.direction == Direction.LONG
+        and s.source == "bollinger_wick_reversal_lower"
+        and s.strength == 1.5
         for s in signals
     )
 

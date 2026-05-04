@@ -558,8 +558,16 @@ def create_app() -> FastAPI:
 
     @app.post("/config", response_model=ConfigDTO)
     async def update_config(config: ConfigDTO) -> ConfigDTO:
-        """사용자 전략 설정 갱신 — 영구 저장."""
-        config_store.save(config.model_dump())
+        """사용자 전략 설정 갱신 — 영구 저장 + 봇 running 중이면 hot reload (v0.1.28).
+
+        흐름: UI 토글/슬라이더 변경 → 본 엔드포인트 → config_store 저장 +
+        BotInstance.apply_live_config — 봇 재시작 없이 즉시 반영.
+        """
+        cfg = config.model_dump()
+        config_store.save(cfg)
+        bot = bot_instance.get_instance()
+        if bot.running:
+            bot.apply_live_config(cfg)
         return config
 
     # ───── 제어 (Start/Stop) ────────────────────────

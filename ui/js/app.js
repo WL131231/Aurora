@@ -656,7 +656,9 @@ function showCtrlMsg(text, ok) {
 // 7. 전략 / 지표 토글 (use_* 4개)
 // ============================================================
 
-// data-config 속성을 가진 입력 type 별 적용/수집 (checkbox / radio / range / number / text/select)
+// data-config 속성을 가진 입력 type 별 적용/수집 (checkbox / radio / range / number / text/select).
+// v0.1.28: risk_pct 단위 변환 — UI 슬라이더 % 표시 (1.0 = "1.0%") ↔️ 백엔드 비율
+// (0.01 = 1%) 미스매치 fix. UI 저장 시 / 100, 로드 시 × 100.
 function _applyConfigValue(input, val) {
     if (val === undefined || val === null) return;
     if (input.type === "checkbox") {
@@ -665,7 +667,9 @@ function _applyConfigValue(input, val) {
         // 같은 name 라디오 그룹 — value 매칭되는 것만 checked
         input.checked = (input.value === String(val));
     } else if (input.type === "range" || input.type === "number") {
-        input.value = String(val);
+        // risk_pct: 백엔드 비율 (0.01) → UI 슬라이더 % (1.0) 변환
+        const uiVal = (input.dataset.config === "risk_pct") ? Number(val) * 100 : val;
+        input.value = String(uiVal);
         // 슬라이더 표시값 (lev-val 등) 갱신 트리거
         input.dispatchEvent(new Event("input"));
     } else {
@@ -676,7 +680,12 @@ function _applyConfigValue(input, val) {
 function _collectConfigValue(input) {
     if (input.type === "checkbox") return !!input.checked;
     if (input.type === "radio") return input.checked ? input.value : undefined;
-    if (input.type === "range" || input.type === "number") return parseFloat(input.value);
+    if (input.type === "range" || input.type === "number") {
+        const v = parseFloat(input.value);
+        // risk_pct: UI % (1.0) → 백엔드 비율 (0.01) 변환
+        if (input.dataset.config === "risk_pct") return v / 100;
+        return v;
+    }
     return input.value;
 }
 
@@ -749,6 +758,69 @@ document.getElementById("btn-register-alias")?.addEventListener("click", async (
         msg.style.color = "#fb7185";
     }
     setTimeout(() => { msg.textContent = ""; }, 5000);
+});
+
+// ============================================================
+// 7b. Live config apply (v0.1.28) — UI 변경 즉시 백엔드 + 봇 메모리 반영
+// ============================================================
+//
+// 흐름:
+//   1. 사용자가 토글/슬라이더/페어 카드 변경
+//   2. debounce 500ms 후 saveLiveConfig() — POST /config 호출
+//   3. 백엔드: config_store 저장 + bot.running 이면 apply_live_config (hot reload)
+//   4. ▼ 설정 저장 버튼은 fallback 으로 유지 (수동 트리거)
+
+function _debounce(fn, delay = 500) {
+    let timer = null;
+    return (...args) => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), delay);
+    };
+}
+
+async function _collectAndSaveConfig() {
+    const msg = document.getElementById("config-msg");
+    let cfg = {};
+    try {
+        cfg = { ...(await Api.getConfig()) };
+    } catch (_) { /* 미연결 — 빈 dict */ }
+
+    document.querySelectorAll("[data-config]").forEach((input) => {
+        const val = _collectConfigValue(input);
+        if (val !== undefined) cfg[input.dataset.config] = val;
+    });
+    const firstSelected = document.querySelector(".pair-card.selected");
+    if (firstSelected) {
+        cfg.primary_symbol = `${firstSelected.dataset.pair}:USDT`;
+    }
+    try {
+        await Api.updateConfig(cfg);
+        if (msg) {
+            msg.textContent = "✓ 자동 저장됨";
+            msg.style.color = "#22d3ee";
+            setTimeout(() => { msg.textContent = ""; }, 2000);
+        }
+    } catch (e) {
+        if (msg) {
+            msg.textContent = `자동 저장 실패: ${e.message}`;
+            msg.style.color = "#fb7185";
+        }
+    }
+}
+
+const saveLiveConfig = _debounce(_collectAndSaveConfig, 500);
+
+// 모든 data-config 입력에 변경 이벤트 연결
+document.querySelectorAll("[data-config]").forEach((input) => {
+    input.addEventListener("change", saveLiveConfig);
+    if (input.type === "range") {
+        input.addEventListener("input", saveLiveConfig);
+    }
+});
+
+// 페어 카드 click 도 라이브 저장 트리거
+document.querySelectorAll(".pair-card").forEach((card) => {
+    card.addEventListener("click", saveLiveConfig);
 });
 
 document.getElementById("btn-save-config")?.addEventListener("click", async () => {

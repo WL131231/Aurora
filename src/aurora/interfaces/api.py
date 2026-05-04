@@ -122,6 +122,38 @@ class ControlResponse(BaseModel):
     message: str
 
 
+class TradeDTO(BaseModel):
+    """``GET /trades`` — 청산된 trade 한 개 (v0.1.20).
+
+    Bybit P&L 표 매핑:
+        - market = symbol (BTCUSDT Perp)
+        - instrument = "USDT Perpetuals" (고정)
+        - entry_price → Entry Price
+        - exit_price → Traded Price
+        - qty → Order Quantity (sell 빨강)
+        - direction → Long / Short (UI 색)
+        - pnl_usd → Realized P&L (양수 초록 / 음수 빨강)
+        - roi_pct → ROI%
+        - closed_at_ts → Trade Time
+        - reason → 청산 사유 (sl / tp_full / tp_partial / reverse / manual)
+        - triggered_by → 진입 트리거
+    """
+
+    symbol: str
+    instrument: str = "USDT Perpetuals"  # Bybit 표기 일치
+    direction: str
+    leverage: int
+    qty: float
+    entry_price: float
+    exit_price: float
+    pnl_usd: float
+    roi_pct: float
+    opened_at_ts: int
+    closed_at_ts: int
+    reason: str
+    triggered_by: list[str] = []
+
+
 class UiUpdateResponse(BaseModel):
     """``POST /update/apply_ui`` — UI 핫 업데이트 결과.
 
@@ -313,6 +345,35 @@ def create_app() -> FastAPI:
             message="UI 갱신 완료 — 새로고침으로 즉시 적용됨",
             version=tag,
         )
+
+    # ───── Trades (거래내역, v0.1.20) ────────────────
+
+    @app.get("/trades", response_model=list[TradeDTO])
+    async def trades(limit: int = 50) -> list[TradeDTO]:
+        """청산된 거래내역 — 최근 N개 (rolling buffer).
+
+        Bybit P&L 표 형식 매핑. 봇 자기 청산만 (사용자 직접 청산은 미포함).
+        """
+        bot = bot_instance.get_instance()
+        records = bot.closed_trades[-limit:] if limit > 0 else bot.closed_trades
+        # 신→구 (가장 최근 trade 가 위로 오게 reverse)
+        return [
+            TradeDTO(
+                symbol=t.symbol,
+                direction=t.direction,
+                leverage=t.leverage,
+                qty=t.qty,
+                entry_price=t.entry_price,
+                exit_price=t.exit_price,
+                pnl_usd=t.pnl_usd,
+                roi_pct=t.roi_pct,
+                opened_at_ts=t.opened_at_ts,
+                closed_at_ts=t.closed_at_ts,
+                reason=t.reason,
+                triggered_by=list(t.triggered_by),
+            )
+            for t in reversed(records)
+        ]
 
     # ───── Config ───────────────────────────────────
 

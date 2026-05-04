@@ -250,6 +250,9 @@ async function refreshDashboard() {
 
         // 열린 포지션 표 — /positions 호출 + 행 렌더
         await refreshPositions();
+
+        // 거래내역 (P&L) 표 — /trades 호출 + Bybit 스타일 행 렌더 (v0.1.20)
+        await refreshTrades();
     } catch (_) {
         connDot.style.background = "#fb7185";
         connDot.style.boxShadow  = "0 0 8px #fb7185";
@@ -302,6 +305,63 @@ async function refreshPositions() {
             <td class="mono">${Number(p.quantity).toFixed(4)}</td>
             <td class="mono">${p.leverage}×</td>
             <td class="mono">${fmtPnl(p)}</td>
+        </tr>
+    `).join("");
+}
+
+// 거래내역 (P&L) 표 갱신 — Bybit 스타일 (v0.1.20). /trades 호출 + tbody 행 렌더.
+async function refreshTrades() {
+    const tbody = document.getElementById("trades-tbody");
+    if (!tbody) return;
+    let trades = [];
+    try {
+        trades = await Api.getTrades(50);
+    } catch (_) {
+        return;
+    }
+    if (!Array.isArray(trades) || trades.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="trades-empty">거래내역 없음</td></tr>';
+        return;
+    }
+    const fmtPrice = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtTime = (ts) => {
+        const d = new Date(ts);
+        const yy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        const hh = String(d.getHours()).padStart(2, "0");
+        const mi = String(d.getMinutes()).padStart(2, "0");
+        const ss = String(d.getSeconds()).padStart(2, "0");
+        return `${yy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+    };
+    const fmtPnl = (n) => {
+        const v = Number(n);
+        const sign = v >= 0 ? "+" : "";
+        const color = v >= 0 ? "#34d399" : "#fb7185";
+        return `<span style="color:${color}">${sign}${v.toFixed(4)}</span>`;
+    };
+    // Bybit 패턴 — qty 색: short = 빨강 (sell), long = 초록 (buy 진입 → reduce sell 청산)
+    // Aurora 는 Bybit P&L 화면처럼 "방향 = 진입 방향" 기준 표시.
+    const fmtQty = (qty, dir) => {
+        const color = dir === "short" ? "#fb7185" : "#34d399";
+        return `<span style="color:${color}">${Number(qty).toFixed(4)}</span>`;
+    };
+    // Symbol 표시 — "BTC/USDT:USDT" → "BTCUSDT Perp"
+    const fmtSymbol = (s) => {
+        const base = s.split("/")[0] || s;
+        const quote = (s.split("/")[1] || "").split(":")[0] || "USDT";
+        return `${base}${quote} <span class="trade-perp">Perp</span>`;
+    };
+    tbody.innerHTML = trades.map(t => `
+        <tr>
+            <td>${fmtSymbol(t.symbol)}</td>
+            <td class="mono">${t.instrument}</td>
+            <td class="mono">${fmtPrice(t.entry_price)}</td>
+            <td class="mono">${fmtPrice(t.exit_price)}</td>
+            <td class="mono">${fmtQty(t.qty, t.direction)}</td>
+            <td>Trade</td>
+            <td class="mono">${fmtPnl(t.pnl_usd)}</td>
+            <td class="mono">${fmtTime(t.closed_at_ts)}</td>
         </tr>
     `).join("");
 }

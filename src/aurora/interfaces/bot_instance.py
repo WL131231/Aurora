@@ -165,6 +165,56 @@ class BotInstance:
         """
         return self._external_position
 
+    def apply_live_config(self, cfg: dict) -> None:
+        """Live config update — running 중에도 일부 필드 즉시 반영 (v0.1.28).
+
+        UI 토글/슬라이더 변경 → POST /config → 본 메서드 → 다음 step 부터 새 값 사용.
+        ▶ 봇 재시작 없이도 설정 반영.
+
+        즉시 반영 (다음 step 부터):
+            - ``use_bollinger`` / ``use_ma_cross`` / ``use_ichimoku`` / ``use_harmonic``
+              (Selectable 지표 토글 → ``strategy_config`` 업데이트)
+
+        다음 진입부터 반영:
+            - ``leverage`` / ``risk_pct`` / ``full_seed``
+              (현재 보유 포지션은 진입 시점 plan 따라 진행)
+
+        재시작 권장 (즉시 반영 X):
+            - ``primary_symbol`` / ``timeframes`` / ``default_exchange`` / API 키
+              (페어 변경은 cache 다시 warmup 필요, 어댑터 재생성 필요)
+
+        Args:
+            cfg: ``ConfigDTO.model_dump()`` 형식 dict.
+        """
+        # Selectable 지표 — 즉시 (다음 step 부터)
+        for key in ("use_bollinger", "use_ma_cross", "use_ichimoku", "use_harmonic"):
+            if key in cfg:
+                setattr(self._strategy_config, key, bool(cfg[key]))
+
+        # 다음 진입부터
+        if "leverage" in cfg:
+            try:
+                self._leverage = int(cfg["leverage"])
+            except (ValueError, TypeError):
+                pass
+        if "risk_pct" in cfg:
+            try:
+                self._risk_pct = float(cfg["risk_pct"])
+            except (ValueError, TypeError):
+                pass
+        if "full_seed" in cfg:
+            self._full_seed = bool(cfg["full_seed"])
+
+        logger.info(
+            "BotInstance.apply_live_config: use_bb=%s use_ma=%s use_ichi=%s use_harm=%s "
+            "lev=%d risk_pct=%.4f full_seed=%s",
+            self._strategy_config.use_bollinger,
+            self._strategy_config.use_ma_cross,
+            self._strategy_config.use_ichimoku,
+            self._strategy_config.use_harmonic,
+            self._leverage, self._risk_pct, self._full_seed,
+        )
+
     def _record_closed(self, closed: ClosedTrade) -> None:
         """ClosedTrade 메모리 buffer + 디스크 영속화 통합 (v0.1.25).
 

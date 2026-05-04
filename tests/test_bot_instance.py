@@ -480,6 +480,50 @@ async def test_restore_active_position_exchange_empty_clears(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_apply_live_config_updates_strategy_use_flags() -> None:
+    """v0.1.28 — apply_live_config 가 use_* 토글 즉시 반영 (running 중에도)."""
+    bot = bot_instance.get_instance()
+    # 초기: 모두 False
+    assert bot._strategy_config.use_bollinger is False
+    assert bot._strategy_config.use_ma_cross is False
+
+    bot.apply_live_config({
+        "use_bollinger": True,
+        "use_ma_cross": True,
+        "use_ichimoku": False,
+        "use_harmonic": True,
+    })
+    assert bot._strategy_config.use_bollinger is True
+    assert bot._strategy_config.use_ma_cross is True
+    assert bot._strategy_config.use_ichimoku is False
+    assert bot._strategy_config.use_harmonic is True
+
+
+def test_apply_live_config_updates_leverage_and_risk_pct() -> None:
+    """v0.1.28 — leverage / risk_pct / full_seed 갱신 (다음 진입부터 반영)."""
+    bot = bot_instance.get_instance()
+    bot.apply_live_config({
+        "leverage": 25,
+        "risk_pct": 0.02,
+        "full_seed": True,
+    })
+    assert bot._leverage == 25
+    assert bot._risk_pct == 0.02
+    assert bot._full_seed is True
+
+
+def test_apply_live_config_partial_dict_only_updates_keys_present() -> None:
+    """일부 키만 들어와도 그 키만 갱신 (나머지 보존)."""
+    bot = bot_instance.get_instance()
+    bot._leverage = 10
+    bot._risk_pct = 0.01
+    bot.apply_live_config({"use_bollinger": True})  # leverage / risk_pct 없음
+    assert bot._strategy_config.use_bollinger is True
+    assert bot._leverage == 10  # 보존
+    assert bot._risk_pct == 0.01  # 보존
+
+
+@pytest.mark.asyncio
 async def test_restore_active_position_paper_skipped(monkeypatch) -> None:
     """paper 모드 — 영속 plan 있어도 실 거래소 호출 X 정책 → restore skip."""
     from aurora.core.risk import PositionSize, RiskPlan, TrailingMode

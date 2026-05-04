@@ -394,11 +394,36 @@ def detect_bollinger_touch(
                 bar_timestamp=ts,
             )]
 
-    # ─── 3. 찢어짐 보류 (현재 봉 종가가 BB 밖) ────────────
+    # ─── 3. 단일 봉 wick reversal (v0.1.28 신규, 사용자 차트 진단) ────
+    # 현재 봉 안에서 wick 만 outside (high > upper or low < lower) + close inside.
+    # 직전 봉이 upper 안에서 닫혔어도 현재 봉 wick reversion 자체로 진입 신호.
+    # 강도 1.5 (Reversal 과 동일) — 단일 봉이 reversion candle 자체.
+    if last_high > last_upper_f and last_close <= last_upper_f:
+        return [EntrySignal(
+            direction=Direction.SHORT,
+            timeframe="1H",
+            source="bollinger_wick_reversal_upper",
+            strength=1.5,
+            note=f"BB 상단 wick reversal (high={last_high:.4f}>{last_upper_f:.4f}, "
+                 f"close={last_close:.4f}≤{last_upper_f:.4f})",
+            bar_timestamp=ts,
+        )]
+    if last_low < last_lower_f and last_close >= last_lower_f:
+        return [EntrySignal(
+            direction=Direction.LONG,
+            timeframe="1H",
+            source="bollinger_wick_reversal_lower",
+            strength=1.5,
+            note=f"BB 하단 wick reversal (low={last_low:.4f}<{last_lower_f:.4f}, "
+                 f"close={last_close:.4f}≥{last_lower_f:.4f})",
+            bar_timestamp=ts,
+        )]
+
+    # ─── 4. 찢어짐 보류 (현재 봉 종가가 BB 밖) ────────────
     if last_close > last_upper_f or last_close < last_lower_f:
         return []
 
-    # ─── 4. Proximity 터치 진입 (가장자리 안쪽 zone) ──────
+    # ─── 5. Proximity 터치 진입 (가장자리 안쪽 zone) ──────
     upper_zone_start = last_upper_f * (1.0 - config.bollinger_proximity_pct)
     lower_zone_end = last_lower_f * (1.0 + config.bollinger_proximity_pct)
 

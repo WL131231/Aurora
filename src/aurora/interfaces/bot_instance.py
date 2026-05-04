@@ -129,6 +129,10 @@ class BotInstance:
         self._last_signal_log_key: str = ""    # 직전 평가 dedup key
         self._last_signal_log_ts: int = 0      # 마지막 로그 출력 ms (heartbeat)
 
+        # v0.1.33: apply_live_config 중복 호출 dedup — UI debounce 후에도 변화 없는 호출
+        # 가능 (POST /config 동일 cfg). 같은 적용 대상 필드 셋이면 silent.
+        self._last_applied_config_key: str = ""
+
         # 거래내역 (v0.1.20) — close_position 마다 ClosedTrade 추가 (rolling 100).
         # GUI "거래내역" 표 표시 + Telegram 알림 + PnL 카드 데이터 source.
         # v0.1.25: 디스크에서 영속화된 record 복원 → 봇 재시작 후 표 / 통계 유지.
@@ -196,6 +200,8 @@ class BotInstance:
             - ``primary_symbol`` / ``timeframes`` / ``default_exchange`` / API 키
               (페어 변경은 cache 다시 warmup 필요, 어댑터 재생성 필요)
 
+        v0.1.33: 적용 대상 필드 변화 없으면 silent (UI debounce 후 중복 호출 방지).
+
         Args:
             cfg: ``ConfigDTO.model_dump()`` 형식 dict.
         """
@@ -218,6 +224,19 @@ class BotInstance:
         if "full_seed" in cfg:
             self._full_seed = bool(cfg["full_seed"])
 
+        # v0.1.33: 적용 결과 dedup key — 같으면 silent (중복 INFO 노이즈 차단)
+        new_key = (
+            f"bb={self._strategy_config.use_bollinger}|"
+            f"ma={self._strategy_config.use_ma_cross}|"
+            f"ichi={self._strategy_config.use_ichimoku}|"
+            f"harm={self._strategy_config.use_harmonic}|"
+            f"lev={self._leverage}|risk={self._risk_pct:.4f}|"
+            f"full={self._full_seed}"
+        )
+        if new_key == self._last_applied_config_key:
+            return
+        self._last_applied_config_key = new_key
+
         logger.info(
             "BotInstance.apply_live_config: use_bb=%s use_ma=%s use_ichi=%s use_harm=%s "
             "lev=%d risk_pct=%.4f full_seed=%s",
@@ -228,12 +247,84 @@ class BotInstance:
             self._leverage, self._risk_pct, self._full_seed,
         )
 
+    def _compute_diagnostic_line(
+        self,
+        df_by_tf: dict,
+        last_close: float,
+    ) -> str:
+        """지표 진단 1줄 (v0.1.33) — 신호 X 일 때 "왜 X" 한눈에.
+
+        1H TF 기준 핵심 메트릭:
+            - EMA200 / EMA480 거리% (가격 vs EMA, +위 / -아래)
+            - BB width% + 상/하단 거리% + squeeze 여부
+            - RSI 14 값
+
+        EMA 임계 ±0.3%, BB squeeze threshold = 1.5% (config 디폴트) 와 비교 가능.
+        실패 / 데이터 부족 시 빈 segment 자연 skip.
+        """
+        import pandas as pd
+
+        from aurora.core.indicators import bollinger_bands, ema
+        from aurora.core.indicators import rsi as rsi_fn
+
+        df_1h = df_by_tf.get("1H")
+        if df_1h is None or df_1h.empty or "close" not in df_1h.columns:
+            return ""
+
+        parts: list[str] = []
+        cfg = self._strategy_config
+
+        # EMA — 200 + 480 거리% (가격 vs EMA, +위 / -아래)
+        for period in cfg.ema_periods:
+            try:
+                ema_val = float(ema(df_1h["close"], period).iloc[-1])
+                if pd.isna(ema_val) or ema_val <= 0:
+                    continue
+                dist = (last_close - ema_val) / ema_val * 100.0
+                parts.append(f"EMA{period}@1H={dist:+.2f}%")
+            except (ValueError, IndexError):
+                continue
+
+        # BB — width / 상하단 거리 / squeeze
+        try:
+            bb = bollinger_bands(
+                df_1h["close"],
+                period=cfg.bollinger_period,
+                std=cfg.bollinger_std,
+            )
+            bu = float(bb["upper"].iloc[-1])
+            bl = float(bb["lower"].iloc[-1])
+            bm = float(bb["middle"].iloc[-1])
+            if not (pd.isna(bu) or pd.isna(bl) or bm <= 0):
+                width_pct = (bu - bl) / bm * 100.0
+                up_dist = (bu - last_close) / last_close * 100.0
+                lo_dist = (last_close - bl) / last_close * 100.0
+                squeeze = (bu - bl) / bm <= cfg.bollinger_squeeze_threshold
+                tag = "/squeeze" if squeeze else ""
+                parts.append(
+                    f"BB@1H[w={width_pct:.2f}%{tag},"
+                    f"up={up_dist:+.2f}% lo={lo_dist:+.2f}%]",
+                )
+        except (ValueError, IndexError):
+            pass
+
+        # RSI 14 값
+        try:
+            rsi_val = float(rsi_fn(df_1h["close"], 14).iloc[-1])
+            if not pd.isna(rsi_val):
+                parts.append(f"RSI@1H={rsi_val:.1f}")
+        except (ValueError, IndexError):
+            pass
+
+        return " | ".join(parts) if parts else ""
+
     def _log_signal_evaluation(
         self,
         signals: list,
         decision,
         bar_ts: int,
         in_position: bool = False,
+        diagnostic: str = "",
     ) -> None:
         """신호 평가 결과 1줄 요약 로그 (v0.1.31 + v0.1.32 throttle).
 
@@ -297,6 +388,9 @@ class BotInstance:
             "[신호평가 %s] %s | score: long=%.2f short=%.2f | %s%s",
             ctx, joined, decision.long_score, decision.short_score, verdict, suffix,
         )
+        # v0.1.33: 진단 1줄 추가 — 신호 X 일 때 "왜 X" 한눈에 (EMA 거리 / BB / RSI 등)
+        if diagnostic:
+            logger.info("[지표진단] %s", diagnostic)
         self._last_signal_log_key = key
         self._last_signal_log_ts = now_ms
         self._last_evaluated_bar_ts = bar_ts
@@ -787,10 +881,13 @@ class BotInstance:
                 )
                 cur_dir = self._executor._plan.direction
                 # v0.1.32: 보유 중 REVERSE 평가도 매 step throttle (변화 + 60초 heartbeat)
+                # v0.1.33: 진단 1줄 동봉
                 bar_ts_pos = int(primary_df.index[-1].value // 1_000_000)
                 rev_decision = compose_entry(rev_signals)
+                diag_pos = self._compute_diagnostic_line(df_by_tf, current_price)
                 self._log_signal_evaluation(
                     rev_signals, rev_decision, bar_ts_pos, in_position=True,
+                    diagnostic=diag_pos,
                 )
                 if compose_exit(cur_dir, rev_signals):
                     logger.info("REVERSE 신호 (%s) → 청산 (다음 step 진입 평가)", cur_dir)
@@ -854,8 +951,12 @@ class BotInstance:
 
         # v0.1.32: 매 step 평가 결과를 _log_signal_evaluation 에 전달.
         # throttle 은 함수 내부 (변화 시 즉시 + 60초 heartbeat) — 봉 닫힘 시점 제약 X.
+        # v0.1.33: 진단 1줄 (EMA 거리 / BB / RSI 등) 동봉
         bar_ts = int(primary_df.index[-1].value // 1_000_000)
-        self._log_signal_evaluation(signals, decision, bar_ts, in_position=False)
+        diag = self._compute_diagnostic_line(df_by_tf, current_price)
+        self._log_signal_evaluation(
+            signals, decision, bar_ts, in_position=False, diagnostic=diag,
+        )
 
         if not decision.enter or decision.direction is None:
             return

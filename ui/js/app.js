@@ -1262,15 +1262,19 @@ document.getElementById("btn-run-bt")?.addEventListener("click", () => {
 });
 
 // ============================================================
-// 11. Logs view — WebSocket 실시간 + 필터 / 검색 / 다운로드
+// 11. Logs view — WebSocket 실시간 + fallback 폴링 + 필터 / 검색 / 다운로드
 // ============================================================
 
 const Logs = (() => {
-    // 화면·메모리 모두 보호 차원의 상한. 봇 운영 중 INFO 다량 발생해도 GUI 불안정 방지.
-    const MAX_LINES = 1000;
+    // PR-G: 200줄 상한 (기존 1000 → DOM/메모리 절감 + 실용 충분).
+    const MAX_LINES = 200;
+    const MAX_WS_RETRIES = 5;   // 5회 실패 → 폴링 fallback 고정
+    const POLL_INTERVAL = 5000; // fallback 폴링 주기 (ms)
 
-    const buffer = [];          // 수신된 record 누적 (FIFO, MAX 도달 시 shift)
-    let liveConn = null;        // connectLiveLog 반환 객체
+    const buffer = [];
+    let liveConn = null;
+    let wsRetries = 0;          // WS 재연결 시도 횟수
+    let pollTimer = null;       // fallback 폴링 interval ID
     let initialized = false;
 
     const $ = (id) => document.getElementById(id);
@@ -1280,12 +1284,23 @@ const Logs = (() => {
     const $status = () => $("log-status");
     const $autoStream = () => $("log-autostream");
     const $search = () => $("log-search");
+    const $scrollBtn = () => $("log-scroll-btn");
 
-    // 사용자가 켠 레벨 set — Python 표준 레벨 키로 저장 (INFO/WARNING/ERROR).
+    // 사용자가 켠 레벨 set
     function enabledLevels() {
         const set = new Set();
         document.querySelectorAll("[data-log-level]").forEach((el) => {
             if (el.checked) set.add(el.dataset.logLevel);
+        });
+        return set;
+    }
+
+    // 모듈 필터 — 버튼에 active-* 클래스가 있으면 켜진 것
+    function enabledModules() {
+        const set = new Set();
+        document.querySelectorAll("[data-log-module]").forEach((el) => {
+            const m = el.dataset.logModule;
+            if (el.classList.contains(`active-${m}`)) set.add(m);
         });
         return set;
     }
@@ -1296,8 +1311,15 @@ const Logs = (() => {
         return "log-level-info";
     }
 
-    // 필터·검색 매칭. CRITICAL 은 ERROR 체크박스에 흡수 (별도 토글 없음).
-    function isVisible(record, levels, query) {
+    // logger 이름 → aurora.<module> 추출 (없으면 null)
+    function loggerModule(logger) {
+        if (!logger) return null;
+        const m = logger.match(/^aurora\.(core|exchange|interfaces|backtest)/);
+        return m ? m[1] : null;
+    }
+
+    // 필터·검색·모듈 매칭
+    function isVisible(record, levels, query, modules) {
         const lvl = (record.level === "WARN") ? "WARNING"
                   : (record.level === "CRITICAL") ? "ERROR"
                   : record.level;
@@ -1306,6 +1328,10 @@ const Logs = (() => {
             const hay = `${record.message || ""} ${record.logger || ""}`.toLowerCase();
             if (!hay.includes(query.toLowerCase())) return false;
         }
+        // 모듈 필터: aurora.* 로거이고 해당 모듈이 꺼져 있으면 숨김.
+        // aurora.* 아닌 로거(root 등)는 모듈 필터 대상 외 → 항상 표시.
+        const mod = loggerModule(record.logger);
+        if (mod && !modules.has(mod)) return false;
         return true;
     }
 
@@ -1321,9 +1347,27 @@ const Logs = (() => {
         lvl.textContent = (record.level || "").padEnd(7).slice(0, 7);
         const msg = document.createElement("span");
         msg.className = "log-line-msg";
-        msg.textContent = `${record.logger ? record.logger + ": " : ""}${record.message || ""}`;
+        if (record.logger) {
+            const prefix = document.createElement("span");
+            const mod = loggerModule(record.logger);
+            prefix.className = mod ? `log-prefix-${mod}` : "";
+            prefix.textContent = record.logger + ": ";
+            const text = document.createElement("span");
+            text.textContent = record.message || "";
+            msg.append(prefix, text);
+        } else {
+            msg.textContent = record.message || "";
+        }
         el.append(ts, lvl, msg);
         return el;
+    }
+
+    function updateScrollBtn() {
+        const box = $box();
+        const btn = $scrollBtn();
+        if (!box || !btn) return;
+        const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
+        btn.classList.toggle("visible", !atBottom);
     }
 
     function appendLine(record) {
@@ -1333,16 +1377,16 @@ const Logs = (() => {
         if (empty) empty.style.display = "none";
         const levels = enabledLevels();
         const query = ($search()?.value) || "";
-        // Why: 사용자가 직접 위로 스크롤해서 과거 보고 있으면 강제 자동스크롤 X (UX).
+        const modules = enabledModules();
         const wasAtBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
         const el = makeLineEl(record);
-        if (!isVisible(record, levels, query)) el.style.display = "none";
+        if (!isVisible(record, levels, query, modules)) el.style.display = "none";
         box.appendChild(el);
-        // DOM 라인 수 상한 — buffer 와 별개로 매우 오래된 노드는 떼어냄 (메모리 보호)
         while (box.querySelectorAll(".log-line").length > MAX_LINES) {
             box.querySelector(".log-line")?.remove();
         }
         if (wasAtBottom) box.scrollTop = box.scrollHeight;
+        updateScrollBtn();
     }
 
     function rerenderAll() {
@@ -1351,10 +1395,11 @@ const Logs = (() => {
         Array.from(box.querySelectorAll(".log-line")).forEach((el) => el.remove());
         const levels = enabledLevels();
         const query = ($search()?.value) || "";
+        const modules = enabledModules();
         let visibleCount = 0;
         for (const r of buffer) {
             const el = makeLineEl(r);
-            if (!isVisible(r, levels, query)) el.style.display = "none";
+            if (!isVisible(r, levels, query, modules)) el.style.display = "none";
             else visibleCount++;
             box.appendChild(el);
         }
@@ -1362,6 +1407,7 @@ const Logs = (() => {
         if (empty) empty.style.display = visibleCount === 0 ? "block" : "none";
         box.scrollTop = box.scrollHeight;
         updateCount();
+        updateScrollBtn();
     }
 
     function updateCount() {
@@ -1387,7 +1433,6 @@ const Logs = (() => {
         try {
             const data = await Api.getLogs(limit);
             const lines = (data && data.lines) || [];
-            // ts+message 키로 dedup (서버 폴링 결과가 buffer 와 겹칠 수 있음)
             const seen = new Set(buffer.map((r) => `${r.ts}|${r.message}`));
             for (const r of lines) {
                 const k = `${r.ts}|${r.message}`;
@@ -1398,9 +1443,23 @@ const Logs = (() => {
             }
             while (buffer.length > MAX_LINES) buffer.shift();
             rerenderAll();
-            setStatus(`폴링 완료 (${lines.length}줄)`, true);
+            setStatus(`폴링 (${lines.length}줄)`, true);
         } catch (e) {
             setStatus(`폴링 실패: ${e.message}`, false);
+        }
+    }
+
+    function startPolling() {
+        if (pollTimer) return;
+        pollOnce(100);
+        pollTimer = setInterval(() => pollOnce(100), POLL_INTERVAL);
+        setStatus("폴링 모드 (WS 불가)", false);
+    }
+
+    function stopPolling() {
+        if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
         }
     }
 
@@ -1408,18 +1467,21 @@ const Logs = (() => {
         if (liveConn) return;
         setStatus("실시간 연결 중...", true);
         liveConn = Api.connectLiveLog({
-            // open: 연결 확립 시점. 첫 record 안 와도 시각 피드백 제공 (UX).
             onOpen: () => setStatus("LIVE (대기)", true),
             onMessage: (record) => {
                 pushRecord(record);
                 setStatus("LIVE", true);
             },
-            onError: (reason) => {
-                setStatus(`LIVE 끊김: ${reason}`, false);
+            onError: () => {
                 stopLive();
-                // 자동 재연결: 토글이 여전히 켜져있을 때만 5초 후 재시도
-                if ($autoStream()?.checked) {
+                if (!$autoStream()?.checked) return;
+                wsRetries++;
+                if (wsRetries <= MAX_WS_RETRIES) {
+                    setStatus(`LIVE 끊김 (${wsRetries}/${MAX_WS_RETRIES}) — 재연결 중...`, false);
                     setTimeout(() => { if ($autoStream()?.checked) startLive(); }, 5000);
+                } else {
+                    // 5회 초과 → polling fallback 고정 (토글 켜진 동안 유지)
+                    startPolling();
                 }
             },
         });
@@ -1435,33 +1497,56 @@ const Logs = (() => {
     function init() {
         if (initialized) return;
         const box = $box();
-        if (!box) return;  // Logs view 마크업 없으면 noop
+        if (!box) return;
         initialized = true;
 
-        // 필터 체크박스
+        // 레벨 체크박스
         document.querySelectorAll("[data-log-level]").forEach((cb) => {
             cb.addEventListener("change", rerenderAll);
         });
+
+        // 모듈 필터 토글 버튼
+        document.querySelectorAll("[data-log-module]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                const m = btn.dataset.logModule;
+                btn.classList.toggle(`active-${m}`);
+                rerenderAll();
+            });
+        });
+
         // 검색
         $search()?.addEventListener("input", rerenderAll);
-        // 실시간 토글
+
+        // 실시간 토글 — 켜면 retry 초기화 후 WS 시도, 끄면 WS+폴링 모두 중단
         $autoStream()?.addEventListener("change", () => {
-            if ($autoStream().checked) startLive();
-            else stopLive();
+            if ($autoStream().checked) {
+                wsRetries = 0;
+                stopPolling();
+                startLive();
+            } else {
+                stopLive();
+                stopPolling();
+                setStatus("실시간 OFF", true);
+            }
         });
+
         // 버튼들
         $("log-refresh")?.addEventListener("click", () => pollOnce(200));
         $("log-clear")?.addEventListener("click", () => {
-            // Why: 화면(DOM) 만 비우고 buffer 는 유지. 새로고침 시 복원 가능 + 새 record 계속 push.
             Array.from(box.querySelectorAll(".log-line")).forEach((el) => el.remove());
             const empty = $empty();
             if (empty) empty.style.display = "block";
             setStatus(`화면 비움 (버퍼 ${buffer.length}줄 유지)`, true);
         });
 
-        // v0.1.35 — 로그 복사: 보이는 줄 (필터 적용된 visible) 만 텍스트로 클립보드.
-        // Why: pywebview 환경에서 마우스 드래그 select 가 직관적이지 않을 수 있음 →
-        // 한 클릭 복사 + ts/level/msg 탭 구분 → 외부 (텔레그램/이슈) 붙여넣기 깔끔.
+        // ↓ 최신으로 버튼 — 사용자가 위로 스크롤 중일 때 나타남
+        box.addEventListener("scroll", updateScrollBtn);
+        $scrollBtn()?.addEventListener("click", () => {
+            box.scrollTop = box.scrollHeight;
+            updateScrollBtn();
+        });
+
+        // v0.1.35 — 로그 복사/저장
         function _formatLogText() {
             const lines = Array.from(box.querySelectorAll(".log-line"))
                 .filter((el) => el.style.display !== "none");
@@ -1475,16 +1560,11 @@ const Logs = (() => {
 
         $("log-copy")?.addEventListener("click", async () => {
             const text = _formatLogText();
-            if (!text) {
-                setStatus("복사 X — 표시된 로그 없음", false);
-                return;
-            }
+            if (!text) { setStatus("복사 X — 표시된 로그 없음", false); return; }
             try {
                 await navigator.clipboard.writeText(text);
-                const lineCount = text.split("\n").length;
-                setStatus(`✓ 클립보드 복사 (${lineCount}줄)`, true);
+                setStatus(`✓ 클립보드 복사 (${text.split("\n").length}줄)`, true);
             } catch (e) {
-                // 권한 거부 / 비-secure context — fallback: 임시 textarea
                 const ta = document.createElement("textarea");
                 ta.value = text;
                 ta.style.position = "fixed";
@@ -1504,10 +1584,7 @@ const Logs = (() => {
 
         $("log-download")?.addEventListener("click", () => {
             const text = _formatLogText();
-            if (!text) {
-                setStatus("저장 X — 표시된 로그 없음", false);
-                return;
-            }
+            if (!text) { setStatus("저장 X — 표시된 로그 없음", false); return; }
             const ts = new Date();
             const fname = `aurora_log_${ts.getFullYear()}${String(ts.getMonth()+1).padStart(2,"0")}${String(ts.getDate()).padStart(2,"0")}_${String(ts.getHours()).padStart(2,"0")}${String(ts.getMinutes()).padStart(2,"0")}.txt`;
             const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
@@ -1522,7 +1599,7 @@ const Logs = (() => {
             setStatus(`✓ 저장됨 (${fname})`, true);
         });
 
-        // 초기 catch-up: /logs 폴링으로 최근 100 줄 가져오고, 자동 토글 켜져있으면 LIVE 시작.
+        // 초기 catch-up + 자동 스트리밍 시작
         pollOnce(100).then(() => {
             if ($autoStream()?.checked) startLive();
         });

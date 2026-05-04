@@ -22,6 +22,7 @@ CORS 정책:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -617,17 +618,29 @@ def create_app() -> FastAPI:
     # ───── WebSocket 실시간 push ────────────────────
 
     _ws_clients: set[WebSocket] = set()
+    # v0.1.34: _ws_clients 동시 mutate 보호 — broadcast_log (iterate) + ws_live
+    # (add/discard) 동시 진행 가능. CPython GIL 만으로는 set 변경 도중 RuntimeError
+    # ("Set changed size during iteration") 가능성 → asyncio.Lock 으로 직렬화.
+    _ws_lock = asyncio.Lock()
 
     async def broadcast_log(record: dict) -> None:
-        """새 log record 발생 시 모든 연결된 클라이언트에 push."""
-        dead = []
-        for ws in _ws_clients:
+        """새 log record 발생 시 모든 연결된 클라이언트에 push.
+
+        Lock 으로 iterate snapshot — broadcast 중 새 connect/disconnect 와 race 회피.
+        send 자체는 lock 밖에서 실행 (개별 client 응답 대기 시 다른 client 영향 X).
+        """
+        async with _ws_lock:
+            snapshot = list(_ws_clients)  # 불변 스냅샷 — iterate 중 mutate 차단
+        dead: list[WebSocket] = []
+        for ws in snapshot:
             try:
                 await ws.send_json({"type": "log", "data": record})
-            except Exception:
+            except Exception:  # noqa: BLE001 — 어떤 send 실패도 dead 처리
                 dead.append(ws)
-        for ws in dead:
-            _ws_clients.discard(ws)
+        if dead:
+            async with _ws_lock:
+                for ws in dead:
+                    _ws_clients.discard(ws)
 
     log_buffer.set_broadcaster(broadcast_log)
 
@@ -635,13 +648,15 @@ def create_app() -> FastAPI:
     async def ws_live(websocket: WebSocket) -> None:
         """실시간 로그 broadcast — 연결 직후 최근 50줄 catch-up 후 신규 record push."""
         await websocket.accept()
-        _ws_clients.add(websocket)
+        async with _ws_lock:
+            _ws_clients.add(websocket)
         try:
             for line in log_buffer.get_recent(50):
                 await websocket.send_json({"type": "log", "data": line})
             while True:
                 await websocket.receive_text()  # 클라이언트 ping 수신 (keep-alive)
         except WebSocketDisconnect:
-            _ws_clients.discard(websocket)
+            async with _ws_lock:
+                _ws_clients.discard(websocket)
 
     return app

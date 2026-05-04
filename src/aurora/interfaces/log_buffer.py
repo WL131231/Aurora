@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 import traceback
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -21,6 +22,10 @@ from datetime import UTC, datetime
 _BUFFER_SIZE = 1000
 _buffer: deque[dict] = deque(maxlen=_BUFFER_SIZE)
 _broadcaster: Callable[[dict], Awaitable[None]] | None = None
+# v0.1.34: event loop 없을 때 silent pass 방지 — 첫 실패만 stderr 1줄 명시
+# (이후 silent 유지, 로그 폭주 회피). logging 모듈 재호출 시 BufferHandler.emit
+# 재귀 위험 → print 직접 사용.
+_no_loop_warned: bool = False
 
 
 def set_broadcaster(fn: Callable[[dict], Awaitable[None]]) -> None:
@@ -46,14 +51,23 @@ class BufferHandler(logging.Handler):
             "message": msg,
         }
         _buffer.append(item)
-        # broadcaster 등록 + event loop 실행 중이면 비동기 push
-        if _broadcaster:
+        # broadcaster 등록 + running event loop 가 있으면 비동기 push.
+        # v0.1.34: get_event_loop (deprecated 3.10+) → get_running_loop. 실패 시 첫
+        # 1회 stderr 명시 후 silent — 디버그 가능 + 폭주 회피.
+        if _broadcaster is not None:
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.create_task(_broadcaster(item))
+                asyncio.get_running_loop()
             except RuntimeError:
-                pass  # event loop 없음 (테스트 등)
+                global _no_loop_warned
+                if not _no_loop_warned:
+                    print(
+                        "log_buffer: running event loop 없음 — broadcaster skip "
+                        "(이후 silent, 테스트/동기 컨텍스트면 정상)",
+                        file=sys.stderr,
+                    )
+                    _no_loop_warned = True
+            else:
+                asyncio.create_task(_broadcaster(item))
 
 
 def install() -> None:

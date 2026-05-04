@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,7 @@ from pydantic import BaseModel
 from aurora import __version__
 from aurora.config import settings
 from aurora.core.stats import compute_stats
-from aurora.interfaces import bot_instance, config_store, log_buffer
+from aurora.interfaces import bot_instance, config_store, log_buffer, release_check
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +157,23 @@ class TradeDTO(BaseModel):
     triggered_by: list[str] = []
 
 
+class ReleaseDTO(BaseModel):
+    """``GET /release/latest`` — 새 릴리스 알림 (v0.1.25).
+
+    ``pending_release`` 가 None 이면 ``has_update=False`` + 다른 필드 빈값.
+    UI 가 ``has_update=True`` 일 때만 우상단 알림 표시.
+    """
+
+    has_update: bool
+    tag: str = ""
+    name: str = ""
+    body: str = ""
+    html_url: str = ""
+    published_at: str = ""
+    last_check_ts: int | None = None
+    current_version: str = ""
+
+
 class StatsDTO(BaseModel):
     """``GET /stats`` — 거래 결과 통계 6 메트릭 (v0.1.24).
 
@@ -196,10 +214,20 @@ class UiUpdateResponse(BaseModel):
 
 def create_app() -> FastAPI:
     """FastAPI 앱 인스턴스 생성 + CORS + 엔드포인트 등록."""
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        # startup — release_check 5분 주기 폴링 시작 (v0.1.25)
+        release_check.start_polling()
+        yield
+        # shutdown — 폴링 task 깨끗하게 cancel
+        release_check.stop_polling()
+
     app = FastAPI(
         title="Aurora API",
         version="0.1.0",
         description="고빈도 룰 기반 자동매매 봇 백엔드",
+        lifespan=lifespan,
     )
 
     # ───── CORS ─────────────────────────────────────
@@ -445,6 +473,32 @@ def create_app() -> FastAPI:
         merged = bot_records + ex_records
         merged.sort(key=lambda t: t.closed_at_ts, reverse=True)
         return merged[:limit]
+
+    # ───── Release 알림 (v0.1.25) ──────────────────────
+
+    @app.get("/release/latest", response_model=ReleaseDTO)
+    async def release_latest() -> ReleaseDTO:
+        """새 release 알림 — 5분 주기 백그라운드 폴링 결과 노출.
+
+        UI 가 dashboard 폴링 같이 호출 → ``has_update=True`` 면 우상단 알림 표시.
+        """
+        pending = release_check.get_pending_release()
+        if pending is None:
+            return ReleaseDTO(
+                has_update=False,
+                last_check_ts=release_check.get_last_check_ts(),
+                current_version=__version__,
+            )
+        return ReleaseDTO(
+            has_update=True,
+            tag=pending.get("tag", ""),
+            name=pending.get("name", ""),
+            body=pending.get("body", ""),
+            html_url=pending.get("html_url", ""),
+            published_at=pending.get("published_at", ""),
+            last_check_ts=release_check.get_last_check_ts(),
+            current_version=__version__,
+        )
 
     # ───── Stats (결과 통계, v0.1.24) ──────────────────
 

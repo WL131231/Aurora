@@ -256,6 +256,9 @@ async function refreshDashboard() {
 
         // 결과 통계 6 카드 (v0.1.24) — /stats 호출, 거래내역 토글과 같은 days 사용
         await refreshStats();
+
+        // 업데이트 알림 (v0.1.25) — /release/latest 폴링, has_update 시 우상단 표시
+        await refreshReleaseAlert();
     } catch (_) {
         connDot.style.background = "#fb7185";
         connDot.style.boxShadow  = "0 0 8px #fb7185";
@@ -437,6 +440,73 @@ async function refreshStats() {
     const hold = m >= 60 ? `${Math.floor(m / 60)}h ${Math.round(m % 60)}m` : `${m.toFixed(1)}m`;
     $("stat-hold").textContent = hold;
 }
+
+// ============================================================
+// 6c. 업데이트 알림 (v0.1.25) — 5분 주기 폴링 → 우상단 팝업
+// ============================================================
+//
+// 흐름:
+//   - 백엔드 release_check 가 5분 주기로 GitHub Releases /latest 체크
+//   - dashboard 폴링 (15초) 이 같이 /release/latest 호출
+//   - has_update + dismissed 안 한 tag 면 우상단 알림 표시
+//   - 사용자 × 클릭 시 localStorage 에 dismissed_<tag> 저장 (해당 tag 다시 안 뜸)
+//   - "자세히 보기" 클릭 시 release html_url 새 창
+//   - 새 release 가 또 올라오면 다른 tag → 다시 표시 (dismissed 는 tag 별)
+
+function _isReleaseDismissed(tag) {
+    if (!tag) return false;
+    try {
+        return localStorage.getItem(`aurora_release_dismissed_${tag}`) === "1";
+    } catch (_) {
+        return false;
+    }
+}
+
+function _dismissRelease(tag) {
+    if (!tag) return;
+    try {
+        localStorage.setItem(`aurora_release_dismissed_${tag}`, "1");
+    } catch (_) { /* private mode 등 — 무시 */ }
+}
+
+async function refreshReleaseAlert() {
+    const alert = document.getElementById("release-alert");
+    if (!alert) return;
+    let info;
+    try {
+        info = await Api.getReleaseLatest();
+    } catch (_) {
+        // 첫 폴링 결과 도착 전에는 알림 X
+        alert.style.display = "none";
+        return;
+    }
+    if (!info || !info.has_update || !info.tag || _isReleaseDismissed(info.tag)) {
+        alert.style.display = "none";
+        return;
+    }
+    document.getElementById("release-alert-tag").textContent = info.tag;
+    document.getElementById("release-alert-current").textContent = "v" + (info.current_version || "");
+    // dataset.tag 에 현재 표시중 tag 저장 — × 클릭 시 dismiss 키 사용
+    alert.dataset.tag = info.tag;
+    alert.dataset.url = info.html_url || "";
+    alert.style.display = "flex";
+}
+
+// 알림 X (닫기) — 해당 tag 만 영구 dismiss
+document.getElementById("release-alert-close")?.addEventListener("click", () => {
+    const alert = document.getElementById("release-alert");
+    if (!alert) return;
+    _dismissRelease(alert.dataset.tag);
+    alert.style.display = "none";
+});
+
+// "자세히 보기" — release html_url 새 창. pywebview 환경: window.open 이 외부 브라우저
+document.getElementById("release-alert-open")?.addEventListener("click", () => {
+    const alert = document.getElementById("release-alert");
+    if (!alert) return;
+    const url = alert.dataset.url;
+    if (url) window.open(url, "_blank", "noopener");
+});
 
 // ============================================================
 // 6b. PnL 공유 카드 (v0.1.21) — 모달 + html2canvas PNG 다운로드

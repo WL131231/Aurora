@@ -64,6 +64,9 @@ const getTrades = (limit = 200, days = 0, source = "all") =>
 // days = 거래내역 표 토글과 같은 기간 필터 (7/30/180).
 const getStats = (days = 0) => _request(`/stats?days=${days}`);
 
+// ─── Release 알림 (v0.1.25) ────────────────────
+const getReleaseLatest = () => _request("/release/latest");
+
 // ─── Config ─────────────────────────────────────────
 
 const getConfig = () => _request("/config");
@@ -147,6 +150,7 @@ window.AuroraApi = {
     getPositions,
     getTrades,
     getStats,
+    getReleaseLatest,
     getConfig,
     updateConfig,
     startBot,

@@ -46,6 +46,28 @@ class Position:
 
 
 @dataclass(slots=True)
+class ClosedPosition:
+    """거래소가 매칭해서 돌려준 청산 포지션 한 record (v0.1.23).
+
+    봇 자기 거래내역 (``ClosedTrade``) 와 별개 — 거래소 history API 가 직접 매칭한 결과.
+    Bybit V5 ``/v5/position/closed-pnl`` 응답 형식 정합 + 어댑터별 변환 흡수.
+
+    Phase 1 = 거래소 메타 (entry/exit/leverage/pnl) 만. ``triggered_by`` 등 Aurora 메타는 X.
+    """
+
+    symbol: str                   # ccxt 표준 (예: "BTC/USDT:USDT")
+    direction: Literal["long", "short"]
+    leverage: int
+    qty: float                    # 청산 수량
+    entry_price: float
+    exit_price: float
+    opened_at_ts: int             # ms (포지션 생성 시각 — createdTime)
+    closed_at_ts: int             # ms (포지션 청산 시각 — updatedTime)
+    pnl_usd: float                # realized PnL
+    roi_pct: float                # (pnl / margin) × 100, margin = (entry × qty) / leverage
+
+
+@dataclass(slots=True)
 class Balance:
     """계정 자본금 — DESIGN.md §4 (옵션 a 어댑터 PR 신설).
 
@@ -112,4 +134,23 @@ class ExchangeClient(Protocol):
 
     async def cancel_all(self, symbol: str) -> None:
         """전체 주문 취소."""
+        ...
+
+    async def fetch_closed_positions(
+        self,
+        since_ms: int | None = None,
+        limit: int = 200,
+    ) -> list[ClosedPosition]:
+        """거래소 측 청산 포지션 history 조회 (v0.1.23).
+
+        UI `거래내역 (P&L)` 표 / 결과 통계가 봇 시작 전 / 외부 거래까지 포함하도록.
+        DESIGN.md §3.x 미정의 — Bybit 우선 구현, 다른 거래소는 stub 가능.
+
+        Args:
+            since_ms: 시작 시각 (ms epoch). None 이면 거래소 기본 (보통 최근 7일).
+            limit: 한 페이지 최대 record 수. Bybit V5 = 50~200, 기본 200.
+
+        Returns:
+            신→구 정렬 (최근 청산 먼저). 미구현 어댑터는 빈 리스트.
+        """
         ...

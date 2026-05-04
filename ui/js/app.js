@@ -352,8 +352,8 @@ async function refreshTrades() {
         const quote = (s.split("/")[1] || "").split(":")[0] || "USDT";
         return `${base}${quote} <span class="trade-perp">Perp</span>`;
     };
-    tbody.innerHTML = trades.map(t => `
-        <tr>
+    tbody.innerHTML = trades.map((t, idx) => `
+        <tr class="trade-row" data-trade-idx="${idx}">
             <td>${fmtSymbol(t.symbol)}</td>
             <td class="mono">${t.instrument}</td>
             <td class="mono">${fmtPrice(t.entry_price)}</td>
@@ -364,7 +364,130 @@ async function refreshTrades() {
             <td class="mono">${fmtTime(t.closed_at_ts)}</td>
         </tr>
     `).join("");
+    // v0.1.21 — 행 클릭 시 PnL 공유 카드 모달 오픈
+    tbody.querySelectorAll("tr.trade-row").forEach((row) => {
+        row.addEventListener("click", () => {
+            const idx = parseInt(row.dataset.tradeIdx, 10);
+            const t = trades[idx];
+            if (t) openPnlCard(t);
+        });
+    });
 }
+
+// ============================================================
+// 6b. PnL 공유 카드 (v0.1.21) — 모달 + html2canvas PNG 다운로드
+// ============================================================
+
+// 트레이드 객체 → 카드 채움 + 모달 열기.
+//   trade = TradeDTO (api.py) — symbol, direction, leverage, entry_price, exit_price,
+//                                pnl_usd, roi_pct, opened_at_ts, closed_at_ts, ...
+function openPnlCard(trade) {
+    const modal = document.getElementById("pnl-modal");
+    if (!modal) return;
+
+    // 심볼 — "BTC/USDT:USDT" → "BTCUSDT Perp"
+    const symRaw = trade.symbol || "";
+    const base = symRaw.split("/")[0] || symRaw;
+    const quote = (symRaw.split("/")[1] || "").split(":")[0] || "USDT";
+    document.getElementById("pnl-symbol").textContent = `${base}${quote} Perp`;
+
+    // 방향 + 레버리지
+    const sideEl = document.getElementById("pnl-side");
+    sideEl.textContent = trade.direction === "short" ? "SHORT" : "LONG";
+    sideEl.className = `pnl-card-side ${trade.direction === "short" ? "short" : "long"}`;
+    document.getElementById("pnl-lev").textContent = `${trade.leverage}×`;
+
+    // ROI (큼지막) + PnL USDT
+    const roi = Number(trade.roi_pct || 0);
+    const pnl = Number(trade.pnl_usd || 0);
+    const roiEl = document.getElementById("pnl-roi");
+    const roiSign = roi >= 0 ? "+" : "";
+    roiEl.textContent = `${roiSign}${roi.toFixed(2)}%`;
+    roiEl.className = `pnl-card-roi ${roi >= 0 ? "positive" : "negative"}`;
+    const pnlSign = pnl >= 0 ? "+" : "";
+    document.getElementById("pnl-pnl-usd").textContent = `${pnlSign}${pnl.toFixed(4)} USDT`;
+
+    // 진입가 / 청산가
+    const fmtP = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    document.getElementById("pnl-entry").textContent = fmtP(trade.entry_price);
+    document.getElementById("pnl-exit").textContent = fmtP(trade.exit_price);
+
+    // 청산 시간 (KST)
+    const d = new Date(trade.closed_at_ts);
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    document.getElementById("pnl-time").textContent = `${yy}-${mm}-${dd} ${hh}:${mi} KST`;
+
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+}
+
+function closePnlCard() {
+    const modal = document.getElementById("pnl-modal");
+    if (!modal) return;
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+}
+
+// PnL 카드 → PNG 다운로드.
+// html2canvas 로 #pnl-card 노드를 캡처. backgroundColor: null = 카드 자체 배경 사용.
+async function downloadPnlCard() {
+    const card = document.getElementById("pnl-card");
+    const btn = document.getElementById("pnl-download");
+    if (!card || typeof html2canvas !== "function") return;
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "캡처 중...";
+    try {
+        const canvas = await html2canvas(card, {
+            backgroundColor: null,
+            scale: 2,            // 고해상도 (2x = 960x1200)
+            useCORS: true,
+            logging: false,
+        });
+        // 파일명 — symbol_KSTtime.png
+        const sym = (document.getElementById("pnl-symbol").textContent || "trade").replace(/[^A-Za-z0-9]/g, "");
+        const ts = (document.getElementById("pnl-time").textContent || "")
+                       .replace(/[^0-9]/g, "").slice(0, 12);
+        const fname = `Aurora_${sym}_${ts}.png`;
+        canvas.toBlob((blob) => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = fname;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, "image/png");
+    } catch (e) {
+        console.error("PnL 카드 캡처 실패:", e);
+        alert(`캡처 실패: ${e.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+    }
+}
+
+// 모달 이벤트 — 백드롭 클릭 / X 버튼 / 닫기 버튼 / ESC 키 / 다운로드 버튼
+(() => {
+    const modal = document.getElementById("pnl-modal");
+    if (!modal) return;
+    // 백드롭 클릭 (카드 외부) — 카드 자체 클릭은 stopPropagation 으로 무시
+    modal.addEventListener("click", (e) => {
+        if (e.target === modal) closePnlCard();
+    });
+    document.getElementById("pnl-close")?.addEventListener("click", closePnlCard);
+    document.getElementById("pnl-close-btn")?.addEventListener("click", closePnlCard);
+    document.getElementById("pnl-download")?.addEventListener("click", downloadPnlCard);
+    // ESC 키
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && modal.classList.contains("open")) closePnlCard();
+    });
+})();
 
 // 제어 버튼 인라인 피드백 — success: 3초, error: 5초 + × 닫기
 function showCtrlMsg(text, ok) {

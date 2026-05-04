@@ -182,6 +182,43 @@ async def test_stop_closes_client() -> None:
 
 
 @pytest.mark.asyncio
+async def test_step_resets_position_when_externally_closed() -> None:
+    """거래소 측 포지션 사라지면 (사용자 직접 청산) Executor state reset.
+
+    v0.1.7 fix: 이전엔 _plan 영원히 살아 has_position=True → 트레일링만 돌고
+    신규 진입 평가 안 함 → 봇 멈춤. _step 시작 부분에서 fetch_position 으로
+    sync → 거래소 측 None 면 reset_position 호출.
+    """
+    from aurora.core.risk import TpSlConfig, build_risk_plan
+
+    bot = bot_instance.get_instance()
+    rows = _make_ohlcv_rows(start_ts_ms=1_700_000_000_000, count=200, tf_minutes=60)
+    client = _make_mock_client(ohlcv_rows=rows)
+    # 거래소 측은 처음부터 포지션 없음 (사용자 직접 청산 후 시점 시뮬)
+    client.fetch_position = AsyncMock(return_value=None)
+    bot.configure(client=client, timeframes=["1H"], tpsl_config=TpSlConfig())
+
+    # Executor 에 가짜 _plan 직접 주입 (봇 자기 진입 후 시점)
+    plan = build_risk_plan(
+        entry_price=78000.0, direction="long", leverage=10,
+        equity_usd=10000.0, config=TpSlConfig(), risk_pct=0.01,
+    )
+    await bot.start()
+    bot._executor._plan = plan
+    bot._executor._remaining_qty = plan.position.coin_amount
+    assert bot._executor.has_position
+
+    # _step 1회 — fetch_position=None 감지 → reset_position 호출
+    await bot._step()
+
+    # Executor state reset 확인
+    assert not bot._executor.has_position
+    assert bot._executor._plan is None
+
+    await bot.stop()
+
+
+@pytest.mark.asyncio
 async def test_stop_start_cycle_preserves_executor_position() -> None:
     """stop → start 사이클 시 Executor._plan 보존 → has_position 유지.
 

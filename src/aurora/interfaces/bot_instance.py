@@ -371,6 +371,18 @@ class BotInstance:
         # Why: 동시에 진입 + 청산 평가하면 같은 봉에서 close + open 가능.
         # Aurora 정책 (페어당 1개) 위반 방지 위해 분기 mutually exclusive.
         if self._executor.has_position:
+            # 거래소 측 sync — 사용자 직접 청산 / liquidation 감지.
+            # Why: 봇 _plan 살아있는데 거래소엔 없으면 has_position 영원히 True →
+            # 트레일링만 돌고 신규 진입 평가 안 함 → 봇 멈춤 (v0.1.6 검증).
+            actual = await self._client.fetch_position(self._symbol)
+            if actual is None:
+                logger.info(
+                    "외부 청산 감지: %s 봇 자기 포지션 거래소 측 사라짐 — state reset",
+                    self._symbol,
+                )
+                self._executor.reset_position()
+                return  # 다음 step 부터 진입 평가 분기 진입
+            # 정상 트레일링 + 청산
             await self._executor.update_trailing_sl(current_price)
             reason = self._executor.should_close(current_price)
             if reason is not None:

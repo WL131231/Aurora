@@ -89,6 +89,19 @@ class Executor:
         """
         self._client = client
 
+    def reset_position(self) -> None:
+        """포지션 state 초기화 — 외부 청산 (사용자 직접 / liquidation) 감지 시 호출.
+
+        Why: 봇이 ``_plan`` 살아있다고 믿는데 거래소 측엔 포지션 없으면 has_position
+        이 영원히 True → 트레일링 + 청산 분기만 돌고 신규 진입 평가 안 함 → 봇 멈춤.
+        BotInstance ``_step`` 가 fetch_position 으로 sync → 사라짐 감지 시 본 메서드.
+        """
+        self._plan = None
+        self._remaining_qty = 0.0
+        self._tp_hits = 0
+        self._highest_since_entry = 0.0
+        self._lowest_since_entry = 0.0
+
     @property
     def remaining_qty(self) -> float:
         """남은 포지션 수량 (분할 청산 후 잔여) — read-only."""

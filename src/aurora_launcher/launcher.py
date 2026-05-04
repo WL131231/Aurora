@@ -203,6 +203,8 @@ def apply_swap(downloaded_new: Path) -> bool:
     exe = _aurora_exe_path()
     old_path = exe.with_suffix(exe.suffix + ".old")
     try:
+        # _aurora/ 폴더 자동 생성 (v0.1.17 격리 흐름 첫 다운로드 케이스)
+        exe.parent.mkdir(parents=True, exist_ok=True)
         # 기존 .old 정리
         if old_path.exists():
             old_path.unlink()
@@ -257,7 +259,9 @@ def launch_aurora() -> bool:
             env=env,
             creationflags=flags,
             close_fds=True,
-            cwd=str(exe.parent),
+            # v0.1.17: cwd = launcher 옆 (본체는 _aurora/ 안). .env / config_store 등을
+            # launcher 옆에서 찾게 → 사용자가 .env 를 launcher.exe 옆에 두면 인식 OK.
+            cwd=str(_launcher_dir()),
         )
         return True
     except OSError as e:
@@ -318,6 +322,8 @@ class LauncherApi:
             ``{"success": bool, "message": str}``
         """
         target = _aurora_exe_path().with_suffix(_aurora_exe_path().suffix + ".new")
+        # _aurora/ 폴더 자동 생성 (첫 다운 시 폴더 없음)
+        target.parent.mkdir(parents=True, exist_ok=True)
         if not download_to(url, target):
             return {"success": False, "message": "다운로드 실패 (네트워크 확인)"}
         if not apply_swap(target):
@@ -361,6 +367,9 @@ def _ui_index_path() -> Path:
 def main() -> None:
     """launcher 진입점 — pywebview 윈도우 시작."""
     import webview  # type: ignore[import-not-found]
+
+    # v0.1.17: 이전 layout (launcher 옆 Aurora.exe) → _aurora/ 자동 이전.
+    _migrate_legacy_layout()
 
     api = LauncherApi()
     ui_path = _ui_index_path()

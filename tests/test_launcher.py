@@ -80,10 +80,12 @@ def test_fetch_latest_release_returns_none_on_network_error():
 
 
 def test_apply_swap_replaces_exe(tmp_path, monkeypatch):
-    """다운로드된 .new → 본체 .exe 와 swap. 기존 본체는 .old 백업 후 정리."""
+    """다운로드된 .new → _aurora/Aurora.exe 와 swap (v0.1.17 격리)."""
     monkeypatch.setattr(launcher, "_launcher_dir", lambda: tmp_path)
 
-    exe = tmp_path / "Aurora.exe"
+    aurora_dir = tmp_path / launcher.AURORA_DATA_DIR
+    aurora_dir.mkdir()
+    exe = aurora_dir / "Aurora.exe"
     exe.write_bytes(b"old-exe-content")
     new = tmp_path / "Aurora.exe.new"
     new.write_bytes(b"new-exe-content")
@@ -91,18 +93,18 @@ def test_apply_swap_replaces_exe(tmp_path, monkeypatch):
     assert launcher.apply_swap(new) is True
     assert exe.read_bytes() == b"new-exe-content"
     assert not new.exists()  # .new 는 swap 후 사라짐 (rename 으로)
-    assert not (tmp_path / "Aurora.exe.old").exists()  # 백업도 정리됨
+    assert not (aurora_dir / "Aurora.exe.old").exists()  # 백업도 정리됨
 
 
 def test_apply_swap_when_no_existing_exe(tmp_path, monkeypatch):
-    """본체 미존재 (첫 다운로드) — .new 가 본체 자리로."""
+    """_aurora/ 미존재 (첫 다운로드) — 폴더 자동 생성 + .new 가 본체 자리로."""
     monkeypatch.setattr(launcher, "_launcher_dir", lambda: tmp_path)
 
     new = tmp_path / "Aurora.exe.new"
     new.write_bytes(b"first-time")
 
     assert launcher.apply_swap(new) is True
-    assert (tmp_path / "Aurora.exe").read_bytes() == b"first-time"
+    assert (tmp_path / launcher.AURORA_DATA_DIR / "Aurora.exe").read_bytes() == b"first-time"
 
 
 # ============================================================

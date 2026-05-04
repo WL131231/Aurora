@@ -534,7 +534,6 @@ def atr_wilder(df: pd.DataFrame, period: int = 14) -> pd.Series:
 - **D-3 등간격 분할** (10-d): TP 4 단계는 `[tp_min, tp_min + 1/3·range, tp_min + 2/3·range, tp_max]` 등간격. `tp_allocations` 는 `TpSlConfig` 디폴트 (25/25/25/25) 그대로.
 - **early return** (5 단계): 어떤 TF도 닫힘 없는 1 분봉은 신호 평가 skip. 성능 + 동일 시점 중복 평가 방지.
 - **포지션 보유 시 갱신 우선** (2-4 단계): 닫힌 TF 봉 도착 전이라도 매 1 분봉 SL 갱신 + 청산 체크 (gap-fill 가격 누락 방지).
-- **`_check_exits` 시그니처 `close` 매개변수 미사용** (3 단계): 본 구현 (`engine.py` L677) `del close` 패턴 — slip 산출은 `self._last_close` 사용 (`step()` 진입점 L283-285 갱신). 매개변수 보존은 호출자 OHLC 4 인자 일관성 — direction lowercase 통일 (D-19 `cost.Direction` Literal 격리) 후속 PR 에서 함께 검토 (장수+WooJae 합의 2026-05-04 Stage 1D 마무리).
 
 ---
 
@@ -707,7 +706,7 @@ PR-1 13 개 / PR-2 18 개 / Stage 1A 14 개 / Stage 1B 32 개 (cost 16 + stats 1
 | D-3 (등간격 분할) | A2 (auto risk_config tps=[2.8, 3.13.., 3.46.., 3.8]) | leverage=10 산식 정합 |
 | D-4 (ATR 4H 디폴트 + 가드) | C4 (ATR 모드 + 4H 미닫힘 → 진입 skip) | `build_risk_plan(atr=None)` ValueError 회피 가드 |
 | D-8 (risk_pct config 노출) | A1 (default 0.01) / E3 (custom strategy_config 보존) | — |
-| D-19 (direction 이중 표준 격리) | B1 (정상화) / B2 (불정 raise) | RecordDir Literal 정합 |
+| D-19 (direction lowercase 통일) | — (헬퍼 자연 제거 → 단위 테스트 X) | `cost.Direction` Literal lowercase + `core.strategy.Direction` StrEnum value 자연 통과 (후속 PR ✅) |
 | D-20 (페어당 1 포지션) | B3 (double _open RuntimeError) | — |
 | D-21 (tp_hits counter) | B7 (idx >= 3 reject) | TP4 = `_close` 책임 분리 |
 | D-22 (aggregator 신규 생성) | C1 (run 별 독립, 간접) | 멀티 호출 검증은 후속 통합 PR |
@@ -876,6 +875,20 @@ PR-3 description 본문에 박을 Decisions 항목 미리보기. 본 design doc 
 
 **Reference**: §3.3.1 단락 3 (호출 패턴), §6.2 10-f.
 
+### D-19 ✅ direction lowercase 통일 (후속 PR)
+
+**결정**: `cost.Direction` Literal `["LONG","SHORT"]` → `["long","short"]` 통일. `core.strategy.Direction` StrEnum value (이미 `"long"`/`"short"`) 자연 통과. `engine._to_record_direction` 헬퍼 + `RecordDir` alias 자연 제거.
+
+**이유**:
+- 이중 표준 (core lowercase ↔ backtest UPPERCASE) 격리 비용 > 통일 비용. 헬퍼 1 곳 수정으로는 영구 격리, lowercase 통일은 1 회 변경 후 자연 정합.
+- `core.strategy.Direction` 이 source of truth (StrEnum, signal 영역 모두 사용) — backtest 가 따라가는 게 자연.
+- 헬퍼 제거 + assertion 단순화 → engine.py / test_engine.py LOC 감소 (-49 LOC).
+- 함께 묶음: `_check_exits` `close` 매개변수 제거 (장수+WooJae 합의 2026-05-04) — `del close` 자연 제거 + 시그니처 단순화.
+
+**구현 위치**: `cost.py` L37 (Literal) + L99/L102-103 (assert + 4 분기) / `stats.py` L209 (sign 분기) / `engine.py` (`_to_record_direction` 제거 + 4 호출 정정) / 테스트 lowercase 정합.
+
+**Reference**: §6.3 (구 `_check_exits` `del close` 항목 제거), §8.2 D-19 라인 갱신.
+
 ### D-24 ✅ REVERSE 분기 — `compose_exit` 활용 (signal.is_reverse_signal 부재)
 
 **결정**: `step()` 보유 중 분기에서 반대 방향 신호 감지 시 `_close(reason="REVERSE")` 호출. 판정은 `core.signal.compose_exit(current_direction, signals) -> bool` 활용.
@@ -902,4 +915,5 @@ PR-3 description 본문에 박을 Decisions 항목 미리보기. 본 design doc 
 - 2026-05-03 (저녁, Stage 1C 단계 3): §6.2 8 단계 정정 (`strategy.evaluate` 통합 함수 부재 → `detect_ema_touch + detect_rsi_divergence + evaluate_selectable` 3 함수 합본 명시) / §9 BotInstance ↔ BacktestEngine 책임 경계 환기 추가 / §11 D-24 본문화 (REVERSE 분기 = `compose_exit` 활용).
 - 2026-05-03 (밤, Stage 1C Group 3): §8 본문화 — `tests/test_engine.py` 22 함수 / 23 collected (5 그룹 A~E + D-N 매핑 + sanity → pytest 변환 + 커버리지 갭). pytest baseline 385 → 408.
 - 2026-05-04 (Stage 1D 마무리, 단계 4): §8.4 커버리지 갭 갱신 — REVERSE step() 통합 (단계 2 219d7a0) + 멀티 trade end-to-end (단계 3 c1086a4) 2 건 ✅ 해소, regime breakdown (D-5) + min_seed_pct 16% 증폭 (D-1) 2 건 🟡 잔존 (별도 Issue 예정). §6.3 `_check_exits` `del close` 환기 추가 (D-19 direction lowercase 통일 후속 PR 함께 검토 — 장수+WooJae 합의). pytest baseline 408 → 472 (+64, main 머지 신규 테스트 흡수 + 단계 2/3 회귀 +2).
-- 다음 보강 예정: §10 review 발송 준비 (시프트 후), §11 PR description Decisions 미리보기 (D-1~D-8 + D-4 보강), 동기화 매트릭스 별도 파일 신설.
+- 2026-05-04+ (D-19 direction lowercase 통일 후속 PR): §6.3 `_check_exits` `del close` 항목 제거 (close 매개변수 자체 제거 — 장수+WooJae 합의 (a) 채택). §8.2 D-19 라인 갱신 (RecordDir Literal → cost.Direction Literal lowercase + StrEnum value 자연 통과). §11 D-19 신규 본문화 (Stage 1C·1D 패턴 정합). pytest baseline 504 → 502 (-2, `_to_record_direction` 헬퍼 테스트 자연 제거). PR-3 BacktestEngine Stage 1A→1D 전체 완료 + lowercase 통일 마일스톤.
+- 다음 보강 예정: §10 review 발송 준비 (시프트 후), §11 PR description Decisions 미리보기 (D-9~D-18 / D-20~D-23 누락 보충 별도 후속 트래커), 동기화 매트릭스 별도 파일 신설.

@@ -221,21 +221,25 @@ async function refreshDashboard() {
         const extAlert = document.getElementById("external-position-alert");
         if (extAlert) extAlert.style.display = s.external_position ? "" : "none";
 
-        // 지표 트리거 상태 패널 (v0.1.14) — 6 카테고리 색깔 갱신
+        // 지표 트리거 상태 패널 (v0.1.14, v0.1.18 4-state) — long/short/neutral/disabled
         const indStatus = s.indicator_status || {};
         document.querySelectorAll(".indicator-pill").forEach((pill) => {
             const cat = pill.dataset.cat;
-            const dir = indStatus[cat]; // "long" | "short" | null
-            pill.classList.remove("dir-long", "dir-short");
-            const dirEl = pill.querySelector(".ind-dir");
-            if (dir === "long") {
+            const state = indStatus[cat];  // "long" | "short" | "neutral" | "disabled"
+            pill.classList.remove("dir-long", "dir-short", "dir-neutral", "dir-disabled");
+            const stEl = pill.querySelector(".ind-state");
+            if (state === "long") {
                 pill.classList.add("dir-long");
-                if (dirEl) dirEl.textContent = "롱";
-            } else if (dir === "short") {
+                if (stEl) stEl.textContent = "활성·롱";
+            } else if (state === "short") {
                 pill.classList.add("dir-short");
-                if (dirEl) dirEl.textContent = "숏";
-            } else if (dirEl) {
-                dirEl.textContent = "—";
+                if (stEl) stEl.textContent = "활성·숏";
+            } else if (state === "disabled") {
+                pill.classList.add("dir-disabled");
+                if (stEl) stEl.textContent = "비활성";
+            } else {
+                pill.classList.add("dir-neutral");
+                if (stEl) stEl.textContent = "대기";
             }
         });
 

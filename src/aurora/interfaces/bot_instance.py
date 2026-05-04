@@ -523,13 +523,23 @@ class BotInstance:
             evaluate_selectable(df_by_tf, self._strategy_config, symbol=self._symbol),
         )
 
-        # 지표 트리거 상태 갱신 (v0.1.14) — UI 대시보드 패널 표시용.
-        # Fixed 6 카테고리 항상 노출 (signal 없으면 None=중립). 같은 카테고리
-        # 여러 신호 (예: ema_200 + ema_480) 시 최신 source 의 방향 보존.
-        self._last_indicator_status = {cat: None for cat in _INDICATOR_CATEGORIES}
+        # 지표 트리거 상태 갱신 (v0.1.14, v0.1.18 4-state 확장).
+        # 값: "long" / "short" (활성) / "neutral" (대기) / "disabled" (Selectable 꺼짐).
+        # Fixed 지표 (EMA/RSI) 는 항상 enabled. Selectable 4 종은 use_* 토글에 따라.
+        cfg = self._strategy_config
+        disabled_map = {
+            "BB": not cfg.use_bollinger,
+            "MA": not cfg.use_ma_cross,
+            "Ichimoku": not cfg.use_ichimoku,
+            "Harmonic": not cfg.use_harmonic,
+        }
+        self._last_indicator_status = {
+            cat: ("disabled" if disabled_map.get(cat, False) else "neutral")
+            for cat in _INDICATOR_CATEGORIES
+        }
         for sig in signals:
             cat = _categorize_source(sig.source)
-            if cat is not None:
+            if cat is not None and self._last_indicator_status[cat] != "disabled":
                 self._last_indicator_status[cat] = sig.direction.value
 
         decision = compose_entry(signals)

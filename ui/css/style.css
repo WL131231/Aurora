@@ -1073,6 +1073,7 @@ input[type="range"].slider-input:disabled {
     font-weight: 500;
 }
 
+.indicator-pill .ind-state,
 .indicator-pill .ind-dir {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.6875rem;
@@ -1080,22 +1081,42 @@ input[type="range"].slider-input:disabled {
     letter-spacing: 0.05em;
 }
 
-/* 롱 신호 — 초록 */
+/* 롱 신호 — 초록 (활성·롱) */
 .indicator-pill.dir-long {
     border-color: rgba(52, 211, 153, 0.4);
     background: rgba(52, 211, 153, 0.06);
 }
+.indicator-pill.dir-long .ind-state,
 .indicator-pill.dir-long .ind-dir {
     color: #34d399;
 }
 
-/* 숏 신호 — 빨강 */
+/* 숏 신호 — 빨강 (활성·숏) */
 .indicator-pill.dir-short {
     border-color: rgba(251, 113, 133, 0.4);
     background: rgba(251, 113, 133, 0.06);
 }
+.indicator-pill.dir-short .ind-state,
 .indicator-pill.dir-short .ind-dir {
     color: #fb7185;
+}
+
+/* 대기 — 보라 dim */
+.indicator-pill.dir-neutral {
+    border-color: var(--border);
+}
+.indicator-pill.dir-neutral .ind-state {
+    color: var(--aurora-purple);
+    opacity: 0.7;
+}
+
+/* 비활성 (Selectable 꺼짐) — 회색 dim */
+.indicator-pill.dir-disabled {
+    border-color: var(--border-soft);
+    opacity: 0.5;
+}
+.indicator-pill.dir-disabled .ind-state {
+    color: var(--text-4);
 }
 
 .pos-direction-long { color: #4ade80; }

@@ -66,6 +66,14 @@ def main() -> None:
     except Exception as e:  # noqa: BLE001 — 모든 예외 catch 의도 (GUI 기동 우선)
         print(f"⚠ BotInstance configure 실패 (GUI 만 기동): {e}")
 
+    # Telegram 봇 백그라운드 시작 + 진입/청산 알림 콜백 등록
+    # TELEGRAM_BOT_TOKEN 미설정 시 launch_in_background 내부에서 noop.
+    from aurora.interfaces import bot_instance as _bi_mod
+    from aurora.interfaces.telegram import get_bot, launch_in_background
+
+    _bi_mod.register_trade_alert_callback(get_bot().on_trade_alert)
+    launch_in_background()
+
     launch()
 
 

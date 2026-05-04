@@ -1,31 +1,42 @@
 /* ============================================================
    Aurora GUI 콘솔 — 디자인 시스템
    웹사이트(`website/style.css`) 톤 차용:
-     - 배경 #06060a + 오로라 그라디언트 글로우
+     - 배경 #1e202c + 오로라 그라디언트 글로우
      - Bodoni Moda / Space Grotesk / Pretendard 폰트
      - 다이아몬드 로고 그라디언트 (purple → indigo → cyan)
      - photo-frame 카드 (다크 + 라디얼 글로우 + 그라디언트 보더)
    GUI 차이: hero 거대 타이포 X, 정보 밀도 ↑, 사진 배경 X.
    ============================================================ */
 
-/* ===== 폰트 변수 (웹사이트와 동일) ===== */
+/* ===== 폰트 + 컬러 (v0.1.15 팔레트 통일 + 페인팅 텍스처) =====
+   사용자 요청 4색 팔레트 + SVG fractalNoise 페인팅 질감.
+   로고 그라디언트 (purple→indigo→cyan) 만 예외 — 사용자 명시 유지.
+   롱/숏 의미색 (초록/빨강) 유지 — trading 컨벤션. */
 :root {
     --font-display: "Space Grotesk", "Pretendard Variable", system-ui, sans-serif;
     --font-sans: "Pretendard Variable", "Space Grotesk", system-ui, sans-serif;
     --font-wordmark: "Monica Allcaps Stencil", "Bodoni Moda", "Playfair Display", "Times New Roman", serif;
 
-    --bg: #06060a;
-    --bg-card: #0d0d18;
-    --border: rgba(255, 255, 255, 0.08);
-    --border-soft: rgba(255, 255, 255, 0.05);
-    --text-1: rgba(255, 255, 255, 0.95);
-    --text-2: rgba(255, 255, 255, 0.7);
-    --text-3: rgba(255, 255, 255, 0.4);
-    --text-4: rgba(255, 255, 255, 0.25);
+    /* === Brand 4색 (v0.1.15) === */
+    --bg: #1e202c;                    /* 짙은 남색-검정 (주 배경) */
+    --bg-card: #31323e;                /* 짙은 회색-남색 (카드 배경) */
+    --aurora-purple: #60519b;          /* 보라 (강조 / primary) */
+    --text-base: #bfc0d1;              /* 밝은 라벤더 (텍스트 베이스) */
 
-    --aurora-purple: #a855f7;
-    --aurora-indigo: #6366f1;
-    --aurora-cyan: #22d3ee;
+    --border: rgba(191, 192, 209, 0.08);
+    --border-soft: rgba(191, 192, 209, 0.05);
+    --text-1: rgba(191, 192, 209, 0.95);
+    --text-2: rgba(191, 192, 209, 0.70);
+    --text-3: rgba(191, 192, 209, 0.45);
+    --text-4: rgba(191, 192, 209, 0.25);
+
+    /* === 로고 그라디언트만 예외 (사용자 유지 요청) === */
+    --logo-purple: #a855f7;
+    --logo-indigo: #6366f1;
+    --logo-cyan: #22d3ee;
+
+    /* === Painterly 텍스처 — SVG fractalNoise inline (overlay blend) === */
+    --paint-texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.16 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
 
 html { scroll-behavior: smooth; }
@@ -34,6 +45,11 @@ body {
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    background: var(--bg);
+    /* Painterly 질감 — body 전체 배경에 fractalNoise overlay (텍스트 영향 X). */
+    background-image: var(--paint-texture);
+    background-blend-mode: overlay;
+    color: var(--text-1);
 }
 
 /* ===== 워드마크 ===== */
@@ -45,7 +61,7 @@ body {
 
 /* ===== 다이아몬드 로고 글로우 (웹사이트와 동일) ===== */
 .logo-mark {
-    filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.5));
+    filter: drop-shadow(0 0 8px rgba(96, 81, 155, 0.5));
 }
 
 /* ============================================================
@@ -70,17 +86,17 @@ body {
 
 .band-1 {
     width: 60vw; height: 60vh; top: -20vh; left: -10vw;
-    background: radial-gradient(circle, rgba(168, 85, 247, 0.85), transparent 65%);
+    background: radial-gradient(circle, rgba(96, 81, 155, 0.85), transparent 65%);
     animation: drift 25s ease-in-out infinite alternate;
 }
 .band-2 {
     width: 50vw; height: 50vh; top: 15vh; right: -15vw;
-    background: radial-gradient(circle, rgba(99, 102, 241, 0.7), transparent 65%);
+    background: radial-gradient(circle, rgba(96, 81, 155, 0.7), transparent 65%);
     animation: drift 30s ease-in-out infinite alternate-reverse;
 }
 .band-3 {
     width: 45vw; height: 45vh; bottom: -15vh; left: 30vw;
-    background: radial-gradient(circle, rgba(34, 211, 238, 0.55), transparent 65%);
+    background: radial-gradient(circle, rgba(96, 81, 155, 0.55), transparent 65%);
     animation: drift 28s ease-in-out infinite alternate;
 }
 
@@ -115,11 +131,11 @@ body {
 
 .nav-btn:hover {
     background: rgba(255, 255, 255, 0.02);
-    border-left-color: rgba(168, 85, 247, 0.3);
+    border-left-color: rgba(96, 81, 155, 0.3);
 }
 
 .nav-btn.active {
-    background: rgba(168, 85, 247, 0.06);
+    background: rgba(96, 81, 155, 0.06);
     border-left-color: var(--aurora-purple);
 }
 
@@ -214,15 +230,17 @@ body {
     border-radius: 14px;
     padding: 1.5rem 1.5rem 1.25rem;
     border: 1px solid var(--border);
+    /* v0.1.15 — bg-card 단색 + painterly texture overlay. 보라 글로우 약하게 유지. */
     background:
-        radial-gradient(ellipse at 30% 20%, rgba(168, 85, 247, 0.10), transparent 60%),
-        radial-gradient(ellipse at 70% 80%, rgba(34, 211, 238, 0.08), transparent 60%),
-        linear-gradient(135deg, var(--bg-card), #060610);
+        var(--paint-texture),
+        radial-gradient(ellipse at 30% 20%, rgba(96, 81, 155, 0.12), transparent 60%),
+        linear-gradient(135deg, var(--bg-card), #1e202c);
+    background-blend-mode: overlay, normal, normal;
     backdrop-filter: blur(20px);
     box-shadow:
-        0 1px 0 rgba(255, 255, 255, 0.05) inset,
+        0 1px 0 rgba(191, 192, 209, 0.05) inset,
         0 20px 40px -20px rgba(0, 0, 0, 0.5),
-        0 0 30px -10px rgba(168, 85, 247, 0.10);
+        0 0 30px -10px rgba(96, 81, 155, 0.15);
     transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
 
@@ -232,7 +250,7 @@ body {
     box-shadow:
         0 1px 0 rgba(255, 255, 255, 0.08) inset,
         0 30px 50px -20px rgba(0, 0, 0, 0.6),
-        0 0 50px -10px rgba(168, 85, 247, 0.18);
+        0 0 50px -10px rgba(96, 81, 155, 0.18);
 }
 
 /* metric-card 내부 */
@@ -257,7 +275,7 @@ body {
     margin-top: 1rem;
     width: 2.5rem;
     height: 1px;
-    background: linear-gradient(to right, rgba(168, 85, 247, 0.7), transparent);
+    background: linear-gradient(to right, rgba(96, 81, 155, 0.7), transparent);
 }
 
 /* indicator-toggle-card */
@@ -337,8 +355,8 @@ body {
 }
 
 .toggle-switch input:checked + .slider {
-    background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(99, 102, 241, 0.4));
-    border-color: rgba(168, 85, 247, 0.6);
+    background: linear-gradient(135deg, rgba(96, 81, 155, 0.4), rgba(96, 81, 155, 0.4));
+    border-color: rgba(96, 81, 155, 0.6);
 }
 
 .toggle-switch input:checked + .slider::before {
@@ -368,9 +386,9 @@ body {
 }
 
 .ctrl-start:hover {
-    border-color: rgba(34, 211, 238, 0.5);
+    border-color: rgba(96, 81, 155, 0.5);
     color: var(--aurora-cyan);
-    box-shadow: 0 0 24px -8px rgba(34, 211, 238, 0.4);
+    box-shadow: 0 0 24px -8px rgba(96, 81, 155, 0.4);
 }
 
 .ctrl-stop:hover {
@@ -380,9 +398,9 @@ body {
 }
 
 .ctrl-save:hover {
-    border-color: rgba(168, 85, 247, 0.5);
+    border-color: rgba(96, 81, 155, 0.5);
     color: #d8b4fe;
-    box-shadow: 0 0 24px -8px rgba(168, 85, 247, 0.4);
+    box-shadow: 0 0 24px -8px rgba(96, 81, 155, 0.4);
 }
 
 /* ============================================================
@@ -425,7 +443,7 @@ body {
     top: 0.7rem;
     width: 0.75rem;
     height: 1px;
-    background: linear-gradient(to right, rgba(168, 85, 247, 0.8), transparent);
+    background: linear-gradient(to right, rgba(96, 81, 155, 0.8), transparent);
 }
 
 .placeholder-todo {
@@ -630,15 +648,15 @@ body {
 }
 
 .radio-group label:hover {
-    border-color: rgba(168, 85, 247, 0.4);
+    border-color: rgba(96, 81, 155, 0.4);
     color: var(--text-1);
 }
 
 .radio-group input[type="radio"]:checked + label {
     border-color: var(--aurora-purple);
-    background: rgba(168, 85, 247, 0.1);
+    background: rgba(96, 81, 155, 0.1);
     color: var(--text-1);
-    box-shadow: 0 0 16px -4px rgba(168, 85, 247, 0.4);
+    box-shadow: 0 0 16px -4px rgba(96, 81, 155, 0.4);
 }
 
 .radio-group input[type="radio"]:checked + label::before {
@@ -702,7 +720,7 @@ input[type="range"].slider-input::-webkit-slider-thumb {
     background: linear-gradient(135deg, var(--aurora-purple), var(--aurora-cyan));
     border: 2px solid var(--bg-card);
     cursor: pointer;
-    box-shadow: 0 0 12px -2px rgba(168, 85, 247, 0.6);
+    box-shadow: 0 0 12px -2px rgba(96, 81, 155, 0.6);
     transition: transform 0.15s ease;
 }
 
@@ -746,8 +764,8 @@ input[type="range"].slider-input:disabled {
 .input-field:focus {
     outline: none;
     border-color: var(--aurora-purple);
-    background: rgba(168, 85, 247, 0.04);
-    box-shadow: 0 0 16px -4px rgba(168, 85, 247, 0.4);
+    background: rgba(96, 81, 155, 0.04);
+    box-shadow: 0 0 16px -4px rgba(96, 81, 155, 0.4);
 }
 
 .input-field:disabled {
@@ -824,15 +842,15 @@ input[type="range"].slider-input:disabled {
 }
 
 .btn-primary {
-    border-color: rgba(168, 85, 247, 0.5);
+    border-color: rgba(96, 81, 155, 0.5);
     color: #d8b4fe;
-    background: linear-gradient(135deg, rgba(168, 85, 247, 0.1), rgba(99, 102, 241, 0.1));
+    background: linear-gradient(135deg, rgba(96, 81, 155, 0.1), rgba(96, 81, 155, 0.1));
 }
 
 .btn-primary:hover {
     border-color: var(--aurora-purple);
     color: white;
-    box-shadow: 0 0 24px -8px rgba(168, 85, 247, 0.6);
+    box-shadow: 0 0 24px -8px rgba(96, 81, 155, 0.6);
 }
 
 .btn-danger {
@@ -911,14 +929,14 @@ input[type="range"].slider-input:disabled {
 }
 
 .pair-card:hover {
-    border-color: rgba(168, 85, 247, 0.4);
-    background: rgba(168, 85, 247, 0.04);
+    border-color: rgba(96, 81, 155, 0.4);
+    background: rgba(96, 81, 155, 0.04);
 }
 
 .pair-card.selected {
     border-color: var(--aurora-purple);
-    background: linear-gradient(135deg, rgba(168, 85, 247, 0.10), rgba(34, 211, 238, 0.06));
-    box-shadow: 0 0 20px -8px rgba(168, 85, 247, 0.5);
+    background: linear-gradient(135deg, rgba(96, 81, 155, 0.10), rgba(96, 81, 155, 0.06));
+    box-shadow: 0 0 20px -8px rgba(96, 81, 155, 0.5);
 }
 
 .pair-card .pair-symbol {
@@ -1020,7 +1038,7 @@ input[type="range"].slider-input:disabled {
     padding: 2px 6px;
     margin-right: 2px;
     border-radius: 3px;
-    background: rgba(168, 85, 247, 0.12);
+    background: rgba(96, 81, 155, 0.12);
     color: var(--aurora-purple, #c4b5fd);
     font-family: 'JetBrains Mono', monospace;
     letter-spacing: 0.05em;

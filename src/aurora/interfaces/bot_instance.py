@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import deque
+from collections.abc import Callable
 
 import ccxt
 
@@ -46,6 +47,30 @@ from aurora.exchange.execution import ClosedTrade, Executor
 from aurora.interfaces import active_position_store, trades_store
 
 logger = logging.getLogger(__name__)
+
+# ============================================================
+# 거래 알림 콜백 — Telegram 등 외부 채널 (싱글톤 수명 동안 유지)
+# ============================================================
+
+_trade_alert_callbacks: list[Callable[[str, dict], None]] = []
+
+
+def register_trade_alert_callback(fn: Callable[[str, dict], None]) -> None:
+    """진입/청산 알림 콜백 등록.
+
+    Args:
+        fn: ``fn(event, data)`` — event = "entry" | "exit", data = 이벤트 payload.
+    """
+    _trade_alert_callbacks.append(fn)
+
+
+def _fire_trade_alert(event: str, data: dict) -> None:
+    """등록된 콜백 일괄 호출 (실패 시 silent — 매매 사이클 보호)."""
+    for fn in _trade_alert_callbacks:
+        try:
+            fn(event, data)
+        except Exception:
+            pass
 
 
 # 매매 사이클 폴링 주기 — 봉 경계 검출은 cache.step 자체가 처리.
@@ -442,11 +467,14 @@ class BotInstance:
     def _record_closed(self, closed: ClosedTrade) -> None:
         """ClosedTrade 메모리 buffer + 디스크 영속화 통합 (v0.1.25).
 
+        청산 알림 콜백도 여기서 발화 — 모든 close_position 경로를 커버.
+
         매 close_position 직후 호출. ``trades_store.save`` 는 atomic + 실패 시 silent
         (warn) — 디스크 이슈로 매매 lifecycle 차단되지 않게.
 
         v0.1.26: 청산 후 active_position 도 동기화 — 잔여 0 = clear, partial = 새 state save.
         """
+        _fire_trade_alert("exit", {"trade": closed})
         self._closed_trades.append(closed)
         try:
             trades_store.save(list(self._closed_trades))
@@ -1074,6 +1102,13 @@ class BotInstance:
             self._symbol, decision.direction.value, plan.position.coin_amount,
             decision.triggered_by, decision.score,
         )
+        _fire_trade_alert("entry", {
+            "symbol": self._symbol,
+            "direction": decision.direction.value,
+            "entry_price": current_price,
+            "leverage": self._leverage,
+            "plan": plan,
+        })
         # v0.1.26: 진입 직후 영속화 — .exe 종료 시 잊지 않게
         self._persist_active()
 

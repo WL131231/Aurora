@@ -516,3 +516,133 @@ def test_step_reverse_branch_synthetic_ohlcv() -> None:
 
     # consec_sl 유지 — D-2 봇 능동 카테고리 (REVERSE / FORCE_END 둘 다)
     assert engine.consec_sl == 1
+
+
+def test_run_multi_trade_end_to_end_scenario() -> None:
+    """``run()`` 멀티 trade end-to-end 통합 — DESIGN §8.4 커버리지 갭 1 건 추가.
+
+    LONG entry → TP1 partial → TP2 partial → BE close → SHORT entry →
+    REVERSE close → LONG entry → FORCE_END close 의 8 단계 라이프사이클을
+    한 ``run()`` 호출로 검증. 단계 2 self-spy 패턴 정합 — ``_close`` +
+    ``_partial_close`` 둘 다 wrapper 로 호출 인자 캡처 (mock 외부 의존 X).
+
+    가격 시퀀스 (v0.1.13 ROI 단위, leverage=10 → SL 가격 0.2% / TP[0] 가격
+    0.28% 임계 정합):
+
+        봉 0~46:    close=100.0 평탄 (bar 0 진행)
+        봉 47:      close=100.0 → bar 0 닫힘 → LONG entry @ 100
+                    (SL=99.8, TPs=[100.28, 100.31, 100.35, 100.38])
+        봉 48:      close=100.30 → high ≥ TP1 → _partial_close(idx=0).
+                    tp_hits=1, trailing MOVING_TARGET → SL=entry=100
+        봉 49:      close=100.32 → high ≥ TP2 → _partial_close(idx=1).
+                    tp_hits=2, trailing → SL=tp[0]=100.28
+        봉 50:      close=99.78 → low ≤ SL 100.28 → _close(reason="BE")
+                    (tp_hits=2 ≥ 1 → BE 분류, D-2 봇 능동 카운트 유지)
+        봉 51~106:  close=99.50 평탄 (position=None)
+        봉 107:     bar 1 닫힘 → close 99.50 < EMA(2) 99.667 → SHORT
+                    entry @ 99.50 (SL=99.70, TP1=99.22)
+        봉 108~166: close=99.50 평탄 (SHORT 보유 — SL/TP 미달)
+        봉 167:     bar 2 닫힘 → SHORT signal (자기 방향 → REVERSE X)
+        봉 168~226: close=99.65 평탄 (high 99.65 < SHORT SL 99.70)
+        봉 227:     bar 3 닫힘 → close 99.65 > EMA(2) ≈ 99.61 → LONG
+                    signal → compose_exit(SHORT, [LONG]) True →
+                    _close(reason="REVERSE")
+        봉 228~286: close=99.65 평탄 (position=None)
+        봉 287:     bar 4 닫힘 → LONG entry @ 99.65
+        봉 288~298: close=99.65 평탄
+        봉 299:     마지막 봉 → _force_close_at_end(reason="FORCE_END")
+
+    Assertion 8 가지 — D-2 reason 매핑 + 멀티 trade 누적 + 방향 분포 +
+    consec_sl 흐름 + balance 변동:
+        - partial_idx_log == [0, 1]      # TP1 → TP2 순차 partial
+        - close_reasons == ["BE", "REVERSE", "FORCE_END"]
+        - len(trades) == 5               # partial 2 + close 3
+        - 방향 분포 LONG 4 (TP1/TP2/BE/FORCE_END) + SHORT 1 (REVERSE)
+        - trades[0/1] partial: entry=100 + exit > entry (LONG TP)
+        - trades[2] BE: exit < entry (LONG SL trail)
+        - trades[3] SHORT REVERSE: bar 3 닫힘 시점 == 봉 227 ts
+        - consec_sl == 0 (TP1/TP2 partial reset → BE/REVERSE/FORCE_END
+                          모두 카운트 유지 → 0 그대로)
+        - balance < initial_capital     # 누적 손실 (단일 BE + 두 SHORT
+                                        # 사이 변동 + FORCE_END 마이너 fee)
+    """
+    cfg = BacktestConfig(
+        timeframes=["1H"],
+        strategy_config=StrategyConfig(
+            ema_periods=(2, 3),
+            ema_touch_tolerance=0.003,
+        ),
+    )
+    engine = BacktestEngine(cfg)
+
+    # self-spy — _close 와 _partial_close 둘 다 캡처 (D-21 partial idx 추적)
+    close_reasons: list[str] = []
+    original_close = engine._close
+
+    def spy_close(*, fill: float, ts_ms: int, reason: str) -> TradeRecord:
+        close_reasons.append(reason)
+        return original_close(fill=fill, ts_ms=ts_ms, reason=reason)
+
+    engine._close = spy_close                               # type: ignore[method-assign]
+
+    partial_idx_log: list[int] = []
+    original_partial = engine._partial_close
+
+    def spy_partial(*, idx: int, fill: float, ts_ms: int) -> TradeRecord:
+        partial_idx_log.append(idx)
+        return original_partial(idx=idx, fill=fill, ts_ms=ts_ms)
+
+    engine._partial_close = spy_partial                     # type: ignore[method-assign]
+
+    prices = (
+        [100.0] * 47                                        # 봉 0~46
+        + [100.0]                                           # 봉 47, bar 0 닫힘
+        + [100.30]                                          # 봉 48, TP1
+        + [100.32]                                          # 봉 49, TP2
+        + [99.78]                                           # 봉 50, BE close
+        + [99.50] * 56                                      # 봉 51~106
+        + [99.50] * 60                                      # 봉 107~166
+        + [99.65] * 60                                      # 봉 167~226
+        + [99.65] * 60                                      # 봉 227~286
+        + [99.65] * 13                                      # 봉 287~299
+    )
+    assert len(prices) == 300                               # 사전 계산 verify
+    df = _make_synthetic_1m_df(prices=prices)
+
+    trades = engine.run(df)
+
+    # (1) D-21 TP partial 순차 — TP1 → TP2 (한 봉 1 청산 한계 정합)
+    assert partial_idx_log == [0, 1]
+
+    # (2) D-2 close reason 매핑 — BE / REVERSE / FORCE_END
+    assert close_reasons == ["BE", "REVERSE", "FORCE_END"]
+
+    # (3) trade 누적 — partial 2 + close 3 = 5 (>= 4 사용자 임계)
+    assert len(trades) == 5
+
+    # (4) 방향 분포 — LONG 4 (TP1/TP2/BE/FORCE_END) + SHORT 1 (REVERSE)
+    directions = [t.direction for t in trades]
+    assert directions == ["LONG", "LONG", "LONG", "SHORT", "LONG"]
+    assert directions.count("LONG") == 4
+    assert directions.count("SHORT") == 1
+
+    # (5) trades[0/1] LONG TP partial — exit > entry (익절)
+    assert trades[0].entry_price == pytest.approx(100.0)
+    assert trades[0].exit_price > trades[0].entry_price
+    assert trades[1].exit_price > trades[1].entry_price
+
+    # (6) trades[2] LONG BE close — exit < entry (SL trail 100.28 통과 청산)
+    assert trades[2].entry_price == pytest.approx(100.0)
+    assert trades[2].exit_price < trades[2].entry_price
+
+    # (7) trades[3] SHORT REVERSE close — bar 3 닫힘 시점 (봉 227)
+    bar3_close_ts = 1_700_000_000_000 + 227 * 60_000
+    assert trades[3].direction == "SHORT"
+    assert trades[3].exit_ts == bar3_close_ts
+
+    # (8) consec_sl == 0 — _partial_close reset → BE/REVERSE/FORCE_END 유지
+    assert engine.consec_sl == 0
+
+    # balance 변동 — 누적 손실 (BE 청산 + SHORT REVERSE pnl 음수 + fee)
+    assert engine.balance < cfg.initial_capital
+    assert engine.position is None                          # FORCE_END 후 정리

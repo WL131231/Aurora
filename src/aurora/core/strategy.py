@@ -121,6 +121,10 @@ class StrategyConfig:
     """Leading Span B donchian 기간."""
     ichimoku_displacement: int = 26
     """forward shift 양 (트뷰 표준 26 → 실제 shift = 25봉)."""
+    ichimoku_breakout_buffer_pct: float = 0.006
+    """Ichimoku 구름 이탈 buffer (v0.1.44). 진입 시점 cloud 라인 ± buffer 가
+    SL 라인. 기본 0.006 = 0.6% (BB 0.3% 보다 2배 여유 — Ichimoku 는 멀티 TF
+    추세 지표라 wick 흡수 폭 더 필요. 사용자 결정)."""
 
     # Harmonic Pattern (Selectable — 15m/1H 멀티 TF, HTF 가중치 자동 적용)
     harmonic_pivot_length: int = 10
@@ -576,6 +580,11 @@ def detect_ichimoku_signal(
         lower_f = float(last_lower)
         ts = _last_bar_timestamp(df)
 
+        # v0.1.44: Ichimoku Structural SL meta — 진입 시점 cloud 값 + buffer 박음.
+        # build_risk_plan 이 SL = cloud_upper × (1 - buffer) (LONG) /
+        # cloud_lower × (1 + buffer) (SHORT) 로 override.
+        ichimoku_buffer = config.ichimoku_breakout_buffer_pct
+
         # 가격이 구름 위 + 상단 스팬 터치 → LONG
         if last_close > upper_f and last_low <= upper_f:
             signals.append(EntrySignal(
@@ -586,6 +595,12 @@ def detect_ichimoku_signal(
                 note=f"이치모쿠 구름 상단 지지 ({tf}, "
                      f"low={last_low:.4f}≤upper={upper_f:.4f}<close={last_close:.4f})",
                 bar_timestamp=ts,
+                meta={
+                    "cloud_upper": upper_f,
+                    "cloud_lower": lower_f,
+                    "buffer_pct": ichimoku_buffer,
+                    "sl_price": upper_f * (1.0 - ichimoku_buffer),
+                },
             ))
         # 가격이 구름 아래 + 하단 스팬 터치 → SHORT
         elif last_close < lower_f and last_high >= lower_f:
@@ -597,6 +612,12 @@ def detect_ichimoku_signal(
                 note=f"이치모쿠 구름 하단 저항 ({tf}, "
                      f"close={last_close:.4f}<lower={lower_f:.4f}≤high={last_high:.4f})",
                 bar_timestamp=ts,
+                meta={
+                    "cloud_upper": upper_f,
+                    "cloud_lower": lower_f,
+                    "buffer_pct": ichimoku_buffer,
+                    "sl_price": lower_f * (1.0 + ichimoku_buffer),
+                },
             ))
 
     return signals

@@ -282,6 +282,7 @@ def build_risk_plan(
     bb_upper: float | None = None,
     bb_lower: float | None = None,
     bb_buffer_pct: float = 0.003,
+    structural_sl_price: float | None = None,
 ) -> RiskPlan:
     """진입 시점에 SL/TP 가격 + 포지션 사이즈를 한 번에 계산.
 
@@ -364,17 +365,23 @@ def build_risk_plan(
     else:
         raise ValueError(f"unknown TpSlMode: {config.mode}")
 
-    # 방향별 가격 — SL 은 BB 신호 진입 시 override (v0.1.42)
+    # 방향별 가격 — SL 은 구조적 신호 진입 시 override.
+    # 우선순위 (v0.1.44): structural_sl_price (일반화, Ichimoku/EMA 등) >
+    # bb_upper/bb_lower (v0.1.42 BB 전용) > 기존 ROI 기반.
     if direction_norm == "long":
-        if bb_lower is not None and bb_lower > 0:
-            # BB Structural SL override — long 진입 시 BB 하단 - buffer
+        if structural_sl_price is not None and structural_sl_price > 0:
+            sl_price = structural_sl_price
+        elif bb_lower is not None and bb_lower > 0:
+            # BB Structural SL override — long 진입 시 BB 하단 - buffer (v0.1.42)
             sl_price = bb_lower * (1.0 - bb_buffer_pct)
         else:
             sl_price = entry_price - sl_dist
         tp_prices = [entry_price + d for d in tp_dists]
     else:
-        if bb_upper is not None and bb_upper > 0:
-            # BB Structural SL override — short 진입 시 BB 상단 + buffer
+        if structural_sl_price is not None and structural_sl_price > 0:
+            sl_price = structural_sl_price
+        elif bb_upper is not None and bb_upper > 0:
+            # BB Structural SL override — short 진입 시 BB 상단 + buffer (v0.1.42)
             sl_price = bb_upper * (1.0 + bb_buffer_pct)
         else:
             sl_price = entry_price + sl_dist

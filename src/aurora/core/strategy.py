@@ -12,6 +12,7 @@ import pandas as pd
 
 from aurora.core.indicators import (
     HarmonicMatch,
+    atr_wilder,
     bollinger_bands,
     ema,
     harmonic_pattern,
@@ -967,3 +968,87 @@ def evaluate_selectable(
     signals.extend(detect_2468_signal(df_by_tf, config, symbol=symbol))
 
     return signals
+
+
+# ============================================================
+# D-5 Regime breakdown — 4H 시장 국면 분류 (2026-05-05)
+# ============================================================
+
+
+class Regime(StrEnum):
+    """시장 국면 enum — TradeRecord.regime metadata 입력.
+
+    분류 우선순위 (정책 spec 5/5 LGTM 합치, Issue #110): VOLATILE > TREND > RANGE.
+    UNKNOWN 은 4H 미닫힘 진입 시 Position.regime 디폴트 (분류 미산출 자연 처리).
+    """
+
+    TREND_UP = "TREND_UP"
+    TREND_DOWN = "TREND_DOWN"
+    RANGE = "RANGE"
+    VOLATILE = "VOLATILE"
+    UNKNOWN = "UNKNOWN"
+
+
+# Regime 분류 임계 — 정책 spec drafts/D-5-regime-policy-spec.md 5/5 LGTM 합치 (잠정안)
+TREND_THRESHOLD = 0.005          # EMA50/200 격차 ±0.5% — TREND vs RANGE 경계
+VOLATILITY_MULTIPLIER = 2.0      # atr_now / atr_avg ≥ 2.0 → VOLATILE
+VOLATILITY_LOOKBACK = 20         # ATR 평균 산출 윈도우 (4H 봉 20 개 = 약 3.3 일)
+
+
+def classify_regime(df_4h: pd.DataFrame) -> Regime:
+    """4H DataFrame 기반 시장 국면 분류 — 4 regime + UNKNOWN fallback.
+
+    분류 우선순위 (정책 spec, 5/5 LGTM 합치 — Issue #110):
+        1. **VOLATILE** — ``atr_now / atr_avg ≥ VOLATILITY_MULTIPLIER`` (변동성 우선,
+           TREND 동시 발동 시에도 VOLATILE 채택).
+        2. **TREND_UP** — ``(ema50 - ema200) / ema200 ≥ TREND_THRESHOLD``.
+        3. **TREND_DOWN** — ``(ema50 - ema200) / ema200 ≤ -TREND_THRESHOLD``.
+        4. **RANGE** — fallback (격차 미만 또는 변동성 평균 안정).
+
+    Sample 부족 (``len(df_4h) < VOLATILITY_LOOKBACK``) 또는 NaN 발생 시
+    ``RANGE`` fallback (silent — UNKNOWN 은 진입 시점 박는 디폴트로만 사용).
+
+    Args:
+        df_4h: 4H OHLC DataFrame (``open/high/low/close`` 컬럼 필요).
+
+    Returns:
+        ``Regime`` enum (VOLATILE / TREND_UP / TREND_DOWN / RANGE).
+
+    Note:
+        본 함수는 분류만 책임. VOLATILE 시 신호 평가 skip 등의 액션은 별도 후속
+        PR 책임 (보충 의견 트래커 F1).
+    """
+    # Sample 부족 가드 — lookback 미만이면 ATR 평균 산출 무의미 → RANGE fallback
+    if len(df_4h) < VOLATILITY_LOOKBACK:
+        return Regime.RANGE
+
+    close = df_4h["close"]
+    ema50 = ema(close, 50)
+    ema200 = ema(close, 200)
+    atr = atr_wilder(df_4h, period=14)
+
+    ema50_now = ema50.iloc[-1]
+    ema200_now = ema200.iloc[-1]
+    atr_now = atr.iloc[-1]
+
+    # NaN 가드 — close 끝부분 NaN / 산출 실패 → RANGE fallback
+    if pd.isna(ema50_now) or pd.isna(ema200_now) or pd.isna(atr_now):
+        return Regime.RANGE
+
+    # VOLATILE 우선 (정책 spec — 변동성 평균 ≥ 2.0)
+    atr_avg = atr.iloc[-VOLATILITY_LOOKBACK:].mean()
+    # Why: atr_avg=0 가드 — 완전 정적 가격 (high=low=close 모든 봉) 시 ZeroDiv 회피
+    if atr_avg > 0 and atr_now / atr_avg >= VOLATILITY_MULTIPLIER:
+        return Regime.VOLATILE
+
+    # TREND 분류 — EMA50/200 상대 격차 (정책 spec ±0.5%)
+    # Why: ema200_now=0 가드 — 산출가 0 (이론상 비정상) 시 ZeroDiv 회피 → RANGE
+    if ema200_now == 0:
+        return Regime.RANGE
+    gap = (ema50_now - ema200_now) / ema200_now
+    if gap >= TREND_THRESHOLD:
+        return Regime.TREND_UP
+    if gap <= -TREND_THRESHOLD:
+        return Regime.TREND_DOWN
+
+    return Regime.RANGE

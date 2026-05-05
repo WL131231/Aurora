@@ -733,20 +733,51 @@ document.getElementById("release-alert-open")?.addEventListener("click", () => {
 // "재시작하기" — POST /relaunch (v0.1.43): launcher 다시 spawn + 본체 자기 종료.
 // launcher 가 auto-start 모드로 시작 → START 자동 클릭 → 새 본체 실행.
 // 사용자 입장: 본체 화면 사라짐 → launcher 화면 잠깐 → 새 본체 화면 등장.
+//
+// v0.1.46 fix (사용자 보고: 무한 로딩):
+//   1. 응답 success=False (launcher path env 없음) 이면 alert + button reset
+//   2. fetch timeout 2초 — 본체 응답 안 오면 강제 abort
+//   3. finally 1.5초 후 button 강제 reset — 본체 안 죽었을 때 사용자 갇히지 않음
 document.getElementById("release-alert-restart")?.addEventListener("click", async () => {
     const btn = document.getElementById("release-alert-restart");
     if (!btn) return;
     if (!confirm("Aurora 를 재시작합니다.\n현재 봇이 실행 중이면 자동으로 중지됩니다.")) return;
     btn.disabled = true;
     btn.textContent = "재시작 중...";
+
+    let responseError = null;
     try {
-        // 응답을 못 받을 가능성 — 본체가 1초 후 죽음. fetch 자체는 즉시 응답 받지만
-        // 그 후 connection close 됨. 정상 흐름에서 catch 도착 가능.
-        await fetch("/relaunch", { method: "POST" });
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 2000);
+        const r = await fetch("/relaunch", { method: "POST", signal: ctrl.signal });
+        clearTimeout(tid);
+        // 응답 받음 — success 확인. False 면 사용자 알림 (launcher path env 없는 케이스)
+        try {
+            const data = await r.json();
+            if (data && data.success === false) {
+                responseError = data.message || "재시작 실패";
+            }
+        } catch (_) { /* JSON 파싱 실패 무시 (정상 진행 가정) */ }
     } catch (_) {
-        // 정상 — 서버 종료 직전 connection drop 가능
+        // 정상 — 서버 종료 직전 connection drop / timeout 가능
     }
-    // 본체가 1초 후 종료 — UI 화면 사라짐. launcher 가 auto-start 로 켜짐.
+
+    // launcher path env 없으면 사용자 알림 + 즉시 button reset
+    if (responseError) {
+        alert(`재시작 불가 — ${responseError}\n\nlauncher 통해 봇을 켜야 재시작 버튼 사용 가능합니다.`);
+        btn.disabled = false;
+        btn.textContent = "재시작하기";
+        return;
+    }
+
+    // 정상 흐름 — 본체가 0.8초 후 종료 → UI 화면 사라짐. launcher 가 auto-start 로 등장.
+    // 안전장치: 2초 후에도 본체가 살아있으면 (종료 실패) button reset → 사용자 갇히지 않음
+    setTimeout(() => {
+        if (btn.isConnected) {  // UI 살아있다 = 본체 안 죽음
+            btn.disabled = false;
+            btn.textContent = "재시작하기";
+        }
+    }, 2000);
 });
 
 // ============================================================

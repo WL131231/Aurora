@@ -299,6 +299,21 @@ def test_restart_bot_from_stopped_state() -> None:
     assert s.json()["running"] is True
 
 
+def test_relaunch_without_launcher_path_v0_1_43(monkeypatch) -> None:
+    """v0.1.43: ``/relaunch`` 호출 시 launcher path env 없으면 실패 응답.
+
+    Why: 사용자가 launcher 없이 직접 본체 .exe 실행한 경우 launcher path 모름.
+    위험한 spawn 방지 위해 명시 실패 응답 (silent 종료 X).
+    """
+    monkeypatch.delenv("AURORA_LAUNCHER_PATH", raising=False)
+    client = _client()
+    r = client.post("/relaunch")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is False
+    assert "launcher" in body["message"].lower()
+
+
 # ============================================================
 # Logs
 # ============================================================

@@ -109,4 +109,16 @@ window.addEventListener("pywebviewready", async () => {
     Api = window.pywebview.api;
     await loadVersionInfo();
     log("Launcher 시작");
+
+    // v0.1.43: 본체 /relaunch 흐름 — auto-start 모드면 START 자동 클릭.
+    // 사용자가 본체 UI 의 업데이트 팝업 "재시작하기" 클릭 → 본체가 launcher
+    // spawn (env AURORA_LAUNCHER_AUTO_START=1) → launcher 가 자동 START.
+    try {
+        const auto = await Api.is_auto_start();
+        if (auto) {
+            log("자동 재시작 모드 — START 자동 트리거");
+            // 약간의 지연으로 UI 렌더링 + 사용자가 "뭐 일어나는지" 확인 가능
+            setTimeout(() => btnStart.click(), 600);
+        }
+    } catch (_) { /* 구버전 launcher 호환 — is_auto_start 없으면 silent skip */ }
 });

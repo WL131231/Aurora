@@ -1612,6 +1612,22 @@ input[type="range"].slider-input:disabled {
     border-color: var(--aurora-purple);
 }
 
+/* v0.1.43: 재시작 버튼 — primary 강조 (launcher 재실행 + Start 자동) */
+.release-alert-btn-primary {
+    background: rgba(168, 134, 255, 0.32);
+    border-color: rgba(168, 134, 255, 0.7);
+    color: #fff;
+    font-weight: 600;
+}
+.release-alert-btn-primary:hover {
+    background: rgba(168, 134, 255, 0.5);
+    border-color: var(--aurora-purple);
+}
+.release-alert-btn-primary:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
 /* ============================================================
    PnL 공유 카드 (v0.1.21) — 거래내역 행 클릭 → 모달 + html2canvas PNG
    ============================================================ */

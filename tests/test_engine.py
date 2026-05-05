@@ -778,9 +778,12 @@ def test_step_classifies_regime_on_4h_close(
     engine = BacktestEngine(cfg)
 
     # self-spy on classify_regime — TREND_UP 강제 반환 (테스트 결정론성)
+    # D-5 보충 F3: regime_config keyword arg 시그니처 호환 (engine 호출자 전달)
     classify_call_lengths: list[int] = []
 
-    def spy_classify(df_4h: pd.DataFrame) -> Regime:
+    def spy_classify(
+        df_4h: pd.DataFrame, regime_config: object = None,
+    ) -> Regime:
         classify_call_lengths.append(len(df_4h))
         return Regime.TREND_UP
 

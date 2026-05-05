@@ -222,6 +222,30 @@ def test_bb_reversal_long_after_lower_break() -> None:
     )
 
 
+def test_bb_reversal_attaches_meta_v0_1_42() -> None:
+    """v0.1.42: BB reversal 신호에 meta (bb_upper/lower/middle/buffer) 박힘.
+
+    Why: BotInstance 가 진입 시점 BB 값을 build_risk_plan 에 전달해 SL 을 BB
+    라인 + buffer 로 박기 위함. meta 없으면 SL override 작동 안 함.
+    """
+    rng = np.random.RandomState(42)
+    closes = list(rng.randn(40) * 1.0 + 100)
+    closes.append(float(np.mean(closes)) + 8.0)   # 직전 봉: upper 위 buffer 이탈
+    closes.append(float(np.mean(closes[:-1])))    # 현재 봉: 안쪽 회귀
+    df = _bb_df(closes)
+    config = StrategyConfig()
+    signals = detect_bollinger_touch(df, config)
+    short_sig = next(
+        s for s in signals if s.source == "bollinger_reversal_upper"
+    )
+    assert short_sig.meta is not None
+    assert "bb_upper" in short_sig.meta
+    assert "bb_lower" in short_sig.meta
+    assert "bb_middle" in short_sig.meta
+    assert abs(short_sig.meta["buffer_pct"] - 0.003) < 1e-9
+    assert short_sig.meta["bb_upper"] > short_sig.meta["bb_middle"] > short_sig.meta["bb_lower"]
+
+
 # ─── Tier 3: 찢어짐 보류 (현재 봉 종가가 BB 밖) ───
 
 
@@ -240,11 +264,13 @@ def test_bb_holds_on_close_outside() -> None:
 # ─── Tier 4: Proximity 터치 (high/low 기반) ───
 
 
-def test_bb_touch_short_when_high_in_upper_zone() -> None:
-    """high 가 upper zone 진입 + 종가 안쪽 → SHORT (강도 1.0).
+def test_bb_proximity_touch_no_signal_v0_1_42() -> None:
+    """v0.1.42: Proximity 진입 폐기 검증 — high 가 upper zone 안쪽이어도 신호 X.
 
-    v0.1.28: wick reversal tier 도입 후 high 가 upper outside 면 그쪽이 우선 잡힘.
-    proximity touch 검증 위해 high 를 명시 계산된 zone 중앙 (upper 안쪽) 으로 설정.
+    Why: proximity 진입은 ``last_high`` 누적 max 기반이라 봉 안 wick 한 번
+    닿으면 봉 닫힐 때까지 신호 stateful ON → 봇이 1초 폴링이라 청산 후 즉시
+    재진입 → 사고팔고 무한 사이클 (사용자 보고). v0.1.42 부터 폐기.
+    Reversal + Wick reversal (buffer 이탈 후 회귀) 만 신호.
     """
     import pandas as pd
 
@@ -253,30 +279,21 @@ def test_bb_touch_short_when_high_in_upper_zone() -> None:
     closes = list(rng.randn(40) * 1.0 + 100)
     last_close = float(np.mean(closes[-20:]))
     closes.append(last_close)
-    # BB upper 계산 → high 를 zone 안 (zone_start ~ upper) 중앙에 고정
     bb_calc = bollinger_bands(pd.Series(closes), period=20, std=2.0)
     upper_val = float(bb_calc["upper"].iloc[-1])
-    zone_start = upper_val * (1.0 - 0.005)
-    spike_high = (zone_start + upper_val) / 2.0  # zone 중앙 (upper 아래 inside)
+    # high 를 upper 안쪽 (proximity zone 진입) 으로 — 그래도 신호 X 여야 함
+    spike_high = upper_val * 0.999  # upper 0.1% 안쪽
     highs = list(closes[:-1]) + [spike_high]
     lows = list(closes)
     df = _bb_df(closes, highs=highs, lows=lows)
     config = StrategyConfig()
     signals = detect_bollinger_touch(df, config)
-    assert any(
-        s.direction == Direction.SHORT
-        and s.source == "bollinger_upper"
-        and s.strength == 1.0
-        for s in signals
-    )
+    # Proximity (bollinger_upper / bollinger_lower) source 신호 X
+    assert not any(s.source in ("bollinger_upper", "bollinger_lower") for s in signals)
 
 
-def test_bb_touch_long_when_low_in_lower_zone() -> None:
-    """low 가 lower zone 진입 + 종가 안쪽 → LONG (강도 1.0).
-
-    v0.1.28: wick reversal tier 도입 후 low 가 lower outside 면 그쪽이 우선 잡힘.
-    proximity touch 검증 위해 low 를 명시 계산된 zone 중앙 (lower 안쪽) 으로 설정.
-    """
+def test_bb_proximity_touch_long_no_signal_v0_1_42() -> None:
+    """v0.1.42: Proximity 폐기 (long 측) — low 가 lower zone 안쪽이어도 신호 X."""
     import pandas as pd
 
     from aurora.core.indicators import bollinger_bands
@@ -286,19 +303,13 @@ def test_bb_touch_long_when_low_in_lower_zone() -> None:
     closes.append(last_close)
     bb_calc = bollinger_bands(pd.Series(closes), period=20, std=2.0)
     lower_val = float(bb_calc["lower"].iloc[-1])
-    zone_end = lower_val * (1.0 + 0.005)
-    spike_low = (lower_val + zone_end) / 2.0  # zone 중앙 (lower 위 inside)
+    spike_low = lower_val * 1.001  # lower 0.1% 위
     highs = list(closes)
     lows = list(closes[:-1]) + [spike_low]
     df = _bb_df(closes, highs=highs, lows=lows)
     config = StrategyConfig()
     signals = detect_bollinger_touch(df, config)
-    assert any(
-        s.direction == Direction.LONG
-        and s.source == "bollinger_lower"
-        and s.strength == 1.0
-        for s in signals
-    )
+    assert not any(s.source in ("bollinger_upper", "bollinger_lower") for s in signals)
 
 
 # ─── Tier 3: Wick reversal (v0.1.28 신규) ───

@@ -288,6 +288,42 @@ def test_build_risk_plan_manual_mode() -> None:
     assert plan.tp_prices == pytest.approx([100.05, 100.1, 100.15, 100.2])
 
 
+def test_build_risk_plan_bb_structural_sl_short_v0_1_42() -> None:
+    """v0.1.42: BB 신호 진입 시 SL = BB upper × (1 + buffer) override (short).
+
+    기존 ROI 기반 SL 무시하고 BB 라인 기반 SL. 호가 noise (~0.08%) 위 안전.
+    Why: 사용자 보고 v0.1.41 사고팔고 무한 루프 fix.
+    """
+    cfg = TpSlConfig(mode=TpSlMode.FIXED_PCT)
+    plan = build_risk_plan(
+        entry_price=80_500.0, direction="short",
+        leverage=34, equity_usd=1000.0,
+        config=cfg, risk_pct=0.01,
+        bb_upper=80_650.0, bb_lower=80_200.0,
+        bb_buffer_pct=0.003,
+    )
+    # SL = 80,650 × 1.003 = 80,891.95 (진입가 +391.95 USDT, ~0.49% 위)
+    assert plan.sl_price == pytest.approx(80_650.0 * 1.003)
+    # TP 는 기존 ROI 기반 그대로 (override X)
+    assert len(plan.tp_prices) == 4
+    assert plan.tp_prices[0] < 80_500.0  # short 의 TP 는 진입가 아래
+
+
+def test_build_risk_plan_bb_structural_sl_long_v0_1_42() -> None:
+    """v0.1.42: BB 신호 진입 시 SL = BB lower × (1 - buffer) override (long)."""
+    cfg = TpSlConfig(mode=TpSlMode.FIXED_PCT)
+    plan = build_risk_plan(
+        entry_price=80_300.0, direction="long",
+        leverage=34, equity_usd=1000.0,
+        config=cfg, risk_pct=0.01,
+        bb_upper=80_650.0, bb_lower=80_200.0,
+        bb_buffer_pct=0.003,
+    )
+    # SL = 80,200 × 0.997 = 79,959.4 (진입가 -340.6 USDT, ~0.42% 아래)
+    assert plan.sl_price == pytest.approx(80_200.0 * 0.997)
+    assert plan.tp_prices[0] > 80_300.0  # long 의 TP 는 진입가 위
+
+
 def test_build_risk_plan_atr_requires_atr_value() -> None:
     """ATR 모드인데 atr 인자 없으면 raise."""
     cfg = TpSlConfig(mode=TpSlMode.ATR)

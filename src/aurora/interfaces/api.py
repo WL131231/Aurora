@@ -744,8 +744,12 @@ def create_app() -> FastAPI:
             logger.exception("[/relaunch] FAIL — launcher Popen OSError: %s", e)
             return ControlResponse(success=False, message=f"launcher 실행 실패: {e}")
 
-        # 응답 반환 후 본체 자기 종료 — v0.1.50: webview destroy 제거 + os._exit.
-        # v0.1.52: trace log 추가 (사용자 보고 v0.1.50 무반응 디버깅용).
+        # 응답 반환 후 본체 자기 종료 — 다중 fallback (v0.1.56).
+        # v0.1.50: webview destroy 제거 (thread hang)
+        # v0.1.52: trace log 추가
+        # v0.1.56: os._exit(0) 차단 가능성 → Windows ExitProcess fallback +
+        # sys.exit fallback. PyInstaller frozen 환경에서 os._exit 가 hook 으로
+        # 차단되는 케이스 보호 (사용자 보고 v0.1.50/52 환경 본체 안 죽음).
         import threading as _threading
         import time as _time
 
@@ -753,10 +757,24 @@ def create_app() -> FastAPI:
             try:
                 logger.info("[/relaunch shutdown] sleep 0.5s 시작")
                 _time.sleep(0.5)
-                logger.info("[/relaunch shutdown] os._exit(0) 호출 — 본체 종료")
+                logger.info("[/relaunch shutdown] 1차 시도: os._exit(0)")
             except Exception as e:  # noqa: BLE001 — 종료 흐름이라 예외 무시
                 logger.warning("[/relaunch shutdown] log/sleep 예외 (무시): %s", e)
-            _os._exit(0)  # noqa: S603 — system call 즉시 종료
+            # 1차: os._exit (가장 일반적, system call)
+            try:
+                _os._exit(0)  # noqa: S603 — system call 즉시 종료
+            except SystemExit:
+                pass
+            # 2차: Windows ExitProcess (frozen 환경에서 os._exit 차단 시)
+            try:
+                logger.warning("[/relaunch shutdown] os._exit 도달 후도 살아있음 — ExitProcess 시도")
+                import ctypes  # noqa: PLC0415
+                ctypes.windll.kernel32.ExitProcess(0)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[/relaunch shutdown] ExitProcess 예외: %s", e)
+            # 3차: sys.exit (마지막 fallback)
+            import sys as _sys  # noqa: PLC0415
+            _sys.exit(0)
 
         # daemon=False — main thread 종료에 의존 X (강제 종료 보장)
         _threading.Thread(target=_shutdown_thread, daemon=False).start()

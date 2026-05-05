@@ -1173,8 +1173,10 @@ class BotInstance:
             return
 
         # v0.1.53: Coinalyze 추세 인지 — 진입 평가 시점에 5분 cache 활용.
-        # 1) 강한 추세 반대 (|score| ≥ 2 + 진입 방향 반대) → 진입 차단 (필터)
-        # 2) 그 외 → score 가중치 부스트 (일치 ×1.3~1.5 / 중립 ×1.0 / 약 반대 ×0.7)
+        # v0.1.58: 추세 방향 강제 (사용자 요청) — 추세 롱/숏 이면 반대 방향 무조건 차단.
+        # 1) 추세 방향 (롱/강한 롱/숏/강한 숏) + 진입 방향 반대 → 진입 차단
+        # 2) 중립 (score=0) — 양방향 허용 + 가중치 1.0
+        # 3) 일치 — 가중치 부스트 (강 ×1.5 / 약 ×1.3)
         # client None (api_key 미설정) → 기존 동작 유지 (필터 X, boost 1.0).
         market_trend: MarketTrend | None = None
         if self._coinalyze is not None:
@@ -1186,9 +1188,9 @@ class BotInstance:
 
         sig_dir = decision.direction.value  # "long" / "short"
         if trend_filter(market_trend, sig_dir):
-            # 강한 추세 반대 — 진입 차단
+            # 추세 반대 방향 — 진입 차단 (v0.1.58: 약한 추세도 차단)
             logger.info(
-                "진입 차단 (강한 추세 반대): trend=%s score=%+d / 신호 방향=%s",
+                "진입 차단 (추세 반대 방향): trend=%s score=%+d / 신호 방향=%s",
                 market_trend.direction if market_trend else "?",
                 market_trend.score if market_trend else 0,
                 sig_dir,

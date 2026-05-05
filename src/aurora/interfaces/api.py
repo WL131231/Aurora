@@ -762,42 +762,69 @@ def create_app() -> FastAPI:
             logger.exception("[/relaunch] FAIL — launcher Popen OSError: %s", e)
             return ControlResponse(success=False, message=f"launcher 실행 실패: {e}")
 
-        # 응답 반환 후 본체 자기 종료 — 다중 fallback (v0.1.56).
-        # v0.1.50: webview destroy 제거 (thread hang)
-        # v0.1.52: trace log 추가
-        # v0.1.56: os._exit(0) 차단 가능성 → Windows ExitProcess fallback +
-        # sys.exit fallback. PyInstaller frozen 환경에서 os._exit 가 hook 으로
-        # 차단되는 케이스 보호 (사용자 보고 v0.1.50/52 환경 본체 안 죽음).
+        # v0.1.58: 외부 watchdog cmd 로 taskkill /F — 가장 robust 한 강제 종료.
+        # Why: v0.1.46/48/50/52/56 fallback (os._exit / ExitProcess / sys.exit) 모두
+        # 사용자 환경에서 먹통 (PyInstaller frozen + uvicorn + threading + webview
+        # 복합 hold). 자기 자신 죽이기는 hook 들이 막아도, 외부 cmd 프로세스는
+        # 무조건 동작. taskkill /F /PID <self_pid> 가 OS-level 종료라 모든 hook 우회.
+        #
+        # 흐름:
+        #   1) 외부 detached cmd 프로세스 spawn (timeout 1.5s 대기 후 taskkill /F)
+        #   2) 응답 반환 — UI 가 "재시작 중..." 토스트 표시
+        #   3) 1.5초 후 외부 cmd 가 본체 강제 종료 → launcher 가 새 본체 spawn
+        # 자체 종료 (os._exit / ExitProcess / sys.exit) 도 백업으로 시도 — 외부
+        # watchdog 도착 전에 먼저 끝나면 더 좋음.
         import threading as _threading
         import time as _time
 
+        if _platform.system() == "Windows":
+            self_pid = _os.getpid()
+            # /T = 자식 프로세스도 함께. /F = 강제 종료. timeout 1.5s = 응답 도달
+            # + UI 토스트 노출 시간 확보. CREATE_NO_WINDOW = cmd 창 안 뜸.
+            kill_cmd = f'timeout /t 2 /nobreak >nul & taskkill /F /T /PID {self_pid}'
+            CREATE_NO_WINDOW = 0x08000000  # noqa: N806
+            try:
+                _subprocess.Popen(  # noqa: S602 — self pid 만 박힘 (외부 입력 X)
+                    kill_cmd,
+                    shell=True,
+                    creationflags=(
+                        DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+                        | CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW
+                    ),
+                    close_fds=True,
+                )
+                logger.info(
+                    "[/relaunch] watchdog cmd spawn — 2초 후 taskkill /F /PID %d",
+                    self_pid,
+                )
+            except OSError as e:
+                logger.warning("[/relaunch] watchdog cmd spawn 실패: %s", e)
+
         def _shutdown_thread() -> None:
+            """자체 종료 시도 (백업) — 외부 watchdog 도착 전에 종료되면 더 빠름."""
             try:
-                logger.info("[/relaunch shutdown] sleep 0.5s 시작")
                 _time.sleep(0.5)
-                logger.info("[/relaunch shutdown] 1차 시도: os._exit(0)")
-            except Exception as e:  # noqa: BLE001 — 종료 흐름이라 예외 무시
+                logger.info("[/relaunch shutdown] 자체 종료 시도: os._exit(0)")
+            except Exception as e:  # noqa: BLE001
                 logger.warning("[/relaunch shutdown] log/sleep 예외 (무시): %s", e)
-            # 1차: os._exit (가장 일반적, system call)
             try:
-                _os._exit(0)  # noqa: S603 — system call 즉시 종료
+                _os._exit(0)  # noqa: S603
             except SystemExit:
                 pass
-            # 2차: Windows ExitProcess (frozen 환경에서 os._exit 차단 시)
             try:
-                logger.warning("[/relaunch shutdown] os._exit 도달 후도 살아있음 — ExitProcess 시도")
                 import ctypes  # noqa: PLC0415
                 ctypes.windll.kernel32.ExitProcess(0)
             except Exception as e:  # noqa: BLE001
                 logger.warning("[/relaunch shutdown] ExitProcess 예외: %s", e)
-            # 3차: sys.exit (마지막 fallback)
             import sys as _sys  # noqa: PLC0415
             _sys.exit(0)
 
-        # daemon=False — main thread 종료에 의존 X (강제 종료 보장)
         _threading.Thread(target=_shutdown_thread, daemon=False).start()
-        logger.info("[/relaunch] step 5/5 — shutdown thread 시작 + 응답 반환")
-        return ControlResponse(success=True, message="launcher 재실행 + 본체 0.5초 후 종료")
+        logger.info("[/relaunch] step 5/5 — watchdog + self-shutdown 시작")
+        return ControlResponse(
+            success=True,
+            message="launcher 재실행 + 본체 2초 후 강제 종료 (watchdog)",
+        )
 
     # ───── 로그 (단순 폴링) ─────────────────────────
 

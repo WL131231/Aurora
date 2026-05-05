@@ -188,6 +188,34 @@ class ReleaseDTO(BaseModel):
     current_version: str = ""
 
 
+class MarketTrendCoinDTO(BaseModel):
+    """``GET /market-trend`` 응답의 단일 coin trend (v0.1.54)."""
+
+    coin: str
+    score: int  # -4 ~ +4
+    direction: str  # "long" / "short" / "neutral"
+    strong: bool
+    reasons: list[str] = []
+    price: float | None = None
+    price_24h: float | None = None
+    oi: float | None = None
+    oi_24h: float | None = None
+    cvd_spot: float | None = None
+    cvd_futures: float | None = None
+    funding_rate: float | None = None
+    fetched_at_ms: int = 0
+
+
+class MarketTrendDTO(BaseModel):
+    """``GET /market-trend`` 응답 — Coinalyze 추세 데이터 (v0.1.54).
+
+    ``enabled=False`` 면 COINALYZE_API_KEY 미설정. UI 가 카드 숨김.
+    """
+
+    enabled: bool
+    trends: list[MarketTrendCoinDTO] = []
+
+
 class StatsDTO(BaseModel):
     """``GET /stats`` — 거래 결과 통계 6 메트릭 (v0.1.24).
 
@@ -488,6 +516,39 @@ def create_app() -> FastAPI:
         merged = bot_records + ex_records
         merged.sort(key=lambda t: t.closed_at_ts, reverse=True)
         return merged[:limit]
+
+    # ───── Market Trend (Coinalyze, v0.1.54) ───────────
+
+    @app.get("/market-trend", response_model=MarketTrendDTO)
+    async def market_trend() -> MarketTrendDTO:
+        """Coinalyze 추세 데이터 — BTC/ETH score / direction / 원본.
+
+        BotInstance._coinalyze 의 5분 cache 활용. UI 대시보드 상단 Market Data
+        카드 + 5분 주기 polling. COINALYZE_API_KEY 미설정 시 enabled=False.
+        """
+        bot = bot_instance.get_instance()
+        coinalyze_client = getattr(bot, "_coinalyze", None)
+        if coinalyze_client is None:
+            return MarketTrendDTO(enabled=False)
+
+        trends: list[MarketTrendCoinDTO] = []
+        for coin in ("BTC", "ETH"):
+            try:
+                t = await coinalyze_client.fetch_trend(coin)
+            except Exception:  # noqa: BLE001 — 네트워크 실패 fallback
+                t = None
+            if t is None:
+                continue
+            trends.append(MarketTrendCoinDTO(
+                coin=t.coin, score=t.score, direction=t.direction,
+                strong=t.strong, reasons=list(t.reasons),
+                price=t.price, price_24h=t.price_24h,
+                oi=t.oi, oi_24h=t.oi_24h,
+                cvd_spot=t.cvd_spot, cvd_futures=t.cvd_futures,
+                funding_rate=t.funding_rate,
+                fetched_at_ms=t.fetched_at_ms,
+            ))
+        return MarketTrendDTO(enabled=True, trends=trends)
 
     # ───── Release 알림 (v0.1.25) ──────────────────────
 

@@ -1310,6 +1310,127 @@ input[type="range"].slider-input:disabled {
     position: relative;
 }
 
+/* ============================================================
+   Market Data — Coinalyze 추세 카드 (v0.1.54)
+   ============================================================ */
+.market-data-section {
+    margin-bottom: 1.75rem;
+}
+
+.md-subtitle {
+    font-size: 0.7rem;
+    color: var(--text-3);
+    margin-left: 0.5rem;
+    letter-spacing: 0.04em;
+    font-weight: 400;
+}
+
+.market-data-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.md-card {
+    background: rgba(13, 14, 22, 0.85);
+    border: 1px solid rgba(96, 81, 155, 0.18);
+    border-radius: 10px;
+    padding: 0.875rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    transition: border-color 0.2s ease;
+}
+.md-card:hover {
+    border-color: rgba(168, 134, 255, 0.4);
+}
+
+.md-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid rgba(96, 81, 155, 0.12);
+    margin-bottom: 0.25rem;
+}
+
+.md-coin-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-1);
+    letter-spacing: 0.02em;
+}
+
+.md-coin-price {
+    flex: 1;
+    font-size: 1.05rem;
+    color: var(--text-1);
+    font-weight: 500;
+}
+
+.md-trend-badge {
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    background: rgba(96, 81, 155, 0.16);
+    color: var(--text-2);
+    border: 1px solid rgba(96, 81, 155, 0.3);
+}
+.md-trend-badge.trend-long {
+    background: rgba(52, 211, 153, 0.16);
+    color: #34d399;
+    border-color: rgba(52, 211, 153, 0.4);
+}
+.md-trend-badge.trend-long-strong {
+    background: rgba(52, 211, 153, 0.32);
+    color: #6ee7b7;
+    border-color: rgba(52, 211, 153, 0.7);
+    font-weight: 700;
+}
+.md-trend-badge.trend-short {
+    background: rgba(251, 113, 133, 0.16);
+    color: #fb7185;
+    border-color: rgba(251, 113, 133, 0.4);
+}
+.md-trend-badge.trend-short-strong {
+    background: rgba(251, 113, 133, 0.32);
+    color: #fda4af;
+    border-color: rgba(251, 113, 133, 0.7);
+    font-weight: 700;
+}
+.md-trend-badge.trend-neutral {
+    background: rgba(168, 162, 158, 0.14);
+    color: var(--text-3);
+}
+
+.md-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.78rem;
+}
+.md-label {
+    color: var(--text-3);
+    letter-spacing: 0.02em;
+}
+.md-row .mono {
+    color: var(--text-1);
+    font-size: 0.8rem;
+}
+.md-row .pos { color: #34d399; }
+.md-row .neg { color: #fb7185; }
+
+.md-updated {
+    margin-top: 0.4rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid rgba(96, 81, 155, 0.08);
+    font-size: 0.66rem;
+    color: var(--text-3);
+    text-align: right;
+    letter-spacing: 0.02em;
+}
+
 .indicator-pill .ind-name {
     color: var(--text-2);
     letter-spacing: 0.02em;

@@ -67,6 +67,9 @@ const getStats = (days = 0) => _request(`/stats?days=${days}`);
 // ─── Release 알림 (v0.1.25) ────────────────────
 const getReleaseLatest = () => _request("/release/latest");
 
+// ─── Market Trend (Coinalyze, v0.1.54) ─────────
+const getMarketTrend = () => _request("/market-trend");
+
 // ─── Config ─────────────────────────────────────────
 
 const getConfig = () => _request("/config");
@@ -151,6 +154,7 @@ window.AuroraApi = {
     getTrades,
     getStats,
     getReleaseLatest,
+    getMarketTrend,
     getConfig,
     updateConfig,
     startBot,

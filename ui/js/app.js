@@ -288,6 +288,10 @@ async function refreshDashboard() {
 
         // 업데이트 알림 (v0.1.25) — /release/latest 폴링, has_update 시 우상단 표시
         await refreshReleaseAlert();
+
+        // v0.1.54: Market Data (Coinalyze 추세) — 매 dashboard 폴링마다 호출.
+        // 백엔드 5분 cache 박힘 → 사용자 UI 반응성 ↑ + API 한도 영향 X.
+        await refreshMarketTrend();
     } catch (_) {
         connDot.style.background = "#fb7185";
         connDot.style.boxShadow  = "0 0 8px #fb7185";
@@ -712,6 +716,127 @@ async function refreshReleaseAlert() {
     alert.dataset.tag = info.tag;
     alert.dataset.url = info.html_url || "";
     alert.style.display = "flex";
+}
+
+// ============================================================
+// 6c. Market Data (Coinalyze 추세, v0.1.54) — 5분 cache 활용
+// ============================================================
+//
+// /market-trend 폴링 (dashboard 사이클과 같이) → BTC/ETH 카드 갱신.
+// 백엔드 cache 5분 박혀있어 UI 폴링 빈도와 API 한도 무관.
+// enabled=False (COINALYZE_API_KEY 미설정) 면 카드 자체 숨김.
+
+function _fmtPct(now, prev) {
+    if (now == null || prev == null || prev === 0) return "—";
+    const pct = (now - prev) / Math.abs(prev) * 100;
+    const sign = pct >= 0 ? "+" : "";
+    return `${sign}${pct.toFixed(1)}%`;
+}
+
+function _fmtBigNum(value) {
+    if (value == null) return "—";
+    const abs = Math.abs(value);
+    const sign = value > 0 ? "+" : (value < 0 ? "" : "");
+    if (abs >= 1e9) return `${sign}${(value / 1e9).toFixed(2)}B`;
+    if (abs >= 1e6) return `${sign}${(value / 1e6).toFixed(2)}M`;
+    if (abs >= 1e3) return `${sign}${(value / 1e3).toFixed(2)}K`;
+    return `${sign}${value.toFixed(2)}`;
+}
+
+function _fmtPrice(value) {
+    if (value == null) return "—";
+    if (value >= 1000) return `$${value.toLocaleString("en-US", {minimumFractionDigits: 1, maximumFractionDigits: 2})}`;
+    return `$${value.toFixed(4)}`;
+}
+
+function _trendBadgeClass(score, direction) {
+    if (direction === "neutral") return "trend-neutral";
+    const strong = Math.abs(score) >= 2;
+    if (direction === "long") return strong ? "trend-long-strong" : "trend-long";
+    return strong ? "trend-short-strong" : "trend-short";
+}
+
+function _trendBadgeText(score, direction) {
+    if (direction === "neutral") return "중립";
+    const strong = Math.abs(score) >= 2;
+    if (direction === "long") return strong ? "강한 롱" : "롱";
+    return strong ? "강한 숏" : "숏";
+}
+
+function _renderMarketCard(card, t) {
+    if (!card) return;
+    card.querySelector(".md-coin-price").textContent = _fmtPrice(t.price);
+
+    const badge = card.querySelector(".md-trend-badge");
+    badge.className = "md-trend-badge " + _trendBadgeClass(t.score, t.direction);
+    badge.textContent = _trendBadgeText(t.score, t.direction);
+
+    // 24h 변화율 (가격)
+    const c24h = card.querySelector(".md-24h");
+    const pctText = _fmtPct(t.price, t.price_24h);
+    c24h.textContent = pctText;
+    c24h.className = "md-24h mono " + (pctText.startsWith("+") ? "pos" : (pctText.startsWith("-") ? "neg" : ""));
+
+    // OI (값 + 24h ▲/▼)
+    const cOi = card.querySelector(".md-oi");
+    if (t.oi != null) {
+        const oiPct = _fmtPct(t.oi, t.oi_24h);
+        cOi.textContent = `${_fmtBigNum(t.oi).replace("+","")} ${oiPct}`;
+        cOi.className = "md-oi mono " + (oiPct.startsWith("+") ? "pos" : (oiPct.startsWith("-") ? "neg" : ""));
+    } else {
+        cOi.textContent = "—";
+        cOi.className = "md-oi mono";
+    }
+
+    // CVD Spot
+    const cSpot = card.querySelector(".md-cvd-spot");
+    cSpot.textContent = _fmtBigNum(t.cvd_spot);
+    cSpot.className = "md-cvd-spot mono " + (t.cvd_spot > 0 ? "pos" : (t.cvd_spot < 0 ? "neg" : ""));
+
+    // CVD Futures
+    const cFut = card.querySelector(".md-cvd-futures");
+    cFut.textContent = _fmtBigNum(t.cvd_futures);
+    cFut.className = "md-cvd-futures mono " + (t.cvd_futures > 0 ? "pos" : (t.cvd_futures < 0 ? "neg" : ""));
+
+    // Funding Rate
+    const cFr = card.querySelector(".md-funding");
+    if (t.funding_rate != null) {
+        const pct = (t.funding_rate * 100).toFixed(4);
+        cFr.textContent = `${pct}%`;
+        cFr.className = "md-funding mono " + (t.funding_rate >= 0 ? "pos" : "neg");
+    } else {
+        cFr.textContent = "—";
+        cFr.className = "md-funding mono";
+    }
+
+    // 갱신 시각 (KST HH:MM)
+    if (t.fetched_at_ms) {
+        const d = new Date(t.fetched_at_ms);
+        const hh = String(d.getHours()).padStart(2, "0");
+        const mm = String(d.getMinutes()).padStart(2, "0");
+        card.querySelector(".md-updated-ts").textContent = `${hh}:${mm}`;
+    }
+}
+
+async function refreshMarketTrend() {
+    const section = document.getElementById("market-data-section");
+    if (!section) return;
+    let data;
+    try {
+        data = await Api.getMarketTrend();
+    } catch (_) {
+        section.style.display = "none";
+        return;
+    }
+    if (!data || !data.enabled) {
+        section.style.display = "none";
+        return;
+    }
+    section.style.display = "block";
+    for (const t of data.trends || []) {
+        const card = section.querySelector(`.md-card[data-coin="${t.coin}"]`);
+        _renderMarketCard(card, t);
+    }
 }
 
 // 알림 X (닫기) — 해당 tag 만 영구 dismiss

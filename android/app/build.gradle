@@ -46,6 +46,8 @@ android {
                 install "pydantic<2"
                 install "websockets>=12.0"
                 install "httpx>=0.27.0"
+                // tenacity: ccxt retry 로직 의존 (순수 Python, ARM64 wheel 불필요)
+                install "tenacity>=8.0.0"
             }
         }
     }

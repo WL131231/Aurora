@@ -1337,6 +1337,41 @@ def test_2468_long_on_downtrend_support_zone() -> None:
     assert longs[0].source == "zone_2468_long"
 
 
+def test_2468_attaches_structural_sl_meta_v0_1_47() -> None:
+    """v0.1.47: 2468 신호에 자체 SL (zone 끝 + 1K USDT, PDF 룰) meta 박힘.
+
+    Why: 이전엔 note 문자열에만 박혀 build_risk_plan 에 전달 안 됨 → ROI 기반
+    좁은 SL 사용 (PDF 의도 대비 ~5배 좁음). v0.1.47 부터 meta 박아 활용.
+    BB / Ichimoku / EMA / MA / Harmonic 패턴 정합.
+    """
+    # SHORT — 상방 추세 + N.200~N.400 zone
+    trend = list(np.linspace(91500, 90500, 15)) + list(np.linspace(90500, 91300, 15))
+    df_s = _trend_then_zone_df(
+        trend[:-1], last_high=91400.0, last_low=91250.0, last_close=91300.0,
+    )
+    config = _2468_cfg()
+    signals_s = detect_2468_signal({"15m": df_s}, config, symbol="BTC/USDT")
+    short_sig = next(s for s in signals_s if s.source == "zone_2468_short")
+    assert short_sig.meta is not None
+    assert "sl_price" in short_sig.meta
+    # SL = zone_hi (91400) + buffer (1000) = 92400
+    expected_sl_s = 91400.0 + config.zone_sl_buffer
+    assert abs(short_sig.meta["sl_price"] - expected_sl_s) < 1e-6
+    assert abs(short_sig.meta["zone_hi"] - 91400.0) < 1e-6
+
+    # LONG — 하방 추세 + N.600~N.800 zone
+    trend_d = list(np.linspace(89500, 90500, 15)) + list(np.linspace(90500, 89700, 15))
+    df_l = _trend_then_zone_df(
+        trend_d[:-1], last_high=89800.0, last_low=89650.0, last_close=89700.0,
+    )
+    signals_l = detect_2468_signal({"15m": df_l}, config, symbol="BTC/USDT")
+    long_sig = next(s for s in signals_l if s.source == "zone_2468_long")
+    assert long_sig.meta is not None
+    # SL = zone_lo (89600) - buffer (1000) = 88600
+    expected_sl_l = 89600.0 - config.zone_sl_buffer
+    assert abs(long_sig.meta["sl_price"] - expected_sl_l) < 1e-6
+
+
 def test_2468_no_signal_when_outside_zone() -> None:
     """추세는 있지만 가격이 zone 밖 → 무신호."""
     trend = list(np.linspace(91500, 90500, 15)) + list(np.linspace(90500, 91300, 15))

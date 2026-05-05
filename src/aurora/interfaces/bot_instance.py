@@ -1117,6 +1117,7 @@ class BotInstance:
             bb_lower=bb_lower_at_entry,
             bb_buffer_pct=bb_buffer_at_entry,
             structural_sl_price=structural_sl_at_entry,
+            apply_sl_floor=True,  # v0.1.45: 라이브 한정 호가 noise 안전망 (0.3% 강제)
         )
         # v0.1.38: 진입 시점 EMA/BB/RSI 진단 1줄 — 차트와 비교 가능 (사용자 검증용)
         diag_entry = self._compute_diagnostic_line(df_by_tf, current_price)

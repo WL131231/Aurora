@@ -15,6 +15,13 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import NamedTuple
 
+# v0.1.45: 모든 신호 일괄 SL 안전망 — 산출된 SL 폭이 가격 변동 % 기준 이 값 미만
+# 이면 강제로 floor 적용. 호가 noise (~0.08%) + 봉 안 wick (~0.1~0.2%) 위 안전.
+# Why: 사용자가 좁은 SL config 박아도 (manual_sl_pct + 고레버리지) 호가 떨림에
+# SL hit 무한 루프 차단. structural SL (BB/Ichimoku/EMA/MA) 은 이미 buffer 0.3%+
+# 이라 floor 영향 X. Fixed/Manual ROI 기반만 이 floor 가 안전망.
+MIN_SL_DISTANCE_PCT: float = 0.003
+
 
 class TpSlMode(StrEnum):
     ATR = "atr"
@@ -283,6 +290,7 @@ def build_risk_plan(
     bb_lower: float | None = None,
     bb_buffer_pct: float = 0.003,
     structural_sl_price: float | None = None,
+    apply_sl_floor: bool = False,
 ) -> RiskPlan:
     """진입 시점에 SL/TP 가격 + 포지션 사이즈를 한 번에 계산.
 
@@ -392,6 +400,20 @@ def build_risk_plan(
     if sl_distance_pct <= 0:
         # SL 가격이 진입가와 같거나 잘못된 경우 fallback (BB 가 진입가 부근일 때)
         sl_distance_pct = sl_dist / entry_price
+
+    # v0.1.45: SL 호가 noise floor — 라이브 봇 한정 안전망 (apply_sl_floor=True).
+    # 산출된 SL 폭이 MIN_SL_DISTANCE_PCT 미만이면 강제 floor 적용.
+    # Why: 호가 떨림 + 봉 안 wick 으로 SL hit 후 즉시 재진입 사이클 차단.
+    # structural SL (BB 0.3% / Ichimoku 0.6% / EMA 0.5% / MA cross 0.3%) 은 이미
+    # buffer >= 0.3% 라 floor 영향 X. Fixed/Manual ROI 기반만 floor 효과 있음.
+    # 백테스트는 봉 단위 close 평가라 호가 noise 무관 → apply_sl_floor=False (default)
+    # 로 floor 미적용 (BotInstance 만 명시 True 호출).
+    if apply_sl_floor and sl_distance_pct < MIN_SL_DISTANCE_PCT:
+        sl_distance_pct = MIN_SL_DISTANCE_PCT
+        if direction_norm == "long":
+            sl_price = entry_price * (1.0 - MIN_SL_DISTANCE_PCT)
+        else:
+            sl_price = entry_price * (1.0 + MIN_SL_DISTANCE_PCT)
 
     # 포지션 사이즈
     position = calc_position_size(

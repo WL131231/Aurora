@@ -129,6 +129,41 @@ def test_ema_touch_applies_both_periods_on_1d() -> None:
     assert "ema_touch_480" in sources
 
 
+def test_ema_touch_attaches_structural_sl_meta_v0_1_45() -> None:
+    """v0.1.45: EMA touch 신호에 structural SL meta 박힘.
+
+    LONG (지지): sl_price = ema × (1 - buffer) — EMA 아래로 buffer 이탈 시 손절.
+    SHORT (저항): sl_price = ema × (1 + buffer) — EMA 위로 buffer 이탈 시 손절.
+    Why: BB / Ichimoku 패턴 정합. 호가 noise 위 안전 + EMA 지지/저항 깨질 때만 손절.
+    """
+    # LONG (close ≥ ema, 지지 시그널)
+    closes_l = [100.0] * 250 + [100.05]  # close 100.05 가 EMA 100 위쪽 가까움
+    df_by_tf_l = {"1H": _make_df(closes_l)}
+    config = StrategyConfig()
+    signals_l = detect_ema_touch(df_by_tf_l, config)
+    long_sigs = [s for s in signals_l if s.direction == Direction.LONG]
+    assert len(long_sigs) >= 1
+    sig_l = long_sigs[0]
+    assert sig_l.meta is not None
+    assert "sl_price" in sig_l.meta
+    assert "ema_value" in sig_l.meta
+    assert abs(sig_l.meta["buffer_pct"] - 0.005) < 1e-9
+    # LONG SL = EMA × (1 - 0.005)
+    expected_sl_l = sig_l.meta["ema_value"] * (1.0 - 0.005)
+    assert abs(sig_l.meta["sl_price"] - expected_sl_l) < 1e-6
+
+    # SHORT (close < ema, 저항 시그널)
+    closes_s = [100.0] * 250 + [99.95]  # close 99.95 가 EMA 100 아래 가까움
+    df_by_tf_s = {"1H": _make_df(closes_s)}
+    signals_s = detect_ema_touch(df_by_tf_s, config)
+    short_sigs = [s for s in signals_s if s.direction == Direction.SHORT]
+    assert len(short_sigs) >= 1
+    sig_s = short_sigs[0]
+    # SHORT SL = EMA × (1 + 0.005)
+    expected_sl_s = sig_s.meta["ema_value"] * (1.0 + 0.005)
+    assert abs(sig_s.meta["sl_price"] - expected_sl_s) < 1e-6
+
+
 # ============================================================
 # detect_rsi_divergence (단순 smoke + 빈 DF 처리)
 # ============================================================
@@ -489,6 +524,45 @@ def test_ma_cross_dead_emits_short() -> None:
     deads = [s for s in signals if s.source == "ma_cross_dead" and s.timeframe == "2H"]
     assert len(deads) == 1
     assert deads[0].direction == Direction.SHORT
+
+
+def test_ma_cross_attaches_structural_sl_meta_v0_1_45() -> None:
+    """v0.1.45: MA cross 신호에 structural SL meta 박힘.
+
+    LONG (golden): sl_price = slowMA × (1 - buffer) — 가격이 slow MA 아래로 가면
+    cross 무효 → 손절. SHORT (dead): sl_price = slowMA × (1 + buffer).
+    """
+    # GOLDEN — V자 패턴 (BB 회귀와 동일 closes 사용)
+    closes_g = [100.0, 100.0, 100.0, 100.0, 100.0,
+                90.0, 80.0, 70.0, 60.0, 50.0,
+                50.0, 50.0, 50.0, 50.0,
+                150.0]
+    df_by_tf_g = {"4H": _trend_close_df(closes_g)}
+    config = StrategyConfig(ma_cross_fast=3, ma_cross_slow=5,
+                            ma_cross_breakout_buffer_pct=0.003)
+    signals_g = detect_ma_cross(df_by_tf_g, config)
+    goldens = [s for s in signals_g if s.source == "ma_cross_golden"]
+    assert len(goldens) == 1
+    sig_g = goldens[0]
+    assert sig_g.meta is not None
+    assert "sl_price" in sig_g.meta
+    assert "slow_ma_value" in sig_g.meta
+    assert abs(sig_g.meta["buffer_pct"] - 0.003) < 1e-9
+    expected_g = sig_g.meta["slow_ma_value"] * (1.0 - 0.003)
+    assert abs(sig_g.meta["sl_price"] - expected_g) < 1e-6
+
+    # DEAD — A자 패턴
+    closes_d = [100.0, 100.0, 100.0, 100.0, 100.0,
+                110.0, 120.0, 130.0, 140.0, 150.0,
+                150.0, 150.0, 150.0, 150.0,
+                50.0]
+    df_by_tf_d = {"2H": _trend_close_df(closes_d)}
+    signals_d = detect_ma_cross(df_by_tf_d, config)
+    deads = [s for s in signals_d if s.source == "ma_cross_dead"]
+    assert len(deads) == 1
+    sig_d = deads[0]
+    expected_d = sig_d.meta["slow_ma_value"] * (1.0 + 0.003)
+    assert abs(sig_d.meta["sl_price"] - expected_d) < 1e-6
 
 
 def test_ma_cross_no_signal_on_constant() -> None:
@@ -1031,6 +1105,28 @@ def test_harmonic_signal_fills_pattern_id() -> None:
     pid = signals[0].pattern_id
     assert pid is not None
     assert pid.startswith("bat@1H@d_bar=")
+
+
+def test_harmonic_signal_attaches_structural_sl_meta_v0_1_45() -> None:
+    """v0.1.45: Harmonic 신호에 패턴 자체 SL/TP 가 meta 에 박힘.
+
+    Why: 패턴별 SL (XABCD X 방향 연장, PDF 룰) 이 match.sl_price 에 산출돼있는데
+    이전엔 build_risk_plan 에 전달 안 됐음 → ROI 기반 SL 만 사용. v0.1.45
+    부터 meta.sl_price 박아 build_risk_plan 이 structural_sl_price 로 사용.
+    """
+    df = _bullish_bat_df()
+    config = _harmonic_cfg()
+    signals = detect_harmonic_signal({"1H": df}, config)
+    assert len(signals) == 1
+    sig = signals[0]
+    assert sig.meta is not None
+    assert "sl_price" in sig.meta
+    assert "tp1_price" in sig.meta
+    assert "tp2_price" in sig.meta
+    assert sig.meta["pattern_name"] == "bat"
+    # bullish (LONG) Bat — SL 은 X 방향 연장 (D 점 아래)
+    assert sig.meta["sl_price"] > 0
+    assert sig.meta["tp1_price"] > sig.meta["sl_price"]
 
 
 def test_harmonic_signal_pattern_id_stable_across_calls() -> None:

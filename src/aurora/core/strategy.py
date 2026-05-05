@@ -86,6 +86,10 @@ class StrategyConfig:
     # 진입 파라미터
     ema_touch_tolerance: float = 0.003  # ±0.3% — 노이즈는 통과시키고 의미있는 터치만 잡는 출발값
     ema_periods: tuple[int, ...] = (200, 480)  # 200=중기 추세, 480=장기 추세 (EMA 보스 자료 기반)
+    ema_breakout_buffer_pct: float = 0.005
+    """EMA 이탈 buffer (v0.1.45). EMA 진입 시점 EMA 라인 ± buffer 가 SL.
+    LONG (지지): SL = EMA × (1 - buffer), SHORT (저항): SL = EMA × (1 + buffer).
+    기본 0.005 = 0.5% (touch tolerance 0.3% 보다 약간 위 — wick 흡수). 사용자 결정."""
     rsi_period: int = 14                 # Wilder 1978 표준
     rsi_div_lb_left: int = 5             # 트뷰 RSI Divergence 표준 lookback (좌)
     rsi_div_lb_right: int = 5            # 트뷰 RSI Divergence 표준 lookback (우)
@@ -111,6 +115,10 @@ class StrategyConfig:
     ma_cross_fast: int = 50
     ma_cross_slow: int = 200
     """SMA 기간. 골크/데크 표준은 50/200."""
+    ma_cross_breakout_buffer_pct: float = 0.003
+    """MA cross 이탈 buffer (v0.1.45). 진입 시점 slow MA ± buffer 가 SL.
+    LONG (golden): SL = slowMA × (1 - buffer), SHORT (dead): SL = slowMA × (1 + buffer).
+    기본 0.003 = 0.3% (cross 무효화 — 가격이 slow 깨면 추세 끝)."""
 
     # Ichimoku Cloud (Selectable — 1H/2H/4H 멀티 TF, HTF 가중치 자동 적용)
     ichimoku_conversion_period: int = 9
@@ -225,12 +233,18 @@ def detect_ema_touch(
                 continue  # 터치 거리 초과 → 신호 X
 
             # 종가 위치로 지지/저항 판단
+            ema_val_f = float(ema_val)
+            ema_buffer = config.ema_breakout_buffer_pct
             if last_close >= ema_val:
                 direction = Direction.LONG
                 note = f"EMA{period} 지지 (close ≥ EMA, 거리 {distance:.4f})"
+                # v0.1.45: LONG (지지) — EMA 아래로 buffer 이탈 시 손절
+                ema_sl_price = ema_val_f * (1.0 - ema_buffer)
             else:
                 direction = Direction.SHORT
                 note = f"EMA{period} 저항 (close < EMA, 거리 {distance:.4f})"
+                # v0.1.45: SHORT (저항) — EMA 위로 buffer 이탈 시 손절
+                ema_sl_price = ema_val_f * (1.0 + ema_buffer)
 
             # 거래량 동반 시 공격적 진입 = strength 부스트
             strength = config.volume_boost if vol_confirmed else 1.0
@@ -244,6 +258,12 @@ def detect_ema_touch(
                     source=f"ema_touch_{period}",
                     strength=strength,
                     note=note,
+                    meta={
+                        "ema_value": ema_val_f,
+                        "ema_period": float(period),
+                        "buffer_pct": ema_buffer,
+                        "sl_price": ema_sl_price,
+                    },
                     bar_timestamp=ts,
                 )
             )
@@ -495,7 +515,23 @@ def detect_ma_cross(
         cross = ma_cross(df["close"], fast=config.ma_cross_fast, slow=config.ma_cross_slow)
         last = cross.iloc[-1]
         ts = _last_bar_timestamp(df)
+        if last not in ("golden", "dead"):
+            continue
+
+        # v0.1.45: slow MA 값 산출 — Structural SL = slowMA × (1 ± buffer).
+        # SMA 직접 계산 (ma_cross 함수가 cross 결과만 반환).
+        slow_ma_series = df["close"].rolling(
+            window=config.ma_cross_slow, min_periods=config.ma_cross_slow,
+        ).mean()
+        slow_ma_val = slow_ma_series.iloc[-1]
+        if pd.isna(slow_ma_val) or slow_ma_val <= 0:
+            continue
+        slow_ma_f = float(slow_ma_val)
+        ma_buffer = config.ma_cross_breakout_buffer_pct
+
         if last == "golden":
+            # LONG (골든크로스 진입) — 가격이 slow MA 아래로 이탈 시 cross 무효 → 손절
+            ma_sl_price = slow_ma_f * (1.0 - ma_buffer)
             signals.append(EntrySignal(
                 direction=Direction.LONG,
                 timeframe=tf,
@@ -503,8 +539,16 @@ def detect_ma_cross(
                 strength=1.0,
                 note=f"SMA{config.ma_cross_fast}/{config.ma_cross_slow} 골든크로스 ({tf})",
                 bar_timestamp=ts,
+                meta={
+                    "slow_ma_value": slow_ma_f,
+                    "slow_period": float(config.ma_cross_slow),
+                    "buffer_pct": ma_buffer,
+                    "sl_price": ma_sl_price,
+                },
             ))
-        elif last == "dead":
+        else:  # dead
+            # SHORT (데드크로스 진입) — 가격이 slow MA 위로 이탈 시 cross 무효 → 손절
+            ma_sl_price = slow_ma_f * (1.0 + ma_buffer)
             signals.append(EntrySignal(
                 direction=Direction.SHORT,
                 timeframe=tf,
@@ -512,6 +556,12 @@ def detect_ma_cross(
                 strength=1.0,
                 note=f"SMA{config.ma_cross_fast}/{config.ma_cross_slow} 데드크로스 ({tf})",
                 bar_timestamp=ts,
+                meta={
+                    "slow_ma_value": slow_ma_f,
+                    "slow_period": float(config.ma_cross_slow),
+                    "buffer_pct": ma_buffer,
+                    "sl_price": ma_sl_price,
+                },
             ))
 
     return signals
@@ -744,6 +794,15 @@ def detect_harmonic_signal(
             bar_timestamp=_last_bar_timestamp(df),
             # 재진입 방지용 식별자: 같은 D 봉의 같은 패턴이면 같은 id
             pattern_id=f"{match.name}@{tf}@d_bar={match.d_bar}",
+            # v0.1.45: Harmonic 패턴 자체 SL (XABCD X 방향 연장, PDF 룰) 을 meta 에
+            # 박아 build_risk_plan 이 structural_sl_price 로 사용. 이전엔 match.sl_price
+            # 가 산출만 되고 build_risk_plan 에 전달 안 됐음 (lev × ROI SL 만 사용).
+            meta={
+                "sl_price": float(match.sl_price),
+                "tp1_price": float(match.tp1_price),
+                "tp2_price": float(match.tp2_price),
+                "pattern_name": match.name,
+            },
         ))
 
     return signals

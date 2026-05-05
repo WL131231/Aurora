@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aurora — 자동매매 봇 다운로드</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            aurora: { DEFAULT: '#7c3aed', light: '#a78bfa', dark: '#5b21b6' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background: #0f0f13; color: #e5e7eb; }
+    .card { background: #1a1a24; border: 1px solid #2d2d3d; }
+    .btn-primary {
+      background: #7c3aed;
+      transition: background 0.15s;
+    }
+    .btn-primary:hover { background: #6d28d9; }
+    .btn-secondary {
+      background: #1f2937;
+      border: 1px solid #374151;
+      transition: background 0.15s;
+    }
+    .btn-secondary:hover { background: #374151; }
+    .step-num {
+      background: #7c3aed;
+      width: 24px; height: 24px;
+      border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; flex-shrink: 0;
+    }
+    details > summary { cursor: pointer; list-style: none; }
+    details > summary::-webkit-details-marker { display: none; }
+    details[open] .chevron { transform: rotate(180deg); }
+    .chevron { transition: transform 0.2s; }
+    @media (max-width: 640px) {
+      .platform-grid { grid-template-columns: 1fr !important; }
+    }
+  </style>
+</head>
+<body class="min-h-screen font-sans">
+
+  <!-- 헤더 -->
+  <header class="border-b border-gray-800 px-6 py-5">
+    <div class="max-w-4xl mx-auto flex items-center gap-3">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+        <rect width="32" height="32" rx="8" fill="#7c3aed"/>
+        <path d="M16 6 L26 26 H6 Z" fill="white" fill-opacity="0.9"/>
+      </svg>
+      <div>
+        <h1 class="text-xl font-bold text-white">Aurora</h1>
+        <p class="text-xs text-gray-400">AI 보조 자동매매 봇</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-4xl mx-auto px-6 py-12">
+
+    <!-- 히어로 -->
+    <div class="text-center mb-14">
+      <h2 class="text-3xl font-bold text-white mb-3">다운로드</h2>
+      <p class="text-gray-400">Windows · macOS · Android 지원</p>
+    </div>
+
+    <!-- 다운로드 카드 -->
+    <div class="platform-grid grid grid-cols-3 gap-4 mb-16">
+
+      <!-- Windows -->
+      <div class="card rounded-xl p-6 flex flex-col gap-4">
+        <div class="flex items-center gap-3">
+          <svg class="w-8 h-8 text-blue-400" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M3 5.557L10.026 4.5V11.5H3V5.557ZM3 18.443L10.026 19.5V12.5H3V18.443ZM10.995 19.638L21 21V12.5H10.995V19.638ZM10.995 4.362V11.5H21V3L10.995 4.362Z"/>
+          </svg>
+          <div>
+            <p class="font-semibold text-white">Windows</p>
+            <p class="text-xs text-gray-400">Windows 10 / 11</p>
+          </div>
+        </div>
+        <a href="https://github.com/WL131231/Aurora/releases/latest/download/Aurora-windows.exe"
+           class="btn-primary text-white text-sm font-medium py-2 px-4 rounded-lg text-center block">
+          Aurora.exe 다운로드
+        </a>
+        <a href="https://github.com/WL131231/Aurora/releases/latest/download/Aurora-launcher.exe"
+           class="btn-secondary text-gray-300 text-xs py-2 px-4 rounded-lg text-center block">
+          Launcher.exe (자동 업데이트용)
+        </a>
+      </div>
+
+      <!-- macOS -->
+      <div class="card rounded-xl p-6 flex flex-col gap-4">
+        <div class="flex items-center gap-3">
+          <svg class="w-8 h-8 text-gray-300" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 22 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.1 22C7.78 22.05 6.8 20.68 5.96 19.47C4.25 17 2.94 12.45 4.7 9.39C5.57 7.87 7.13 6.91 8.82 6.88C10.1 6.86 11.32 7.75 12.11 7.75C12.89 7.75 14.37 6.68 15.92 6.84C16.57 6.87 18.39 7.1 19.56 8.82C19.47 8.88 17.39 10.1 17.41 12.63C17.44 15.65 20.06 16.66 20.09 16.67C20.06 16.74 19.67 18.11 18.71 19.5ZM13 3.5C13.73 2.67 14.94 2.04 15.94 2C16.07 3.17 15.6 4.35 14.9 5.19C14.21 6.04 13.07 6.7 11.95 6.61C11.8 5.46 12.36 4.26 13 3.5Z"/>
+          </svg>
+          <div>
+            <p class="font-semibold text-white">macOS</p>
+            <p class="text-xs text-gray-400">macOS 12+</p>
+          </div>
+        </div>
+        <a href="https://github.com/WL131231/Aurora/releases/latest/download/Aurora-macOS.zip"
+           class="btn-primary text-white text-sm font-medium py-2 px-4 rounded-lg text-center block">
+          Aurora-macOS.zip 다운로드
+        </a>
+        <a href="https://github.com/WL131231/Aurora/releases/latest/download/Aurora-launcher-macOS.zip"
+           class="btn-secondary text-gray-300 text-xs py-2 px-4 rounded-lg text-center block">
+          Launcher-macOS.zip (자동 업데이트용)
+        </a>
+      </div>
+
+      <!-- Android -->
+      <div class="card rounded-xl p-6 flex flex-col gap-4">
+        <div class="flex items-center gap-3">
+          <svg class="w-8 h-8 text-green-400" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M17.523 15.341A8.026 8.026 0 0 0 20 9.5C20 5.364 16.636 2 12.5 2S5 5.364 5 9.5c0 2.26.942 4.3 2.454 5.775L6 17h12l-1.454-1.659H17.523zM9 9.5a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1zm7 0a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1zM6 18v1a1 1 0 0 0 1 1h1v2h1v-2h6v2h1v-2h1a1 1 0 0 0 1-1v-1H6z"/>
+          </svg>
+          <div>
+            <p class="font-semibold text-white">Android</p>
+            <p class="text-xs text-gray-400">Android 7.0+ (API 24)</p>
+          </div>
+        </div>
+        <a href="https://github.com/WL131231/Aurora/releases/latest/download/Aurora-android.apk"
+           class="btn-primary text-white text-sm font-medium py-2 px-4 rounded-lg text-center block">
+          Aurora-android.apk 다운로드
+        </a>
+        <p class="text-xs text-gray-500 text-center">설치 전 "알 수 없는 출처" 허용 필요</p>
+      </div>
+
+    </div>
+
+    <!-- 설치 가이드 -->
+    <h3 class="text-lg font-bold text-white mb-4">설치 가이드</h3>
+    <div class="flex flex-col gap-3 mb-16">
+
+      <!-- Windows -->
+      <details class="card rounded-xl">
+        <summary class="flex items-center justify-between px-5 py-4 select-none">
+          <div class="flex items-center gap-3">
+            <svg class="w-5 h-5 text-blue-400" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M3 5.557L10.026 4.5V11.5H3V5.557ZM3 18.443L10.026 19.5V12.5H3V18.443ZM10.995 19.638L21 21V12.5H10.995V19.638ZM10.995 4.362V11.5H21V3L10.995 4.362Z"/>
+            </svg>
+            <span class="font-medium text-white">Windows 설치 방법</span>
+          </div>
+          <svg class="chevron w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </summary>
+        <div class="px-5 pb-5 pt-1 flex flex-col gap-3 text-sm text-gray-300">
+          <div class="flex items-start gap-3">
+            <span class="step-num mt-0.5">1</span>
+            <span><strong class="text-white">Aurora.exe</strong> 다운로드 후 원하는 폴더에 저장 (설치 프로그램 불필요 — 단일 .exe)</span>
+          </div>
+          <div class="flex items-start gap-3">
+            <span class="step-num mt-0.5">2</span>
+            <span>처음 실행 시 "Windows의 PC 보호" 경고 → <strong class="text-white">추가 정보 → 실행</strong> 클릭</span>
+          </div>
+          <div class="flex items-start gap-3">
+            <span class="step-num mt-0.5">3</span>
+            <span>Aurora GUI가 열리면 <strong class="text-white">거래소 API 키</strong>를 설정 탭에 입력 후 시작</span>
+          </div>
+          <div class="mt-2 p-3 rounded-lg bg-gray-800 text-xs text-gray-400">
+            💡 자동 업데이트: <code class="text-aurora-light">Aurora-launcher.exe</code>를 대신 실행하면 새 버전 자동 다운로드 후 본체를 기동합니다.
+          </div>
+        </div>
+      </details>
+
+      <!-- macOS -->
+      <details class="card rounded-xl">
+        <summary class="flex items-center justify-between px-5 py-4 select-none">
+          <div class="flex items-center gap-3">
+            <svg class="w-5 h-5 text-gray-300" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 22 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.1 22C7.78 22.05 6.8 20.68 5.96 19.47C4.25 17 2.94 12.45 4.7 9.39C5.57 7.87 7.13 6.91 8.82 6.88C10.1 6.86 11.32 7.75 12.11 7.75C12.89 7.75 14.37 6.68 15.92 6.84C16.57 6.87 18.39 7.1 19.56 8.82C19.47 8.88 17.39 10.1 17.41 12.63C17.44 15.65 20.06 16.66 20.09 16.67C20.06 16.74 19.67 18.11 18.71 19.5ZM13 3.5C13.73 2.67 14.94 2.04 15.94 2C16.07 3.17 15.6 4.35 14.9 5.19C14.21 6.04 13.07 6.7 11.95 6.61C11.8 5.46 12.36 4.26 13 3.5Z"/>
+            </svg>
+            <span class="font-medium text-white">macOS 설치 방법</span>
+          </div>
+          <svg class="chevron w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </summary>
+        <div class="px-5 pb-5 pt-1 flex flex-col gap-3 text-sm text-gray-300">
+          <div class="flex items-start gap-3">
+            <span class="step-num mt-0.5">1</span>
+            <span><strong class="text-white">Aurora-macOS.zip</strong> 다운로드 후 압축 해제</span>
+          </div>
+          <div class="flex items-start gap-3">
+            <span class="step-num mt-0.5">2</span>
+            <span>터미널에서 격리 속성 해제: <code class="bg-gray-800 px-1 rounded text-xs text-green-300">xattr -cr Aurora</code></span>
+          </div>
+          <div class="flex items-start gap-3">
+            <span class="step-num mt-0.5">3</span>
+            <span><strong class="text-white">Aurora</strong> 실행 → "확인되지 않은 개발자" 경고 시 <strong class="text-white">시스템 설정 → 개인 정보 보호 및 보안 → 허용</strong></span>
+          </div>
+          <div class="flex items-start gap-3">
+            <span class="step-num mt-0.5">4</span>
+            <span>거래소 API 키를 설정 탭에 입력 후 시작</span>
+          </div>
+        </div>
+      </details>
+
+      <!-- Android -->
+      <details class="card rounded-xl">
+        <summary class="flex items-center justify-between px-5 py-4 select-none">
+          <div class="flex items-center gap-3">
+            <svg class="w-5 h-5 text-green-400" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M17.523 15.341A8.026 8.026 0 0 0 20 9.5C20 5.364 16.636 2 12.5 2S5 5.364 5 9.5c0 2.26.942 4.3 2.454 5.775L6 17h12l-1.454-1.659H17.523zM9 9.5a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1zm7 0a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1zM6 18v1a1 1 0 0 0 1 1h1v2h1v-2h6v2h1v-2h1a1 1 0 0 0 1-1v-1H6z"/>
+            </svg>
+            <span class="font-medium text-white">Android 설치 방법</span>
+          </div>
+          <svg class="chevron w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </summary>
+        <div class="px-5 pb-5 pt-1 flex flex-col gap-3 text-sm text-gray-300">
+          <div class="flex items-start gap-3">
+            <span class="step-num mt-0.5">1</span>
+            <span><strong class="text-white">알 수 없는 출처 허용</strong> — 설정 → 보안 → "알 수 없는 출처" 또는 브라우저/파일관리자에서 APK 설치 허용</span>
+          </div>
+          <div class="flex items-start gap-3">
+            <span class="step-num mt-0.5">2</span>
+            <span>위 버튼으로 <strong class="text-white">Aurora-android.apk</strong> 다운로드</span>
+          </div>
+          <div class="flex items-start gap-3">
+            <span class="step-num mt-0.5">3</span>
+            <span>다운로드된 APK 파일 탭 → <strong class="text-white">설치</strong> 버튼 클릭</span>
+          </div>
+          <div class="flex items-start gap-3">
+            <span class="step-num mt-0.5">4</span>
+            <span>설치 완료 후 Aurora 앱 실행 → 거래소 API 키 입력 후 시작</span>
+          </div>
+          <div class="mt-2 p-3 rounded-lg bg-gray-800 text-xs text-gray-400">
+            💡 자동 업데이트: 앱 내에서 새 버전 감지 시 "재시작하기" 버튼으로 바로 업데이트 가능합니다.
+          </div>
+          <div class="mt-1 p-3 rounded-lg bg-yellow-900/30 border border-yellow-700/40 text-xs text-yellow-300">
+            ⚠️ Android 8 이상에서는 앱별로 "알 수 없는 출처" 허용이 필요합니다. 브라우저(Chrome 등) 설정에서 해당 브라우저의 설치 권한을 허용하세요.
+          </div>
+        </div>
+      </details>
+
+    </div>
+
+    <!-- 시스템 요구사항 -->
+    <h3 class="text-lg font-bold text-white mb-4">시스템 요구사항</h3>
+    <div class="card rounded-xl overflow-hidden mb-16">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-gray-700">
+            <th class="text-left px-5 py-3 text-gray-400 font-medium">플랫폼</th>
+            <th class="text-left px-5 py-3 text-gray-400 font-medium">OS</th>
+            <th class="text-left px-5 py-3 text-gray-400 font-medium">최소 사양</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="border-b border-gray-800">
+            <td class="px-5 py-3 text-blue-400">Windows</td>
+            <td class="px-5 py-3 text-gray-300">Windows 10 / 11 (64-bit)</td>
+            <td class="px-5 py-3 text-gray-400">RAM 4GB · 저장공간 500MB</td>
+          </tr>
+          <tr class="border-b border-gray-800">
+            <td class="px-5 py-3 text-gray-300">macOS</td>
+            <td class="px-5 py-3 text-gray-300">macOS 12 Monterey 이상</td>
+            <td class="px-5 py-3 text-gray-400">RAM 4GB · 저장공간 500MB</td>
+          </tr>
+          <tr>
+            <td class="px-5 py-3 text-green-400">Android</td>
+            <td class="px-5 py-3 text-gray-300">Android 7.0 (API 24) 이상</td>
+            <td class="px-5 py-3 text-gray-400">RAM 3GB · 저장공간 300MB</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- GitHub 링크 -->
+    <div class="text-center text-sm text-gray-500">
+      <a href="https://github.com/WL131231/Aurora/releases" class="hover:text-gray-300 transition-colors">
+        모든 릴리스 보기 →
+      </a>
+    </div>
+
+  </main>
+
+  <footer class="border-t border-gray-800 px-6 py-6 mt-8">
+    <div class="max-w-4xl mx-auto text-center text-xs text-gray-600">
+      Aurora — Proprietary. All rights reserved.
+    </div>
+  </footer>
+
+</body>
+</html>

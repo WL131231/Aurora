@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 from typing import Literal
 
@@ -13,11 +15,48 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _env_file_candidates() -> tuple[str, ...]:
+    """``.env`` 검색 위치 우선순위 (v0.1.57 다중 path).
+
+    Why: dev 환경 / frozen 환경 / 사용자 홈 모두 cover. pydantic-settings 가
+    리스트 받으면 순차 검색 — 첫 발견 파일 사용 (dev > exe 옆 > 사용자 홈).
+
+    검색 순서 (사용자 보고 v0.1.55 frozen 환경 .env 인식 X 사례):
+        1. ``./.env`` — cwd (dev 환경 또는 launcher 옆)
+        2. ``<sys.executable_dir>/.env`` — frozen .exe 옆
+        3. ``~/.aurora/.env`` — 사용자 홈 (LocalAppData 와 별개)
+        4. ``%LOCALAPPDATA%/Aurora/.env`` — Windows 표준 hidden 위치
+    """
+    paths: list[str] = [".env"]
+
+    # frozen 환경 — Aurora.exe 옆
+    try:
+        if getattr(sys, "frozen", False):
+            exe_dir = Path(sys.executable).resolve().parent
+            paths.append(str(exe_dir / ".env"))
+    except OSError:
+        pass
+
+    # 사용자 홈 ~/.aurora/.env (가장 사용자 친화)
+    try:
+        paths.append(str(Path.home() / ".aurora" / ".env"))
+    except (OSError, RuntimeError):
+        pass
+
+    # Windows LocalAppData
+    local_app = os.environ.get("LOCALAPPDATA")
+    if local_app:
+        paths.append(str(Path(local_app) / "Aurora" / ".env"))
+
+    return tuple(paths)
+
+
 class Settings(BaseSettings):
     """프로젝트 전역 설정."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # v0.1.57: 다중 path 검색 (dev / frozen / 홈 / LocalAppData)
+        env_file=_env_file_candidates(),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",

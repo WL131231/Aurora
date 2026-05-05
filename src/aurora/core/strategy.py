@@ -334,54 +334,70 @@ def detect_rsi_divergence(
 
 
 # ============================================================
-# Selectable: Bollinger Bands (1H 고정, 횡보장 특화)
+# Selectable: Bollinger Bands (멀티 TF — 5m/15m/1H, v0.1.51)
 # ============================================================
+
+# v0.1.51: 1H 고정 → 5m/15m/1H 멀티 TF. HTF 가중치 (5m=1, 15m=1, 1H=2) 자동.
+BB_TIMEFRAMES: tuple[str, ...] = ("5m", "15m", "1H")
 
 
 def detect_bollinger_touch(
-    df_1h: pd.DataFrame,
+    df_by_tf: dict[str, pd.DataFrame],
     config: StrategyConfig,
 ) -> list[EntrySignal]:
-    """볼린저 밴드 buffered reversal 진입 룰 (1H 고정, v0.1.42 재설계).
+    """볼린저 밴드 buffered reversal 진입 룰 (멀티 TF, v0.1.51 확장).
 
-    v0.1.42 변경: ``proximity`` 진입 폐기 + buffer 도입.
-    Reversal/Wick reversal 만 신호. 진입 + SL 라인 = ``BB ± buffer`` 동일.
-    Why: proximity 진입은 ``last_high`` 누적 max 기반이라 봉 안 wick 한 번
-    닿으면 봉 닫힐 때까지 신호 stateful ON → 무한 재진입 사이클 발생
-    (사용자 보고 v0.1.41 사고팔고 무한 루프). 또 진입 + SL 라인이 동일
-    buffer (BB ± 0.3%) 라야 호가 noise (~0.08%) 위로 안정.
+    v0.1.51 변경: 1H 고정 → 5m/15m/1H 각 TF 별개 신호 emit. HTF 가중치 자연
+    적용 (compose_entry 가 처리). signal.timeframe 은 해당 TF.
 
-    우선순위 순:
-        1. **Squeeze 보류**: 폭 / middle ≤ ``squeeze_threshold`` → []
-        2. **Reversal 진입** (강도 1.5): 직전 봉 종가가 BB ± buffer 밖 +
-           현재 봉 종가 BB ± buffer 안쪽 → SHORT (위 회귀) / LONG (아래 회귀)
-        3. **Wick reversal** (강도 1.5, v0.1.28 신규): 현재 봉 안에서 wick 만
-           BB ± buffer 밖 + close 안쪽 → SHORT/LONG.
-        4. **나머지**: 진입 신호 X (proximity 폐기됨).
+    v0.1.42 ~ v0.1.50 흐름 (그대로 유지):
+        - proximity 폐기 + buffer 도입
+        - Reversal / Wick reversal 만 신호 emit
+        - 진입 + SL 라인 = BB ± buffer 동일 (호가 noise 위 안전)
+        - meta.sl_price 박음 (build_risk_plan 이 structural_sl_price 로 사용)
 
-    "양방향 진입+청산": BB 신호 = 진입 신호 + 반대 포지션 청산 신호.
+    각 TF 별 독립 평가 — 5m / 15m / 1H 모두 reversal/wick reversal 발생 가능.
+    예: 1H BB SHORT (가중치 2) + 15m BB SHORT (가중치 1) 동시 → 둘 다 emit,
+    compose_entry 가 가중치 곱해 score 합산.
 
     Args:
-        df_1h: 1H OHLC DataFrame (close/high/low 컬럼).
+        df_by_tf: TF 별 OHLC DataFrame ({"5m": df, "15m": df, "1H": df, ...}).
+                  누락 TF 는 skip.
         config: 전략 설정 (bollinger_period/std/breakout_buffer_pct/squeeze).
 
     Returns:
-        ``EntrySignal`` 리스트 (마지막 봉 기준). BB 신호엔 ``meta`` 박힘
-        (bb_upper / bb_lower / buffer_pct).
+        ``EntrySignal`` 리스트 (각 TF 0~1 개, 총 0~3 개).
     """
-    if df_1h is None or df_1h.empty:
-        return []
+    signals: list[EntrySignal] = []
+    for tf in BB_TIMEFRAMES:
+        df = df_by_tf.get(tf)
+        if df is None or df.empty:
+            continue
+        signals.extend(_detect_bb_for_tf(df, tf, config))
+    return signals
+
+
+def _detect_bb_for_tf(
+    df: pd.DataFrame,
+    tf: str,
+    config: StrategyConfig,
+) -> list[EntrySignal]:
+    """단일 TF BB reversal/wick reversal 검출 (v0.1.51 분리).
+
+    v0.1.42 detect_bollinger_touch 본체 그대로 — TF 별 호출만 분리. 본체 로직
+    변경 X (회귀 0 보장). signal.timeframe 만 인자로 받은 ``tf`` 사용.
+    """
     required = {"close", "high", "low"}
-    if not required.issubset(df_1h.columns):
+    if not required.issubset(df.columns):
         return []
 
-    bb = bollinger_bands(df_1h["close"], period=config.bollinger_period, std=config.bollinger_std)
+    bb = bollinger_bands(df["close"], period=config.bollinger_period, std=config.bollinger_std)
     if len(bb) < 2:
         return []
 
-    last_close = float(df_1h["close"].iloc[-1])
-    last_high = float(df_1h["high"].iloc[-1])
-    last_low = float(df_1h["low"].iloc[-1])
+    last_close = float(df["close"].iloc[-1])
+    last_high = float(df["high"].iloc[-1])
+    last_low = float(df["low"].iloc[-1])
     last_upper = bb["upper"].iloc[-1]
     last_lower = bb["lower"].iloc[-1]
     last_middle = bb["middle"].iloc[-1]
@@ -392,7 +408,7 @@ def detect_bollinger_touch(
     last_upper_f = float(last_upper)
     last_lower_f = float(last_lower)
     last_middle_f = float(last_middle)
-    ts = _last_bar_timestamp(df_1h)
+    ts = _last_bar_timestamp(df)
 
     # ─── 1. Squeeze 보류 ──────────────────────────────────
     if last_middle_f > 0:
@@ -414,7 +430,7 @@ def detect_bollinger_touch(
     }
 
     # ─── 2. Reversal 진입 (직전 봉 buffer 밖 → 현재 봉 buffer 안 회귀) ───
-    prev_close = float(df_1h["close"].iloc[-2])
+    prev_close = float(df["close"].iloc[-2])
     prev_upper = bb["upper"].iloc[-2]
     prev_lower = bb["lower"].iloc[-2]
 
@@ -425,39 +441,43 @@ def detect_bollinger_touch(
         prev_lower_thr = prev_lower_f * (1.0 - buffer)
         # 위로 buffer 이탈 → buffer 안 회귀
         if prev_close > prev_upper_thr and last_close <= upper_threshold:
+            # SHORT 시 SL = bb_upper × (1 + buffer) (BB 상단 위로 더 가면 손절)
+            short_sl = last_upper_f * (1.0 + buffer)
             return [EntrySignal(
                 direction=Direction.SHORT,
-                timeframe="1H",
+                timeframe=tf,
                 source="bollinger_reversal_upper",
                 strength=1.5,
-                note=f"BB 상단 buffer 이탈 회귀 (prev={prev_close:.4f}>{prev_upper_thr:.4f}, "
+                note=f"BB 상단 buffer 이탈 회귀 ({tf}, prev={prev_close:.4f}>{prev_upper_thr:.4f}, "
                      f"last={last_close:.4f}≤{upper_threshold:.4f})",
                 bar_timestamp=ts,
-                meta=bb_meta,
+                meta={**bb_meta, "sl_price": short_sl},
             )]
         # 아래로 buffer 이탈 → buffer 안 회귀
         if prev_close < prev_lower_thr and last_close >= lower_threshold:
+            long_sl = last_lower_f * (1.0 - buffer)
             return [EntrySignal(
                 direction=Direction.LONG,
-                timeframe="1H",
+                timeframe=tf,
                 source="bollinger_reversal_lower",
                 strength=1.5,
-                note=f"BB 하단 buffer 이탈 회귀 (prev={prev_close:.4f}<{prev_lower_thr:.4f}, "
+                note=f"BB 하단 buffer 이탈 회귀 ({tf}, prev={prev_close:.4f}<{prev_lower_thr:.4f}, "
                      f"last={last_close:.4f}≥{lower_threshold:.4f})",
                 bar_timestamp=ts,
-                meta=bb_meta,
+                meta={**bb_meta, "sl_price": long_sl},
             )]
 
     # ─── 3. 단일 봉 wick reversal (v0.1.28 + v0.1.42 buffer 적용) ────
     # 현재 봉 안에서 wick 만 buffer 밖 (high > upper_thr or low < lower_thr)
     # + close 가 buffer 안쪽 → 단일 봉 reversion candle 자체.
     if last_high > upper_threshold and last_close <= upper_threshold:
+        short_sl = last_upper_f * (1.0 + buffer)
         return [EntrySignal(
             direction=Direction.SHORT,
-            timeframe="1H",
+            timeframe=tf,
             source="bollinger_wick_reversal_upper",
             strength=1.5,
-            note=f"BB 상단 wick reversal (high={last_high:.4f}>{upper_threshold:.4f}, "
+            note=f"BB 상단 wick reversal ({tf}, high={last_high:.4f}>{upper_threshold:.4f}, "
                  f"close={last_close:.4f}≤{upper_threshold:.4f})",
             bar_timestamp=ts,
             meta=bb_meta,
@@ -465,13 +485,13 @@ def detect_bollinger_touch(
     if last_low < lower_threshold and last_close >= lower_threshold:
         return [EntrySignal(
             direction=Direction.LONG,
-            timeframe="1H",
+            timeframe=tf,
             source="bollinger_wick_reversal_lower",
             strength=1.5,
-            note=f"BB 하단 wick reversal (low={last_low:.4f}<{lower_threshold:.4f}, "
+            note=f"BB 하단 wick reversal ({tf}, low={last_low:.4f}<{lower_threshold:.4f}, "
                  f"close={last_close:.4f}≥{lower_threshold:.4f})",
             bar_timestamp=ts,
-            meta=bb_meta,
+            meta={**bb_meta, "sl_price": last_lower_f * (1.0 - buffer)},
         )]
 
     # v0.1.42: Proximity 터치 진입 폐기 (last_high 누적 max trap →
@@ -1059,9 +1079,8 @@ def evaluate_selectable(
     signals: list[EntrySignal] = []
 
     if config.use_bollinger:
-        df_1h = df_by_tf.get("1H")
-        if df_1h is not None:
-            signals.extend(detect_bollinger_touch(df_1h, config))
+        # v0.1.51: 1H 고정 → 5m/15m/1H 멀티 TF (HTF 가중치 자동)
+        signals.extend(detect_bollinger_touch(df_by_tf, config))
 
     if config.use_ma_cross:
         signals.extend(detect_ma_cross(df_by_tf, config))

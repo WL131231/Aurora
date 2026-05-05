@@ -668,29 +668,25 @@ def create_app() -> FastAPI:
         except OSError as e:
             return ControlResponse(success=False, message=f"launcher 실행 실패: {e}")
 
-        # 응답 반환 후 본체 자기 종료 — 클라이언트가 응답 받을 시간 + launcher 가
-        # spawn 완료 시간. v0.1.48 fix: threading.Thread 로 옮김.
-        # Why: v0.1.46 의 ``asyncio.create_task`` 가 ControlResponse 반환 후 uvicorn
-        # request lifecycle 끝날 때 cancel 가능 → ``os._exit`` 도달 X → 본체 안
-        # 죽음 → UI "재시작 중..." 영원 (사용자 보고 v0.1.46 환경). uvicorn /
-        # asyncio 무관 별도 OS 스레드 (daemon=False) 로 옮겨 보장.
-        # v0.1.18 launcher quit 패턴 정합 — webview destroy 먼저 + os._exit.
+        # 응답 반환 후 본체 자기 종료 — v0.1.50 fix: webview destroy 제거.
+        # Why: v0.1.48 까지 webview.windows[0].destroy() 호출했으나 daemon=False
+        # thread 에서 destroy 시 hang (pywebview 는 main thread 에서만 destroy
+        # 가능). try/except 가 hang 잡지 못함 (예외 발생 X, 그냥 무한 대기) →
+        # os._exit(0) 도달 X → 본체 안 죽음 → UI 안전장치 (2초 후 button reset)
+        # 발동 → 사용자 입장 "재시작 중... 에서 다시 돌아옴" (사용자 보고 v0.1.48).
+        #
+        # destroy 제거해도 안전: os._exit(0) 가 system call 로 process 즉시 종료
+        # → OS 가 windowing 자동 정리. pywebview 윈도우도 같이 닫힘.
         import threading as _threading
         import time as _time
 
         def _shutdown_thread() -> None:
-            _time.sleep(0.8)  # 클라이언트 응답 받을 시간
-            try:
-                import webview  # type: ignore[import-not-found]
-                if webview.windows:
-                    webview.windows[0].destroy()
-            except Exception:  # noqa: BLE001 — 종료 흐름이라 예외 무시
-                pass
-            _os._exit(0)  # noqa: S603 — 의도적 강제 종료
+            _time.sleep(0.5)  # 클라이언트 응답 받을 시간 (0.8 → 0.5 단축, UI 반응성)
+            _os._exit(0)  # noqa: S603 — system call 즉시 종료 (윈도우 OS 자동 정리)
 
         # daemon=False — main thread 종료에 의존 X (강제 종료 보장)
         _threading.Thread(target=_shutdown_thread, daemon=False).start()
-        return ControlResponse(success=True, message="launcher 재실행 + 본체 0.8초 후 종료")
+        return ControlResponse(success=True, message="launcher 재실행 + 본체 0.5초 후 종료")
 
     # ───── 로그 (단순 폴링) ─────────────────────────
 

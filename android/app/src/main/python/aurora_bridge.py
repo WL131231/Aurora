@@ -25,6 +25,14 @@ def start() -> None:
     """Aurora headless 모드 시작 — Chaquopy 백그라운드 스레드에서 호출."""
     _load_env()
 
+    # APK 자동 업데이트 폴링 시작 (AURORA_DATA_DIR 주입 후 호출해야 경로 확정)
+    # Why: _load_env() 가 AURORA_DATA_DIR 을 filesDir 로 설정한 뒤에 호출.
+    try:
+        from aurora.interfaces.apk_updater import start as start_apk_updater
+        start_apk_updater()
+    except Exception:
+        pass  # 업데이트 실패가 봇 기동을 막지 않도록
+
     # main.py 의 _parse_args() 가 읽을 CLI 인자
     sys.argv = ["aurora", "--headless", "--host", "0.0.0.0", "--port", "8765"]
 

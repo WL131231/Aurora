@@ -576,6 +576,24 @@ def create_app() -> FastAPI:
             current_version=__version__,
         )
 
+    # ───── Android APK 업데이트 상태 (Phase C-2) ──────────────────
+
+    @app.get("/update/apk-status")
+    async def apk_status_endpoint() -> dict:
+        """Android APK 업데이트 상태 — apk_updater 백그라운드 다운로드 결과.
+
+        AURORA_PLATFORM=android 환경에서만 has_update=True 가능.
+        데스크탑 / CI 에서는 항상 has_update=False 반환.
+
+        Returns:
+            ``{"has_update": bool, "apk_path": str | None, "latest_tag": str | None}``
+        """
+        try:
+            from aurora.interfaces.apk_updater import get_status
+            return get_status()
+        except ImportError:
+            return {"has_update": False, "apk_path": None, "latest_tag": None}
+
     # ───── Stats (결과 통계, v0.1.24) ──────────────────
 
     @app.get("/stats", response_model=StatsDTO)

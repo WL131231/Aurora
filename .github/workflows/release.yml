@@ -206,6 +206,86 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Android APK — Chaquopy 임베디드 Python, arm64-v8a + x86_64 fat APK.
+  # apk_updater.py 가 본 asset (Aurora-android.apk) 을 다운로드해 자가 업데이트에 사용.
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      # CI 환경 (Ubuntu) 의 Android SDK 경로 → local.properties 덮어쓰기.
+      # Why: local.properties 에 Windows 로컬 경로가 커밋되어 있어 Ubuntu 빌드 실패.
+      #      ANDROID_SDK_ROOT 는 GitHub Actions ubuntu-latest 가 자동 주입.
+      - name: Write local.properties for CI
+        shell: bash
+        run: echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
+
+      # versionName/versionCode 갱신 — apk_updater 버전 비교에 versionName 사용.
+      # versionCode 공식: minor * 10000 + patch * 100 (예: 0.1.41 → 14100)
+      - name: Bump versionName/Code from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF##*/v}"
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+          VERSION_CODE=$((MINOR * 10000 + PATCH * 100))
+          echo "versionName=$VERSION  versionCode=$VERSION_CODE"
+          sed -i "s/versionCode [0-9]*/versionCode $VERSION_CODE/" android/app/build.gradle
+          sed -i "s/versionName \"[^\"]*\"/versionName \"$VERSION\"/" android/app/build.gradle
+          grep -E "versionName|versionCode" android/app/build.gradle
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Build debug APK (Chaquopy + Python deps)
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          if [ ! -f "$APK" ]; then
+            echo "APK 생성 실패"
+            ls -la android/app/build/outputs/apk/ || true
+            exit 1
+          fi
+          echo "app-debug.apk size: $(du -h $APK | cut -f1)"
+
+      - name: Rename APK for release asset
+        shell: bash
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk Aurora-android.apk
+
+      - name: Upload APK artifact (workflow 결과)
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-android
+          path: Aurora-android.apk
+          retention-days: 30
+
+      - name: Attach APK to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Aurora-android.apk
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # Launcher 미니 .exe — 사용자가 launcher 만 다운받아 본체 자동 업데이트.
   # 본체 (Aurora.exe) 의 자기-swap race condition 회피 + 원신 런처 스타일 UX.
   build-launcher:

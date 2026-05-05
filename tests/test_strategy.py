@@ -1372,6 +1372,28 @@ def test_2468_attaches_structural_sl_meta_v0_1_47() -> None:
     assert abs(long_sig.meta["sl_price"] - expected_sl_l) < 1e-6
 
 
+def test_2468_signal_emits_under_persistent_uptrend_v0_1_49() -> None:
+    """v0.1.49: cross 한참 전 발생 + 추세 지속 상태에서도 2468 신호 발동.
+
+    Why: 이전 _detect_ma_trend 는 ma_cross().dropna().iloc[-1] 패턴 — cross 발생
+    봉 외에는 None → 강한 추세 지속 시 (예: BTC EMA200 위 +3.42%) 200봉 안 cross
+    없으면 trend=None → 2468 SKIP. 사용자 보고 v0.1.48.
+
+    fix: fast > slow 단순 비교 — cross 발생 시점 무관 현재 추세 인지.
+    """
+    # 200봉 강한 상방 (cross 한 번 발생 후 그 후 cross X) + 마지막 봉 zone 닿음
+    closes = list(np.linspace(85_000, 91_300, 200))
+    df = _trend_then_zone_df(
+        closes[:-1], last_high=91_400.0, last_low=91_250.0, last_close=91_300.0,
+    )
+    config = _2468_cfg()
+    signals = detect_2468_signal({"15m": df}, config, symbol="BTC/USDT")
+    shorts = [s for s in signals if s.source == "zone_2468_short"]
+    assert len(shorts) == 1, "강한 상방 + zone 터치 → SHORT 신호 발동해야 함"
+    assert shorts[0].meta is not None
+    assert "sl_price" in shorts[0].meta
+
+
 def test_2468_no_signal_when_outside_zone() -> None:
     """추세는 있지만 가격이 zone 밖 → 무신호."""
     trend = list(np.linspace(91500, 90500, 15)) + list(np.linspace(90500, 91300, 15))

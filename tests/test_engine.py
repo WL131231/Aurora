@@ -30,7 +30,7 @@ from aurora.core.risk import (
     TrailingMode,
     build_risk_plan,
 )
-from aurora.core.strategy import StrategyConfig
+from aurora.core.strategy import Regime, StrategyConfig
 
 # ============================================================
 # 헬퍼 — fast 인스턴스 생성 (test_stats.py / test_replay.py 패턴 정합)
@@ -735,3 +735,159 @@ def test_min_seed_amplification_floor_scenario() -> None:
     # (5) balance 갱신 verify — 1_000 → 836.03 (R 약속 10 USD 대비 ~16배 손실)
     assert engine.balance == pytest.approx(836.03, abs=0.1)
     assert engine.position is None                                  # SL 청산 후 정리
+
+
+# ============================================================
+# Group I — D-5 regime breakdown 통합 (2, DESIGN §11 D-5 ✅ 해소)
+# ============================================================
+
+
+def test_step_classifies_regime_on_4h_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``step()`` 8 단계에서 4H 닫힘 시 ``classify_regime`` 호출 + ``_last_regime``
+    갱신 + ``Position.regime`` 박힘 통합 verify (D-5, Issue #110).
+
+    self-spy on ``classify_regime`` (module attribute) — 외부 mock lib 의존 X
+    (``aurora.backtest.engine.classify_regime`` 직접 wrapper 교체, monkeypatch
+    finalize 자동 복원).
+
+    시나리오 (start_ms = 1_700_000_000_000 = 2023-11-14 22:13:20 UTC):
+        - timeframes=["4H"] 단독 — 1H 신호 분기 격리 (조기 진입 회피, _last_regime
+          갱신 전 entry 차단)
+        - 4H bucket 경계: bar 107 (00:00 = [20:00-24:00] 닫힘)
+        - bar 107: 4H 닫힘 → ``closed_tfs == ["4H"]`` →
+          step() 8 단계 흐름:
+            (a) signals = detect_ema_touch on 4H (close=100, EMA(2)=100, dist=0
+                → LONG signal)
+            (b) ``classify_regime(df_4h)`` 호출 → spy 강제 TREND_UP →
+                ``self._last_regime = TREND_UP``
+            (c) compose_entry → LONG decision → ``_open(regime=TREND_UP)`` →
+                ``Position.regime = TREND_UP``
+
+    ema_periods=(2,3) — EMA 빠른 안정 (1 4H 봉) 확보. timeframes=["4H"] 단독으로
+    1H 신호 발동 차단 (1H 첫 닫힘 bar 47 < 4H 첫 닫힘 bar 107 시점 조기 진입 회피).
+    """
+    cfg = BacktestConfig(
+        timeframes=["4H"],
+        strategy_config=StrategyConfig(
+            ema_periods=(2, 3),
+            ema_touch_tolerance=0.003,
+        ),
+    )
+    engine = BacktestEngine(cfg)
+
+    # self-spy on classify_regime — TREND_UP 강제 반환 (테스트 결정론성)
+    classify_call_lengths: list[int] = []
+
+    def spy_classify(df_4h: pd.DataFrame) -> Regime:
+        classify_call_lengths.append(len(df_4h))
+        return Regime.TREND_UP
+
+    monkeypatch.setattr(
+        "aurora.backtest.engine.classify_regime", spy_classify,
+    )
+
+    # bar 107 도달까지 시뮬 (110 봉 = bar 0~109, 4H 닫힘 1 회 + 1H 닫힘 2 회)
+    prices = [100.0] * 110
+    df = _make_synthetic_1m_df(prices=prices)
+    engine.run(df)
+
+    # (1) classify_regime 호출 verify — 4H 닫힘 시점 (bar 107) 도달
+    assert len(classify_call_lengths) >= 1                          # 최소 1 회 (bar 107)
+
+    # (2) self._last_regime 갱신 verify — spy 반환값 박힘
+    assert engine._last_regime == Regime.TREND_UP
+
+    # (3) Position.regime 박힘 verify — bar 107 EMA touch 신호 시 _open 진입
+    # (engine.run() 마지막 봉 _force_close_at_end 가 trades 박음 → 거기서 검증)
+    assert len(engine.trades) >= 1
+    # 첫 trade = bar 107 진입 → FORCE_END 청산 (마지막 봉 109)
+    # regime 전파 chain — Position.regime → TradeRecord.regime
+    assert engine.trades[0].regime == "TREND_UP"
+
+
+def test_run_propagates_regime_to_trade_records() -> None:
+    """``run()`` end-to-end multi-trade 라이프사이클에서 ``TradeRecord.regime``
+    이 모든 청산 경로 (``_close`` / ``_partial_close`` / ``_force_close_at_end``)
+    로 전파되는지 verify (D-5, Issue #110).
+
+    test_run_multi_trade_end_to_end_scenario 시나리오 차용 — LONG TP1 partial →
+    LONG TP2 partial → LONG BE close → SHORT REVERSE close → LONG FORCE_END
+    8 단계 라이프사이클. timeframes=["1H"] (4H 미포함) + ``engine._last_regime``
+    수동 박음 (Regime.TREND_UP) → ``classify_regime`` 호출 X 상태에서도 모든
+    Position 이 TREND_UP 박힌 _last_regime 인계.
+
+    검증 chain (5 trades 모두 ``regime == "TREND_UP"``):
+        - trades[0] LONG TP1 partial — ``_partial_close`` 경로
+        - trades[1] LONG TP2 partial — ``_partial_close`` 경로
+        - trades[2] LONG BE close — ``_close(reason="BE")`` 경로
+        - trades[3] SHORT REVERSE close — ``_close(reason="REVERSE")`` 경로
+        - trades[4] LONG FORCE_END close — ``_force_close_at_end → _close``
+
+    self-spy on ``_close`` + ``_partial_close`` (Stage 1D 단계 2/3 패턴 정합) —
+    각 wrapper 가 호출 시점 ``Position.regime`` 캡처 → TradeRecord.regime 일치
+    verify.
+    """
+    cfg = BacktestConfig(
+        timeframes=["1H"],
+        strategy_config=StrategyConfig(
+            ema_periods=(2, 3),
+            ema_touch_tolerance=0.003,
+        ),
+    )
+    engine = BacktestEngine(cfg)
+
+    # 수동 _last_regime 박음 — 4H 미포함 timeframes 에서도 진입 시 박힘 보장
+    engine._last_regime = Regime.TREND_UP
+
+    # self-spy — _close + _partial_close 호출 시점 Position.regime 캡처
+    captured_regimes_at_close: list[str] = []
+    original_close = engine._close
+
+    def spy_close(*, fill: float, ts_ms: int, reason: str) -> TradeRecord:
+        # Position.regime 청산 직전 캡처 (TradeRecord.regime 박힘 직전)
+        assert engine.position is not None
+        captured_regimes_at_close.append(str(engine.position.regime))
+        return original_close(fill=fill, ts_ms=ts_ms, reason=reason)
+
+    engine._close = spy_close                                       # type: ignore[method-assign]
+
+    captured_regimes_at_partial: list[str] = []
+    original_partial = engine._partial_close
+
+    def spy_partial(*, idx: int, fill: float, ts_ms: int) -> TradeRecord:
+        assert engine.position is not None
+        captured_regimes_at_partial.append(str(engine.position.regime))
+        return original_partial(idx=idx, fill=fill, ts_ms=ts_ms)
+
+    engine._partial_close = spy_partial                             # type: ignore[method-assign]
+
+    # 가격 시퀀스 — test_run_multi_trade_end_to_end_scenario 차용 (5 trade)
+    prices = (
+        [100.0] * 47 + [100.0] + [100.30] + [100.32] + [99.78]
+        + [99.50] * 56 + [99.50] * 60 + [99.65] * 60
+        + [99.65] * 60 + [99.65] * 13
+    )
+    assert len(prices) == 300
+    df = _make_synthetic_1m_df(prices=prices)
+    trades = engine.run(df)
+
+    # (1) trade 누적 — partial 2 + close 3 = 5
+    assert len(trades) == 5
+
+    # (2) 모든 trade.regime == "TREND_UP" (5 청산 경로 전파 verify)
+    for i, tr in enumerate(trades):
+        assert tr.regime == "TREND_UP", (
+            f"trades[{i}] regime={tr.regime!r} (expected 'TREND_UP') "
+            f"— _close/_partial_close 전파 chain 검증 실패"
+        )
+
+    # (3) _partial_close 경로 — 2 회 호출 (TP1 + TP2) 모두 TREND_UP 캡처
+    assert captured_regimes_at_partial == ["TREND_UP", "TREND_UP"]
+
+    # (4) _close 경로 — 3 회 호출 (BE + REVERSE + FORCE_END) 모두 TREND_UP 캡처
+    assert captured_regimes_at_close == ["TREND_UP", "TREND_UP", "TREND_UP"]
+
+    # (5) Position.regime 디폴트 UNKNOWN 환기 — 본 테스트는 _last_regime 수동 박음
+    # (4H 미닫힘 timeframes 에서 디폴트 UNKNOWN 정합은 Position dataclass 단위 검증).

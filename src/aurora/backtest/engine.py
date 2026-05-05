@@ -529,7 +529,7 @@ class BacktestEngine:
             pnl=lev_pnl,
             r_multiple=r_multiple,
             duration_minutes=int(duration_min),
-            regime=None,
+            regime=str(p.regime),
         )
         self.trades.append(trade)
         self.position = None
@@ -622,7 +622,7 @@ class BacktestEngine:
             pnl=lev_pnl,
             r_multiple=r_multiple,
             duration_minutes=int(duration_min),
-            regime=None,
+            regime=str(p.regime),
         )
         self.trades.append(trade)
         return trade

@@ -423,23 +423,27 @@ def _interpret_score(
 
 
 def trend_filter(trend: MarketTrend | None, signal_direction: str) -> bool:
-    """강한 추세 필터 — 진입 차단 여부.
+    """추세 방향 필터 — 진입 차단 여부.
 
-    매매일지 score |≥ 2| 일 때 진입 방향 반대면 진입 차단.
+    v0.1.58: 약한 추세 반대도 차단. 사용자 요청 — "추세 = 롱/강한 롱 이면
+    무조건 롱만, 추세 = 숏/강한 숏 이면 무조건 숏만". 중립 (score=0) 만 양방향 허용.
+
+    Why: BTC 강한 롱 / ETH 롱 추세인데 봇이 가격 매매로 SHORT 진입 후 -4.71% 손실.
+    약한 추세도 반대 방향 진입은 평균적으로 EV 음. trend.strong 조건 제거.
 
     Args:
-        trend: 현재 시장 추세 (None 이면 차단 X — 데이터 없으면 통과).
+        trend: 현재 시장 추세 (None 이면 차단 X — 데이터 없으면 양방향 허용).
         signal_direction: "long" 또는 "short".
 
     Returns:
         True 면 차단 (진입 X), False 면 통과.
     """
-    if trend is None or not trend.strong:
-        return False  # 약한 추세 / 중립 — 차단 X
+    if trend is None or trend.direction == "neutral" or trend.score == 0:
+        return False  # 데이터 없음 / 중립 — 차단 X
     if trend.direction == "long" and signal_direction == "short":
-        return True
+        return True  # 추세 롱 (강/약 무관) → 숏 차단
     if trend.direction == "short" and signal_direction == "long":
-        return True
+        return True  # 추세 숏 (강/약 무관) → 롱 차단
     return False
 
 

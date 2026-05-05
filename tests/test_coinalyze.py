@@ -123,10 +123,20 @@ def test_trend_filter_strong_same_direction_no_block() -> None:
     assert trend_filter(_trend(-2), "short") is False
 
 
-def test_trend_filter_weak_no_block() -> None:
-    """약한 추세 (±1) + 반대 진입 → 차단 X (필터는 강한 추세만)."""
-    assert trend_filter(_trend(1), "short") is False
-    assert trend_filter(_trend(-1), "long") is False
+def test_trend_filter_weak_blocks_opposite() -> None:
+    """v0.1.58: 약한 추세 (±1) + 반대 진입 → 차단 (사용자 요청).
+
+    추세 = 롭/강한 롭 이면 무조건 롭만, 추세 = 숙/강한 숙 이면 무조건 숙만.
+    중립 (0) 만 양방향 허용.
+    """
+    assert trend_filter(_trend(1), "short") is True
+    assert trend_filter(_trend(-1), "long") is True
+
+
+def test_trend_filter_weak_same_direction_no_block() -> None:
+    """약한 추세 + 같은 방향 → 차단 X (통과)."""
+    assert trend_filter(_trend(1), "long") is False
+    assert trend_filter(_trend(-1), "short") is False
 
 
 def test_trend_filter_neutral_no_block() -> None:

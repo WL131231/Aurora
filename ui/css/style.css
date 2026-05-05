@@ -1814,3 +1814,88 @@ input[type="range"].slider-input:disabled {
 .pnl-actions .btn {
     min-width: 140px;
 }
+
+/* ===== 모바일 반응형 (Android APK WebView) ===== */
+
+/* 모바일 헤더 — 기본 숨김, 소형 화면에서만 표시 */
+.mobile-header {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 48px;
+    z-index: 60;
+    background: rgba(6, 6, 10, 0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(191, 192, 209, 0.08);
+    align-items: center;
+    padding: 0 1rem;
+    gap: 0.75rem;
+}
+
+/* 햄버거 버튼 */
+.mobile-hamburger {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+    width: 32px;
+    height: 32px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+}
+.mobile-hamburger span {
+    display: block;
+    height: 1.5px;
+    background: rgba(191, 192, 209, 0.8);
+    border-radius: 2px;
+    transition: opacity 0.2s;
+}
+
+/* 오버레이 — 기본 숨김 */
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(0, 0, 0, 0.6);
+}
+
+@media (max-width: 767px) {
+    /* 모바일 헤더 표시 */
+    .mobile-header {
+        display: flex;
+    }
+
+    /* 메인 레이아웃 — 상단 헤더 높이만큼 패딩 */
+    .main-shell {
+        padding-top: 48px;
+    }
+
+    /* 사이드바 — 슬라이드 드로어로 전환 */
+    aside#sidebar {
+        position: fixed !important;
+        top: 0;
+        left: 0;
+        height: 100%;
+        z-index: 50;
+        transform: translateX(-100%);
+        transition: transform 0.25s ease;
+        width: 240px !important;
+    }
+    aside#sidebar.sidebar-open {
+        transform: translateX(0);
+    }
+
+    /* 오버레이 — 사이드바 열릴 때 표시 */
+    .sidebar-overlay.sidebar-open {
+        display: block;
+    }
+
+    /* 메인 콘텐츠 — 전체 너비 */
+    .main-shell > main {
+        width: 100% !important;
+        flex: 1 !important;
+    }
+}

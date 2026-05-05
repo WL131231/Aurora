@@ -49,8 +49,19 @@
 
     <div class="main-shell relative z-10 flex h-screen">
 
+        <!-- 모바일 오버레이 — 사이드바 열릴 때 뒤쪽 dimming -->
+        <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+        <!-- 모바일 상단 헤더 — 햄버거 + 워드마크 (md 이상 숨김) -->
+        <div class="mobile-header">
+            <button id="sidebar-toggle" class="mobile-hamburger" aria-label="메뉴">
+                <span></span><span></span><span></span>
+            </button>
+            <span class="text-xs tracking-[0.25em] font-light wordmark">AURORA</span>
+        </div>
+
         <!-- ─── 좌측 사이드바 ─────────────────────── -->
-        <aside class="w-60 border-r border-white/5 bg-black/40 backdrop-blur-xl flex flex-col">
+        <aside id="sidebar" class="w-60 border-r border-white/5 bg-black/40 backdrop-blur-xl flex flex-col">
             <div class="px-6 py-6 border-b border-white/5 flex items-center gap-3">
                 <div class="logo-mark">
                     <svg width="28" height="28" viewBox="0 0 28 28" fill="none">

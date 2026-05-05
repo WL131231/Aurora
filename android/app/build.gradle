@@ -24,17 +24,26 @@ android {
         python {
             version "3.11"
             pip {
-                // pyproject.toml 의존성 — pywebview 제외 (headless 모드라 불필요)
-                // uvicorn[standard] X — uvloop/httptools Android 빌드 불필요
+                // stubs/ 로컬 wheel — C 확장 stub (Chaquopy ARM64 wheel 없는 패키지):
+                //   pycares  : aiodns 의존 (ccxt → aiodns → pycares), cffi+c-ares 없음
+                //   coincurve: ccxt ECC 서명 (Bybit HMAC-SHA256 전용, 불필요), libsecp256k1 없음
+                //   aiohttp  : ccxt async dep (sync 전용 사용, 미사용), C 확장 없음
+                // --find-links 로 pip 가 stub wheel 을 먼저 찾아 실제 빌드 생략
+                options "--find-links", new File(project.projectDir, "stubs").absolutePath
+                install "pycares==5.1.0"
+                install "coincurve==21.0.0"
+                install "aiohttp==3.13.5"
                 install "ccxt>=4.4.0"
-                install "pandas>=2.2.0"
-                install "numpy>=1.26.0"
-                install "fastapi>=0.115.0"
+                install "pandas>=2.0.0"
+                install "numpy>=1.26.0,<2.0.0"
+                // fastapi<0.116.0 까지만 pydantic v1 허용. 0.116+ 부터 pydantic>=2.9.0 강제.
+                install "fastapi>=0.110.0,<0.116.0"
                 install "uvicorn>=0.30.0"
                 install "python-telegram-bot>=21.0"
                 install "python-dotenv>=1.0.0"
-                install "pydantic>=2.0"
-                install "pydantic-settings>=2.0"
+                // pydantic v1 강제 — pydantic-core (Rust 확장) Chaquopy ARM64 wheel 없음.
+                // FastAPI 0.115.x 는 pydantic v1 허용 (>=1.7.4). config.py 는 Android 분기.
+                install "pydantic<2"
                 install "websockets>=12.0"
                 install "httpx>=0.27.0"
             }
@@ -68,7 +77,22 @@ tasks.register('copyAuroraSrc', Copy) {
     from "../../src/aurora"
     into "src/main/python/aurora"
 }
-preBuild.dependsOn copyAuroraSrc
+// Aurora UI → Android assets 자동 복사 (빌드 전)
+// Why: WebView 가 file:///android_asset/ui/index.html 로 로드.
+//   FastAPI 가 static 서빙하지 않아도 HTML/JS/CSS 를 assets 에서 직접 제공.
+tasks.register('copyAuroraUI', Copy) {
+    from "../../ui"
+    into "src/main/assets/ui"
+}
+// Gradle 8.4 암묵적 태스크 의존성 금지
+afterEvaluate {
+    tasks.matching { it.name ==~ /merge.*PythonSources/ }.configureEach {
+        dependsOn 'copyAuroraSrc'
+    }
+    tasks.matching { it.name ==~ /merge.*Assets/ }.configureEach {
+        dependsOn 'copyAuroraUI'
+    }
+}
 
 dependencies {
     implementation 'androidx.core:core-ktx:1.12.0'

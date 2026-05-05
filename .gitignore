@@ -73,3 +73,10 @@ Thumbs.db
 *.cache
 .coverage
 htmlcov/
+
+# ===== Android 빌드 캐시 (자동 생성 — 커밋 불필요) =====
+android/.gradle/
+android/local.properties
+android/app/src/main/assets/
+android/app/src/main/python/aurora/
+android/app/build/

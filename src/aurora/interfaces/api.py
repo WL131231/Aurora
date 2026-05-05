@@ -639,7 +639,7 @@ def create_app() -> FastAPI:
         흐름: UI 토글/슬라이더 변경 → 본 엔드포인트 → config_store 저장 +
         BotInstance.apply_live_config — 봇 재시작 없이 즉시 반영.
         """
-        cfg = config.model_dump()
+        cfg = config.dict()  # pydantic v1/v2 호환
         config_store.save(cfg)
         bot = bot_instance.get_instance()
         if bot.running:

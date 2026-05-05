@@ -47,8 +47,28 @@ function switchView(viewName) {
 }
 
 document.querySelectorAll(".nav-btn").forEach((btn) => {
-    btn.addEventListener("click", () => switchView(btn.dataset.view));
+    btn.addEventListener("click", () => {
+        switchView(btn.dataset.view);
+        closeSidebar(); // 모바일에서 메뉴 선택 후 사이드바 자동 닫기
+    });
 });
+
+// ============================================================
+// 모바일 사이드바 토글
+// ============================================================
+
+function openSidebar() {
+    document.getElementById("sidebar").classList.add("sidebar-open");
+    document.getElementById("sidebar-overlay").classList.add("sidebar-open");
+}
+
+function closeSidebar() {
+    document.getElementById("sidebar").classList.remove("sidebar-open");
+    document.getElementById("sidebar-overlay").classList.remove("sidebar-open");
+}
+
+document.getElementById("sidebar-toggle")?.addEventListener("click", openSidebar);
+document.getElementById("sidebar-overlay")?.addEventListener("click", closeSidebar);
 
 // ============================================================
 // 2. 슬라이더 라이브 업데이트 (값 표시)

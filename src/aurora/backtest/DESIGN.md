@@ -705,7 +705,7 @@ PR-1 13 개 / PR-2 18 개 / Stage 1A 14 개 / Stage 1B 32 개 (cost 16 + stats 1
 | D-2 (consec_sl 카운트 분기) | B4 (TP4 reset) / B5 (SL pause 발동) / B6 (REVERSE 유지) / D2 (FORCE_END 유지) | 7 reason 매핑 표 핵심 4 분기 검증 |
 | D-3 (등간격 분할) | A2 (auto risk_config tps=[2.8, 3.13.., 3.46.., 3.8]) | leverage=10 산식 정합 |
 | D-4 (ATR 4H 디폴트 + 가드) | C4 (ATR 모드 + 4H 미닫힘 → 진입 skip) | `build_risk_plan(atr=None)` ValueError 회피 가드 |
-| D-5 (regime breakdown) | Group regime D5-1~D5-6 (단위, `tests/test_strategy.py`) + Group I I-1/I-2 (통합) | 본 PR 해소 (Issue #110) — `core.strategy.classify_regime` 신설 + `Position.regime` + `TradeRecord.regime` 전파 (4 regime: TREND_UP/DOWN/RANGE/VOLATILE, 임계 trend 0.5% / vol mult 2.0 / lookback 20) |
+| D-5 (regime breakdown) | Group regime D5-1~D5-6 (단위, `tests/test_strategy.py`) + Group I I-1/I-2 (통합) + **Group D5-7~D5-9 (F3 매개변수화) + Group J J-1~J-3 (F1 9b VOLATILE skip)** | 본 PR 해소 (Issue #110) — `core.strategy.classify_regime` 신설 + `Position.regime` + `TradeRecord.regime` 전파 (4 regime: TREND_UP/DOWN/RANGE/VOLATILE, 임계 trend 0.5% / vol mult 2.0 / lookback 20). **보충 PR 해소 (Issue #110 후속)** — `RegimeConfig` dataclass 통합 (F1 skip_on_volatile 옵트인 + F3 임계 3 개 매개변수화) + `BacktestConfig.regime_config` 노출 (D-1 risk_config 패턴) + `engine.step()` 9b VOLATILE skip 가드 (옵션 C, 진입 직전) |
 | D-8 (risk_pct config 노출) | A1 (default 0.01) / E3 (custom strategy_config 보존) | — |
 | D-19 (direction lowercase 통일) | — (헬퍼 자연 제거 → 단위 테스트 X) | `cost.Direction` Literal lowercase + `core.strategy.Direction` StrEnum value 자연 통과 (후속 PR ✅) |
 | D-20 (페어당 1 포지션) | B3 (double _open RuntimeError) | — |
@@ -869,6 +869,30 @@ PR-3 description 본문에 박을 Decisions 항목 미리보기. 본 design doc 
 
 **Reference**: §8.2 D-5 행, §8.4 ✅ 해소 항목, `drafts/D-5-regime-policy-spec.md`, `core/strategy.py::classify_regime`, `tests/test_strategy.py::test_regime_*`, `tests/test_engine.py::test_step_classifies_regime_on_4h_close` + `test_run_propagates_regime_to_trade_records`.
 
+### D-5 보충 ✅ F1 + F3 — 본 PR 해소 (2026-05-05, Issue #110 후속)
+
+**결정**: D-5 보충 의견 F1 (VOLATILE 진입 skip 옵트인) + F3 (임계 매개변수화) 묶음 PR 통합 해소. 정책 spec `drafts/D-5-supplements-policy-spec.md` Q 6건 추천 채택 정합 (Q1 옵션 C 진입 가드 / Q2 옵션 B BacktestConfig 노출 / Q3 묶음 PR / Q4 즉시 진입 / Q5 `core/strategy.py` 위치 / Q6 디폴트 `skip_on_volatile=False` 현 동작 보존). 장수 ChoYoon 전결 위임 패턴 정합 추정 (D-5 #124 정합).
+
+**구현**:
+- `core/strategy.py` — `RegimeConfig` dataclass 신설 (`slots=True`, 4 필드: `trend_threshold` / `volatility_multiplier` / `volatility_lookback` / `skip_on_volatile`). 디폴트 = 모듈 상수 (`TREND_THRESHOLD=0.005` / `VOLATILITY_MULTIPLIER=2.0` / `VOLATILITY_LOOKBACK=20`) — 배포 호환성 보존 (모듈 상수 deprecation 후속 트래커). `classify_regime` 시그니처 매개변수화 — `regime_config: RegimeConfig | None = None` (mutable default 안티패턴 회피). 본문 4 곳 (lookback / volatility_multiplier / trend_threshold ×2) → `cfg.*` 참조 변경.
+- `engine.py` — `BacktestConfig.regime_config: RegimeConfig | None = None` 필드 (D-1 `risk_config` 패턴 정합). `__init__` 산출 `self._regime_config = config.regime_config or RegimeConfig()` (config mutate X 보장). `step()` 8 단계 `classify_regime(df_4h, regime_config=self._regime_config)` 인자 전달. **9b 가드 신설** (옵션 C — `decision.enter` 산출 직후, 10 단계 ATR 가드 직전): `if self._regime_config.skip_on_volatile and self._last_regime == Regime.VOLATILE: return`.
+- `tests/test_strategy.py` — Group D5-7~D5-9 (F3 매개변수화 3 단위): D5-7 custom_threshold (gap 0.79% — 디폴트 TREND_UP / custom 0.01 RANGE) / D5-8 custom_volatility_multiplier (디폴트 VOLATILE / custom 5.0 TREND_UP) / D5-9 default_module_constants (None 호출 vs RegimeConfig() 명시 동일 결과).
+- `tests/test_engine.py` — Group J (F1 9b 통합 3 케이스): J-1 skip True + VOLATILE → `_open` 미호출 + position None / J-2 skip False + VOLATILE → `_open` 호출 + Position.regime=VOLATILE (D-5 #124 회귀 X) / J-3 skip True + TREND_UP → 9b 미발동 (VOLATILE 한정).
+
+**이유**:
+- F1 옵션 C (진입 직전 가드) — 신호 평가 + decision 산출 자연 진행, Aurora 기존 가드 패턴 (stopped/pause/ATR) 정합. 8 단계 직후 skip 대안은 신호 평가 자체 차단으로 비효율.
+- F3 BacktestConfig 노출 (Q2 옵션 B) — 사용자 조정 가능 + 디폴트는 모듈 상수 보존. D-1 `risk_config` 패턴 정합.
+- 묶음 PR (Q3) — 단일 `RegimeConfig` source of truth, review 효율 ↑. F1 + F3 본질 영역 (regime 정책) 동일.
+- 디폴트 `skip_on_volatile=False` (Q6) — D-5 #124 현 동작 보존 + 옵트인 정합 (배포 안정성).
+- self-spy on `aurora.backtest.engine.classify_regime` (Stage 1D #102 단계 2/3 패턴 정합) — mock 0 / 결정론적 합성 입력.
+
+**미반영 / 후속**:
+- F2 (regime UI 통계) — 정용우 영역 별도 PR (interfaces/api.py + ui/), Phase 2 진입 후 통계 dashboard 항목.
+- VOLATILE skip 백테스트 결과 회고 — `skip_on_volatile=True` vs `False` 시뮬 비교 (실데이터 검증, ChoYoon 후속 트래커).
+- 모듈 상수 deprecation — 보존 (RegimeConfig 디폴트 source). 외부 import path 영향 점검 후 별도 결정.
+
+**Reference**: §8.2 D-5 행 보충 매핑, §12 변경 이력 2026-05-05 보충 entry, `drafts/D-5-supplements-policy-spec.md`, `core/strategy.py::RegimeConfig` + `classify_regime`, `engine.py::BacktestEngine.step()` 9b 가드, `tests/test_strategy.py::test_classify_regime_custom_*`, `tests/test_engine.py::test_step_skips_entry_on_volatile_*` + `test_step_enters_on_*`.
+
 ### D-6 ✅ Stage 1A draft PR 패턴
 
 **결정**: PR-3 는 Stage 1A → 1B → 1C 분할 진행. Stage 1A 시점부터 `feat/backtest-engine` 브랜치 main 위에 **draft PR 즉시 push**. Stage 1A → 1B → 1C 통합 + 회귀 통과 후 Ready for review 전환. **단일 PR 로 통째 머지** (예외: 1A 가 의외로 작으면 별도 짧은 PR 옵션 OK — ChoYoon 본인 판단).
@@ -943,4 +967,5 @@ PR-3 description 본문에 박을 Decisions 항목 미리보기. 본 design doc 
 - 2026-05-04+ (D-19 direction lowercase 통일 후속 PR): §6.3 `_check_exits` `del close` 항목 제거 (close 매개변수 자체 제거 — 장수+WooJae 합의 (a) 채택). §8.2 D-19 라인 갱신 (RecordDir Literal → cost.Direction Literal lowercase + StrEnum value 자연 통과). §11 D-19 신규 본문화 (Stage 1C·1D 패턴 정합). pytest baseline 504 → 502 (-2, `_to_record_direction` 헬퍼 테스트 자연 제거). PR-3 BacktestEngine Stage 1A→1D 전체 완료 + lowercase 통일 마일스톤.
 - 2026-05-05 (D-1 min_seed_pct 16배 증폭 통합 검증, Issue #111): §11 D-1 본문 통합 검증 결과 본문화 (✅ 해소) — canonical 시나리오 (balance=1_000 / lev=10 / sl 가격 4%) margin floor 400 USD 발동 후 lev_pnl ≈ -0.163968 (16.40배 증폭) 정합. §8.4 잔존 항목 D-1 ✅ 해소 처리 (D-5 regime breakdown 별도 진행). §8.2 D-1 매핑 표 갱신 (Group H 신설 → H1 통합 검증 본 PR 해소). `tests/test_engine.py::test_min_seed_amplification_floor_scenario` self-spy on `_open` + `_close` (Stage 1D 단계 2/3 정합). pytest baseline 525 → 526 (+1, main HEAD d69722e 위 PR #117~#121 11 commits 자연 흡수). PR-3 마일스톤 잔존 2건 중 D-1 ✅ 해소 ↔ Phase 2 입구 진입.
 - 2026-05-05 (D-5 regime breakdown 본 구현, Issue #110, 장수 ChoYoon 전결 위임): §11 D-5 본문 재작성 (✅ 해소) — `core.strategy.classify_regime(df_4h)` 신설 + `Regime` StrEnum + 임계 모듈 상수 (trend_threshold=0.005 / volatility_multiplier=2.0 / volatility_lookback=20) + `Position.regime` 필드 + `TradeRecord.regime` 전파 chain. 분류 우선순위 VOLATILE > TREND > RANGE (정책 spec drafts/D-5-regime-policy-spec.md 5/5 LGTM 합치). §8.2 D-5 행 신설 (Group regime 6 단위 + Group I 2 통합 매핑). §8.4 잔존 항목 D-5 ✅ 해소 처리 — **PR-3 마일스톤 잔존 2건 전부 해소 (D-1 + D-5) ↔ Phase 2 입구 진입 완료**. self-spy on `classify_regime` (module attribute monkeypatch) + `_close` + `_partial_close` (Stage 1D 단계 2/3 패턴 정합). 신설 함수 0건 (기존 `ema` + `atr_wilder` 활용). pytest baseline 526 → 534 (+8, 단위 6 + 통합 2). VOLATILE 시 신호 평가 skip / regime UI 통계는 별도 후속 (보충 의견 트래커 F1 / F2).
-- 다음 보강 예정: §10 review 발송 준비 (시프트 후), §11 PR description Decisions 미리보기 (D-9~D-18 / D-20~D-23 누락 보충 별도 후속 트래커), 동기화 매트릭스 별도 파일 신설, VOLATILE 신호 평가 skip + regime UI 통계 후속 트래커.
+- 2026-05-05 (D-5 보충 F1 + F3 묶음, Issue #110 후속): §11 D-5 보충 항 신설 (✅ 해소) — `RegimeConfig` dataclass 통합 (slots=True, 4 필드: trend_threshold / volatility_multiplier / volatility_lookback / skip_on_volatile, 디폴트 = 모듈 상수 + skip_on_volatile=False 옵트인 보존) + `classify_regime` 시그니처 매개변수화 (`regime_config: RegimeConfig | None = None`, mutable default 안티패턴 회피) + `BacktestConfig.regime_config` 노출 (D-1 risk_config 패턴 정합) + `engine.step()` 9b VOLATILE skip 가드 (옵션 C, 진입 직전 — drafts/D-5-supplements-policy-spec.md Q1 정합). §8.2 D-5 행 갱신 (Group D5-7~D5-9 + Group J J-1~J-3 매핑 추가). 모듈 상수 4 개 보존 (RegimeConfig 디폴트 source, deprecation 후속 트래커). self-spy on `aurora.backtest.engine.classify_regime` + signal stub (mock 0 / Stage 1D 패턴 정합). pytest baseline 539 → 545 (+6, F3 매개변수화 3 + F1 9b 통합 3). F2 (regime UI 통계 정용우 영역) + VOLATILE skip 백테스트 결과 회고 별도 후속 트래커.
+- 다음 보강 예정: §10 review 발송 준비 (시프트 후), §11 PR description Decisions 미리보기 (D-9~D-18 / D-20~D-23 누락 보충 별도 후속 트래커), 동기화 매트릭스 별도 파일 신설, F2 regime UI 통계 + VOLATILE skip 백테스트 회고 후속 트래커.

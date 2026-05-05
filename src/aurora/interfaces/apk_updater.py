@@ -2,7 +2,7 @@
 
 흐름:
     1. aurora_bridge.start() 가 _load_env() 직후 apk_updater.start() 호출
-    2. 백그라운드 스레드 — 시작 시 1회 + 12시간 주기로 GitHub Releases 체크
+    2. 백그라운드 스레드 — 시작 시 1회 + 30분 주기로 GitHub Releases 체크
     3. 새 버전 APK 발견 → AURORA_DATA_DIR/update/Aurora-android.apk 다운로드
     4. api.py 의 GET /update/apk-status 가 상태 노출
     5. UI "재시작하기" 클릭 → window.Android.installApk(path) 호출 (app.js)
@@ -29,7 +29,7 @@ from aurora.interfaces import release_check
 logger = logging.getLogger(__name__)
 
 APK_ASSET_NAME = "Aurora-android.apk"
-CHECK_INTERVAL_SEC = 12 * 3600  # 12시간 주기 (배터리·데이터 절약)
+CHECK_INTERVAL_SEC = 30 * 60  # 30분 주기 (사용자 결정)
 
 _state: dict = {
     "has_update": False,
@@ -111,7 +111,7 @@ def _check_and_download() -> None:
 
 
 def _update_loop() -> None:
-    """시작 시 1회 즉시 체크 + 12시간 주기 반복."""
+    """시작 시 1회 즉시 체크 + 30분 주기 반복."""
     _check_and_download()
     while True:
         time.sleep(CHECK_INTERVAL_SEC)
@@ -130,4 +130,4 @@ def start() -> None:
         return
     t = threading.Thread(target=_update_loop, daemon=True, name="apk-updater")
     t.start()
-    logger.info("APK 업데이트 폴링 시작 (12시간 주기)")
+    logger.info("APK 업데이트 폴링 시작 (30분 주기)")

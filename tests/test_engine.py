@@ -30,7 +30,7 @@ from aurora.core.risk import (
     TrailingMode,
     build_risk_plan,
 )
-from aurora.core.strategy import Regime, StrategyConfig
+from aurora.core.strategy import Regime, RegimeConfig, StrategyConfig
 
 # ============================================================
 # 헬퍼 — fast 인스턴스 생성 (test_stats.py / test_replay.py 패턴 정합)
@@ -778,9 +778,12 @@ def test_step_classifies_regime_on_4h_close(
     engine = BacktestEngine(cfg)
 
     # self-spy on classify_regime — TREND_UP 강제 반환 (테스트 결정론성)
+    # D-5 보충 F3: regime_config keyword arg 시그니처 호환 (engine 호출자 전달)
     classify_call_lengths: list[int] = []
 
-    def spy_classify(df_4h: pd.DataFrame) -> Regime:
+    def spy_classify(
+        df_4h: pd.DataFrame, regime_config: object = None,
+    ) -> Regime:
         classify_call_lengths.append(len(df_4h))
         return Regime.TREND_UP
 
@@ -891,3 +894,127 @@ def test_run_propagates_regime_to_trade_records() -> None:
 
     # (5) Position.regime 디폴트 UNKNOWN 환기 — 본 테스트는 _last_regime 수동 박음
     # (4H 미닫힘 timeframes 에서 디폴트 UNKNOWN 정합은 Position dataclass 단위 검증).
+
+
+# ============================================================
+# Group J — D-5 보충 F1 VOLATILE 진입 skip 가드 통합 (3, Issue #110 후속)
+# ============================================================
+
+
+def test_step_skips_entry_on_volatile_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """J-1 — `RegimeConfig(skip_on_volatile=True)` + VOLATILE 강제 시 9b 가드 발동
+    → 진입 신호 산출되어도 `_open` 미호출 + `engine.position is None` (D-5 보충 F1).
+
+    self-spy on `aurora.backtest.engine.classify_regime` → VOLATILE 강제 반환.
+    Group I `test_step_classifies_regime_on_4h_close` 와 동일 시나리오 (bar 107
+    4H 닫힘 + EMA touch LONG 신호) — 9 단계 decision.enter=True 까지 진행 후 9b 가드
+    `skip_on_volatile=True and _last_regime==VOLATILE` 매치 → 진입 차단.
+    """
+    cfg = BacktestConfig(
+        timeframes=["4H"],
+        strategy_config=StrategyConfig(
+            ema_periods=(2, 3),
+            ema_touch_tolerance=0.003,
+        ),
+        regime_config=RegimeConfig(skip_on_volatile=True),
+    )
+    engine = BacktestEngine(cfg)
+
+    def spy_classify(
+        df_4h: pd.DataFrame, regime_config: object = None,
+    ) -> Regime:
+        return Regime.VOLATILE
+
+    monkeypatch.setattr(
+        "aurora.backtest.engine.classify_regime", spy_classify,
+    )
+
+    prices = [100.0] * 110
+    df = _make_synthetic_1m_df(prices=prices)
+    trades = engine.run(df)
+
+    # (1) _last_regime VOLATILE 갱신 verify (8 단계 spy 정합)
+    assert engine._last_regime == Regime.VOLATILE
+    # (2) 9b 가드 발동 — _open 미호출 → position 미생성 → trades empty
+    assert engine.position is None
+    assert trades == []
+
+
+def test_step_enters_on_volatile_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """J-2 — `skip_on_volatile=False` (디폴트, D-5 #124 현 동작 보존) 시 VOLATILE
+    상태에서도 진입 정상 → `_open` 호출 + `Position.regime=VOLATILE` (회귀 가드).
+
+    D-5 #124 본 동작 (VOLATILE 시 진입 허용 + Position.regime=VOLATILE 박힘) 가
+    옵트인 디폴트로 보존됨 verify. `regime_config=None` (BacktestConfig 디폴트) 도
+    같은 결과여야 하지만 본 케이스는 명시 `RegimeConfig(skip_on_volatile=False)` 로
+    contract 명시화.
+    """
+    cfg = BacktestConfig(
+        timeframes=["4H"],
+        strategy_config=StrategyConfig(
+            ema_periods=(2, 3),
+            ema_touch_tolerance=0.003,
+        ),
+        regime_config=RegimeConfig(skip_on_volatile=False),
+    )
+    engine = BacktestEngine(cfg)
+
+    def spy_classify(
+        df_4h: pd.DataFrame, regime_config: object = None,
+    ) -> Regime:
+        return Regime.VOLATILE
+
+    monkeypatch.setattr(
+        "aurora.backtest.engine.classify_regime", spy_classify,
+    )
+
+    prices = [100.0] * 110
+    df = _make_synthetic_1m_df(prices=prices)
+    trades = engine.run(df)
+
+    # (1) _last_regime VOLATILE 갱신 verify
+    assert engine._last_regime == Regime.VOLATILE
+    # (2) 9b 가드 미작동 — _open 호출 → position 생성 → FORCE_END 청산 → trade 1
+    assert len(trades) >= 1
+    # (3) Position.regime 박힘 → TradeRecord.regime 전파 (D-5 #124 회귀 X)
+    assert trades[0].regime == "VOLATILE"
+
+
+def test_step_enters_on_trend_up_with_skip_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """J-3 — `skip_on_volatile=True` + TREND_UP 강제 시 9b 가드 미발동 → 진입 정상
+    (skip 가드는 VOLATILE 한정 — 다른 regime 영향 X verify, F1).
+    """
+    cfg = BacktestConfig(
+        timeframes=["4H"],
+        strategy_config=StrategyConfig(
+            ema_periods=(2, 3),
+            ema_touch_tolerance=0.003,
+        ),
+        regime_config=RegimeConfig(skip_on_volatile=True),
+    )
+    engine = BacktestEngine(cfg)
+
+    def spy_classify(
+        df_4h: pd.DataFrame, regime_config: object = None,
+    ) -> Regime:
+        return Regime.TREND_UP
+
+    monkeypatch.setattr(
+        "aurora.backtest.engine.classify_regime", spy_classify,
+    )
+
+    prices = [100.0] * 110
+    df = _make_synthetic_1m_df(prices=prices)
+    trades = engine.run(df)
+
+    # (1) _last_regime TREND_UP 갱신 verify
+    assert engine._last_regime == Regime.TREND_UP
+    # (2) 9b 가드 미발동 (VOLATILE 한정) → _open 호출 → trade 1
+    assert len(trades) >= 1
+    assert trades[0].regime == "TREND_UP"

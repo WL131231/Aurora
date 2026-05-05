@@ -41,6 +41,7 @@ from aurora.core.strategy import (
     Direction,
     EntrySignal,
     Regime,
+    RegimeConfig,
     StrategyConfig,
     classify_regime,
     detect_ema_touch,
@@ -89,6 +90,12 @@ class BacktestConfig:
             on/off + 파라미터). ``None`` 이면 ``__init__`` 시점에
             ``StrategyConfig()`` 디폴트 (Fixed only) 자동 산출 → ``self.
             _strategy_config`` 박음 (D-8 사용자 노출 패턴 정합).
+        regime_config: ``RegimeConfig`` (D-5 보충 F1 + F3, Issue #110 후속). 임계
+            매개변수화 (trend_threshold / volatility_multiplier / volatility_lookback)
+            + F1 옵트인 (skip_on_volatile). ``None`` 이면 ``__init__`` 시점에
+            ``RegimeConfig()`` 디폴트 (모듈 상수 그대로 — 현 동작 보존) 자동 산출
+            → ``self._regime_config`` 박음 (D-1 risk_config 패턴 정합, config
+            mutate X 보장).
     """
 
     symbol: str = "BTCUSDT"
@@ -103,6 +110,7 @@ class BacktestConfig:
     consec_sl_pause_minutes: int = 1440   # 정지 24 h (replay L50, 단위 변환)
     risk_config: TpSlConfig | None = None       # __init__ 자동 산출 분기
     strategy_config: StrategyConfig | None = None  # __init__ 디폴트 자동
+    regime_config: RegimeConfig | None = None   # D-5 보충 F1+F3, __init__ 디폴트
 
 
 # ============================================================
@@ -204,6 +212,11 @@ class BacktestEngine:
             config.strategy_config if config.strategy_config is not None
             else StrategyConfig()
         )
+
+        # D-5 보충 regime_config — None 시 RegimeConfig() (모듈 상수 디폴트, 현 동작 보존).
+        # D-1 risk_config 패턴 정합 — config mutate X 보장 위해 self._regime_config
+        # 별도 박음. F1 (skip_on_volatile) + F3 (임계 3 개) 매개변수화 source.
+        self._regime_config: RegimeConfig = config.regime_config or RegimeConfig()
 
         # 시드 추적 — peak_balance 는 _update_peak / _check_max_dd 에서 갱신
         self.balance: float = config.initial_capital
@@ -351,9 +364,11 @@ class BacktestEngine:
         # 7b. D-5 regime 갱신 — 4H 닫힘 시만 (Issue #110, 정책 spec 8 단계 위치).
         # 4H 미닫힘 시 self._last_regime 보존 (이전 4H 닫힘 분류값 유지). 진입 직전
         # _open() 시점에 Position.regime 박힘 → _close/_partial_close 가 TradeRecord
-        # 로 전파. VOLATILE 시 신호 평가 skip 등 액션은 별도 후속 (보충 의견 F1).
+        # 로 전파. VOLATILE 시 진입 skip 은 9b 가드 (D-5 보충 F1, skip_on_volatile 옵트인).
         if "4H" in df_by_tf:
-            self._last_regime = classify_regime(df_by_tf["4H"])
+            self._last_regime = classify_regime(
+                df_by_tf["4H"], regime_config=self._regime_config,
+            )
 
         # 8. 보유 중 분기 — REVERSE 체크 (D-24, compose_exit 활용)
         # Why: signal.is_reverse_signal 부재 — compose_exit(direction, signals)
@@ -372,6 +387,17 @@ class BacktestEngine:
             return
         decision = compose_entry(signals)
         if not decision.enter or decision.direction is None:
+            return
+
+        # 9b. D-5 보충 F1 — VOLATILE 진입 skip 가드 (옵트인, drafts/D-5-supplements-policy-spec.md)
+        # Why: 옵션 C — 신호 평가 + decision 산출 자연 진행 후 진입 직전 가드. 8 단계
+        # classify_regime 호출 직후가 아닌 이 위치인 이유는 (1) Aurora 기존 가드 패턴
+        # (stopped / pause / ATR 미닫힘) 정합, (2) decision 미산출 시 가드 필요 X.
+        # 디폴트 skip_on_volatile=False — D-5 #124 현 동작 보존 (옵트인).
+        if (
+            self._regime_config.skip_on_volatile
+            and self._last_regime == Regime.VOLATILE
+        ):
             return
 
         # 10. ATR 모드 + 4H 미닫힘 → 진입 skip (D-4 정합, sanity [22])

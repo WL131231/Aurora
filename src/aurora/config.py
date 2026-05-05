@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     binance_api_key: str = ""
     binance_api_secret: str = ""
 
+    # ===== 시장 메타 데이터 (선물 추세 인지, v0.1.53) =====
+    # Coinalyze API key — 선물 OI / CVD / Funding 5분 주기 polling.
+    # 무료 tier (40 calls/min) 충분. 미설정 시 라이브 봇 추세 인지 비활성 (default).
+    # 발급: https://coinalyze.net/account/api/
+    coinalyze_api_key: str = ""
+
     # ===== 텔레그램 =====
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""

@@ -389,6 +389,17 @@ class BacktestEngine:
         if not decision.enter or decision.direction is None:
             return
 
+        # 9b. D-5 보충 F1 — VOLATILE 진입 skip 가드 (옵트인, drafts/D-5-supplements-policy-spec.md)
+        # Why: 옵션 C — 신호 평가 + decision 산출 자연 진행 후 진입 직전 가드. 8 단계
+        # classify_regime 호출 직후가 아닌 이 위치인 이유는 (1) Aurora 기존 가드 패턴
+        # (stopped / pause / ATR 미닫힘) 정합, (2) decision 미산출 시 가드 필요 X.
+        # 디폴트 skip_on_volatile=False — D-5 #124 현 동작 보존 (옵트인).
+        if (
+            self._regime_config.skip_on_volatile
+            and self._last_regime == Regime.VOLATILE
+        ):
+            return
+
         # 10. ATR 모드 + 4H 미닫힘 → 진입 skip (D-4 정합, sanity [22])
         cfg = self._risk_config
         if cfg.mode == TpSlMode.ATR and "4H" not in df_by_tf:

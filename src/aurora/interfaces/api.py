@@ -630,7 +630,6 @@ def create_app() -> FastAPI:
         Why: 새 .exe 다운 후 사용자가 한 번 클릭으로 본체 재시작 흐름. 직접 본체
         실행 모드 (launcher 없이) 면 launcher path env 없음 → 실패 응답.
         """
-        import asyncio as _asyncio
         import os as _os
         import platform as _platform
         import subprocess as _subprocess
@@ -670,11 +669,17 @@ def create_app() -> FastAPI:
             return ControlResponse(success=False, message=f"launcher 실행 실패: {e}")
 
         # 응답 반환 후 본체 자기 종료 — 클라이언트가 응답 받을 시간 + launcher 가
-        # spawn 완료 시간. v0.1.46 fix: pywebview 윈도우 destroy 먼저 + os._exit
-        # (v0.1.18 launcher quit 패턴 정합 — destroy 없이 os._exit 만 하면 pywebview
-        # 메인 스레드가 hang 가능 → UI "재시작 중..." 영원. 사용자 보고).
-        async def _shutdown() -> None:
-            await _asyncio.sleep(0.8)  # 클라이언트 응답 받을 시간 (1초 → 0.8초 단축)
+        # spawn 완료 시간. v0.1.48 fix: threading.Thread 로 옮김.
+        # Why: v0.1.46 의 ``asyncio.create_task`` 가 ControlResponse 반환 후 uvicorn
+        # request lifecycle 끝날 때 cancel 가능 → ``os._exit`` 도달 X → 본체 안
+        # 죽음 → UI "재시작 중..." 영원 (사용자 보고 v0.1.46 환경). uvicorn /
+        # asyncio 무관 별도 OS 스레드 (daemon=False) 로 옮겨 보장.
+        # v0.1.18 launcher quit 패턴 정합 — webview destroy 먼저 + os._exit.
+        import threading as _threading
+        import time as _time
+
+        def _shutdown_thread() -> None:
+            _time.sleep(0.8)  # 클라이언트 응답 받을 시간
             try:
                 import webview  # type: ignore[import-not-found]
                 if webview.windows:
@@ -683,7 +688,8 @@ def create_app() -> FastAPI:
                 pass
             _os._exit(0)  # noqa: S603 — 의도적 강제 종료
 
-        _asyncio.create_task(_shutdown())
+        # daemon=False — main thread 종료에 의존 X (강제 종료 보장)
+        _threading.Thread(target=_shutdown_thread, daemon=False).start()
         return ControlResponse(success=True, message="launcher 재실행 + 본체 0.8초 후 종료")
 
     # ───── 로그 (단순 폴링) ─────────────────────────

@@ -669,15 +669,22 @@ def create_app() -> FastAPI:
         except OSError as e:
             return ControlResponse(success=False, message=f"launcher 실행 실패: {e}")
 
-        # 응답 반환 후 1초 뒤 본체 자기 종료 — 클라이언트가 응답 받을 시간 + launcher
-        # 가 spawn 완료 시간. os._exit 로 강제 (uvicorn graceful shutdown 은 lifespan
-        # cleanup 도중 lock 등 race 가능 — race 무시하고 즉시 종료).
+        # 응답 반환 후 본체 자기 종료 — 클라이언트가 응답 받을 시간 + launcher 가
+        # spawn 완료 시간. v0.1.46 fix: pywebview 윈도우 destroy 먼저 + os._exit
+        # (v0.1.18 launcher quit 패턴 정합 — destroy 없이 os._exit 만 하면 pywebview
+        # 메인 스레드가 hang 가능 → UI "재시작 중..." 영원. 사용자 보고).
         async def _shutdown() -> None:
-            await _asyncio.sleep(1.0)
+            await _asyncio.sleep(0.8)  # 클라이언트 응답 받을 시간 (1초 → 0.8초 단축)
+            try:
+                import webview  # type: ignore[import-not-found]
+                if webview.windows:
+                    webview.windows[0].destroy()
+            except Exception:  # noqa: BLE001 — 종료 흐름이라 예외 무시
+                pass
             _os._exit(0)  # noqa: S603 — 의도적 강제 종료
 
         _asyncio.create_task(_shutdown())
-        return ControlResponse(success=True, message="launcher 재실행 + 본체 1초 후 종료")
+        return ControlResponse(success=True, message="launcher 재실행 + 본체 0.8초 후 종료")
 
     # ───── 로그 (단순 폴링) ─────────────────────────
 

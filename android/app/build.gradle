@@ -1,0 +1,77 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.chaquo.python'
+}
+
+android {
+    namespace 'com.aurora.trading'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.aurora.trading"
+        minSdk 24        // Android 7.0 — ccxt/pandas/numpy wheels 지원 최소
+        targetSdk 34
+        versionCode 14100
+        versionName "0.1.41"
+
+        ndk {
+            // arm64-v8a: 최신 Android 공기계 대상
+            // x86_64: AVD 에뮬레이터 (개발/테스트)
+            abiFilters "arm64-v8a", "x86_64"
+        }
+
+        python {
+            version "3.11"
+            pip {
+                // pyproject.toml 의존성 — pywebview 제외 (headless 모드라 불필요)
+                // uvicorn[standard] X — uvloop/httptools Android 빌드 불필요
+                install "ccxt>=4.4.0"
+                install "pandas>=2.2.0"
+                install "numpy>=1.26.0"
+                install "fastapi>=0.115.0"
+                install "uvicorn>=0.30.0"
+                install "python-telegram-bot>=21.0"
+                install "python-dotenv>=1.0.0"
+                install "pydantic>=2.0"
+                install "pydantic-settings>=2.0"
+                install "websockets>=12.0"
+                install "httpx>=0.27.0"
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            applicationIdSuffix ".debug"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+// Aurora 소스 → python assets 자동 복사 (빌드 전)
+// Why: Chaquopy 는 src/main/python/ 을 Python 패키지로 번들.
+//   pyproject.toml 로컬 설치 대신 소스 직접 복사 → pywebview 의존성 회피.
+tasks.register('copyAuroraSrc', Copy) {
+    from "../../src/aurora"
+    into "src/main/python/aurora"
+}
+preBuild.dependsOn copyAuroraSrc
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.11.0'
+}

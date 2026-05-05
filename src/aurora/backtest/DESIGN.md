@@ -705,6 +705,7 @@ PR-1 13 개 / PR-2 18 개 / Stage 1A 14 개 / Stage 1B 32 개 (cost 16 + stats 1
 | D-2 (consec_sl 카운트 분기) | B4 (TP4 reset) / B5 (SL pause 발동) / B6 (REVERSE 유지) / D2 (FORCE_END 유지) | 7 reason 매핑 표 핵심 4 분기 검증 |
 | D-3 (등간격 분할) | A2 (auto risk_config tps=[2.8, 3.13.., 3.46.., 3.8]) | leverage=10 산식 정합 |
 | D-4 (ATR 4H 디폴트 + 가드) | C4 (ATR 모드 + 4H 미닫힘 → 진입 skip) | `build_risk_plan(atr=None)` ValueError 회피 가드 |
+| D-5 (regime breakdown) | Group regime D5-1~D5-6 (단위, `tests/test_strategy.py`) + Group I I-1/I-2 (통합) | 본 PR 해소 (Issue #110) — `core.strategy.classify_regime` 신설 + `Position.regime` + `TradeRecord.regime` 전파 (4 regime: TREND_UP/DOWN/RANGE/VOLATILE, 임계 trend 0.5% / vol mult 2.0 / lookback 20) |
 | D-8 (risk_pct config 노출) | A1 (default 0.01) / E3 (custom strategy_config 보존) | — |
 | D-19 (direction lowercase 통일) | — (헬퍼 자연 제거 → 단위 테스트 X) | `cost.Direction` Literal lowercase + `core.strategy.Direction` StrEnum value 자연 통과 (후속 PR ✅) |
 | D-20 (페어당 1 포지션) | B3 (double _open RuntimeError) | — |
@@ -733,7 +734,7 @@ PR-1 13 개 / PR-2 18 개 / Stage 1A 14 개 / Stage 1B 32 개 (cost 16 + stats 1
 
 - ✅ **해소 (Stage 1D 단계 2, 219d7a0)** — **REVERSE step() 통합** (Q1): synthetic 1m 300 봉 + `ema_periods=(2,3)` + `_close` self-spy 패턴 (mock 외부 의존 X — `engine._close` wrapper 로 호출 인자 캡처) → `test_step_reverse_branch_synthetic_ohlcv` 통합 line coverage. `compose_exit(LONG, [SHORT signals])` True 분기 (engine.py L351-354) 검증.
 - ✅ **해소 (Stage 1D 단계 3, c1086a4)** — **멀티 trade end-to-end** (1m 300 봉, 8 단계 라이프사이클): LONG entry → TP1 partial → TP2 partial → BE close → SHORT entry → REVERSE close → LONG entry → FORCE_END close → `test_run_multi_trade_end_to_end_scenario`. self-spy 확장 (`_close` + `_partial_close` 둘 다, D-21 partial idx 추적) + assertion 8 가지 (D-2 reason 매핑 / direction 분포 LONG 4 + SHORT 1 / consec_sl 흐름).
-- 🟡 **잔존 — regime breakdown** (D-5): regime 분류 정책 PR-3 범위 외. `TradeRecord.regime` 필드 박혀 있고 후속 PR 채움 자연. 별도 Issue 등록 예정.
+- ✅ **해소 (2026-05-05, Issue #110)** — **regime breakdown** (D-5): `core.strategy.classify_regime(df_4h)` 신설 — 4 regime 분류 (TREND_UP / TREND_DOWN / RANGE / VOLATILE, 임계 잠정 trend_threshold=0.005 / volatility_multiplier=2.0 / volatility_lookback=20). `engine.step()` 8 단계 4H 닫힘 시 호출 + `self._last_regime` 박음 + `_open()` 시점 `Position.regime` 인계. `_close` / `_partial_close` 청산 시 `TradeRecord.regime` 로 전파 (`_force_close_at_end` → `_close` 자연 위임). self-spy on `classify_regime` (module attribute monkeypatch) + `_close` + `_partial_close` (Stage 1D 단계 2/3 패턴 정합) → Group regime 6 단위 + Group I 2 통합 케이스. **PR-3 마일스톤 잔존 2건 전부 해소 (D-1 + D-5) ↔ Phase 2 입구 진입 완료**. VOLATILE 시 신호 평가 skip / regime UI 통계는 별도 후속 (보충 의견 트래커 F1 / F2).
 - ✅ **해소 (2026-05-05, Issue #111)** — **min_seed_pct=0.40 16배 증폭 시나리오** (D-1): canonical 시나리오 (balance=1_000 / lev=10 / risk_pct=0.01 / FIXED_PCT sl=40 ROI = 가격 4%) → margin floor 400 USD 발동 → SL 도달 lev_pnl ≈ -0.163968 (= -16.40% balance) → 증폭 ratio ≈ 16.40배 (R 약속 1% 대비). clamp 한도 -0.40 미발동 (순수 증폭, Stage 1B 영역 분리). self-spy on `_open` + `_close` (Stage 1D 단계 2/3 패턴 정합) → `test_min_seed_amplification_floor_scenario` (Group H 신설). §11 D-1 본문 통합 검증 결과 본문화 정합.
 
 ---
@@ -844,15 +845,29 @@ PR-3 description 본문에 박을 Decisions 항목 미리보기. 본 design doc 
 
 **Reference**: §5.3 (core/indicators.py 위임 박스), §6.2 10-a (호출 패턴).
 
-### D-5 ✅ regime breakdown PR-3 범위 외 후속
+### D-5 ✅ regime breakdown — 본 PR 해소 (2026-05-05, Issue #110)
 
-**결정**: 시장 국면 (regime) 별 stats breakdown (`TradeRecord.regime` 필드 활용) 은 PR-3 범위 외. 별도 후속 PR 로 처리.
+**결정**: 시장 국면 (regime) 분류 함수 + `Position.regime` 박음 + `TradeRecord.regime` 전파 본 PR 통합 해소. 정책 spec `drafts/D-5-regime-policy-spec.md` 5/5 LGTM 합치 (장수 + WooJae + 정용우 + ChoYoon + Aurora Claude). 장수 ChoYoon 전결 위임 (2026-05-05) — 후속 review 분리 가치 ↓.
+
+**분류 정책** (정책 spec 잠정안):
+- **VOLATILE 우선**: `atr_now / atr_avg ≥ 2.0` (TREND 동시 발동 시에도 VOLATILE 채택)
+- **TREND_UP**: `(ema50 - ema200) / ema200 ≥ 0.005` (4H, EMA 50/200)
+- **TREND_DOWN**: `(ema50 - ema200) / ema200 ≤ -0.005`
+- **RANGE**: fallback (격차 미만)
+- 가드: `len(df_4h) < 20` / NaN / `atr_avg=0` / `ema200_now=0` → RANGE fallback
+
+**구현**:
+- `core/strategy.py` — `Regime` StrEnum (TREND_UP / TREND_DOWN / RANGE / VOLATILE / UNKNOWN) + 임계 모듈 상수 (`TREND_THRESHOLD` / `VOLATILITY_MULTIPLIER` / `VOLATILITY_LOOKBACK`) + `classify_regime(df_4h)` 함수 (~50 LOC). 신설 함수 0건 — 기존 `ema` + `atr_wilder` 활용.
+- `engine.py` — `Position.regime: Regime = Regime.UNKNOWN` 디폴트 + `self._last_regime` 박음 + `step()` 8 단계 (`df_by_tf["4H"]` 존재 시) `classify_regime` 호출 + `_open()` 시점 `regime=self._last_regime` 인계. `_close` / `_partial_close` `regime=str(p.regime)` 전파.
+- `tests/test_strategy.py` — Group regime 6 단위 (D5-1~D5-6: 4 분류 + sample 부족 + atr=0 가드).
+- `tests/test_engine.py` — Group I 2 통합 (I-1: step() 4H 닫힘 시 classify_regime 호출 + Position.regime 박힘 / I-2: multi-trade 5 trade 모두 `_close` + `_partial_close` + `_force_close_at_end` 전파 verify).
 
 **이유**:
-- regime 분류 자체가 별도 정책 (volatility-based / trend-based / 추세 강도 등) — design 결정 비용 크고 PR-3 머지 지연.
-- `TradeRecord` 에 `regime: str | None = None` 필드는 박아둠 (§5.2 stats.py spec) — 후속 PR 에서 채우기만.
+- 정책 spec 5/5 LGTM 도달 + ChoYoon 전결 위임 → 분리 머지 비용 < 통합 비용.
+- 4 regime + 임계 합의 + `engine.step()` 8 단계 호출 위치 합의 → 본질 ~135-175 LOC 한 묶음 PR 자연.
+- VOLATILE 시 신호 평가 skip / regime UI 통계는 별도 정책 결정 비용 ↑ → 본 PR 범위 외 (보충 의견 트래커 F1 / F2).
 
-**Reference**: 후속 Issue 추적 예정 — 번호 도착 시 본 항목 정정.
+**Reference**: §8.2 D-5 행, §8.4 ✅ 해소 항목, `drafts/D-5-regime-policy-spec.md`, `core/strategy.py::classify_regime`, `tests/test_strategy.py::test_regime_*`, `tests/test_engine.py::test_step_classifies_regime_on_4h_close` + `test_run_propagates_regime_to_trade_records`.
 
 ### D-6 ✅ Stage 1A draft PR 패턴
 
@@ -927,4 +942,5 @@ PR-3 description 본문에 박을 Decisions 항목 미리보기. 본 design doc 
 - 2026-05-04 (Stage 1D 마무리, 단계 4): §8.4 커버리지 갭 갱신 — REVERSE step() 통합 (단계 2 219d7a0) + 멀티 trade end-to-end (단계 3 c1086a4) 2 건 ✅ 해소, regime breakdown (D-5) + min_seed_pct 16% 증폭 (D-1) 2 건 🟡 잔존 (별도 Issue 예정). §6.3 `_check_exits` `del close` 환기 추가 (D-19 direction lowercase 통일 후속 PR 함께 검토 — 장수+WooJae 합의). pytest baseline 408 → 472 (+64, main 머지 신규 테스트 흡수 + 단계 2/3 회귀 +2).
 - 2026-05-04+ (D-19 direction lowercase 통일 후속 PR): §6.3 `_check_exits` `del close` 항목 제거 (close 매개변수 자체 제거 — 장수+WooJae 합의 (a) 채택). §8.2 D-19 라인 갱신 (RecordDir Literal → cost.Direction Literal lowercase + StrEnum value 자연 통과). §11 D-19 신규 본문화 (Stage 1C·1D 패턴 정합). pytest baseline 504 → 502 (-2, `_to_record_direction` 헬퍼 테스트 자연 제거). PR-3 BacktestEngine Stage 1A→1D 전체 완료 + lowercase 통일 마일스톤.
 - 2026-05-05 (D-1 min_seed_pct 16배 증폭 통합 검증, Issue #111): §11 D-1 본문 통합 검증 결과 본문화 (✅ 해소) — canonical 시나리오 (balance=1_000 / lev=10 / sl 가격 4%) margin floor 400 USD 발동 후 lev_pnl ≈ -0.163968 (16.40배 증폭) 정합. §8.4 잔존 항목 D-1 ✅ 해소 처리 (D-5 regime breakdown 별도 진행). §8.2 D-1 매핑 표 갱신 (Group H 신설 → H1 통합 검증 본 PR 해소). `tests/test_engine.py::test_min_seed_amplification_floor_scenario` self-spy on `_open` + `_close` (Stage 1D 단계 2/3 정합). pytest baseline 525 → 526 (+1, main HEAD d69722e 위 PR #117~#121 11 commits 자연 흡수). PR-3 마일스톤 잔존 2건 중 D-1 ✅ 해소 ↔ Phase 2 입구 진입.
-- 다음 보강 예정: §10 review 발송 준비 (시프트 후), §11 PR description Decisions 미리보기 (D-9~D-18 / D-20~D-23 누락 보충 별도 후속 트래커), 동기화 매트릭스 별도 파일 신설, D-5 regime breakdown 후속 PR.
+- 2026-05-05 (D-5 regime breakdown 본 구현, Issue #110, 장수 ChoYoon 전결 위임): §11 D-5 본문 재작성 (✅ 해소) — `core.strategy.classify_regime(df_4h)` 신설 + `Regime` StrEnum + 임계 모듈 상수 (trend_threshold=0.005 / volatility_multiplier=2.0 / volatility_lookback=20) + `Position.regime` 필드 + `TradeRecord.regime` 전파 chain. 분류 우선순위 VOLATILE > TREND > RANGE (정책 spec drafts/D-5-regime-policy-spec.md 5/5 LGTM 합치). §8.2 D-5 행 신설 (Group regime 6 단위 + Group I 2 통합 매핑). §8.4 잔존 항목 D-5 ✅ 해소 처리 — **PR-3 마일스톤 잔존 2건 전부 해소 (D-1 + D-5) ↔ Phase 2 입구 진입 완료**. self-spy on `classify_regime` (module attribute monkeypatch) + `_close` + `_partial_close` (Stage 1D 단계 2/3 패턴 정합). 신설 함수 0건 (기존 `ema` + `atr_wilder` 활용). pytest baseline 526 → 534 (+8, 단위 6 + 통합 2). VOLATILE 시 신호 평가 skip / regime UI 통계는 별도 후속 (보충 의견 트래커 F1 / F2).
+- 다음 보강 예정: §10 review 발송 준비 (시프트 후), §11 PR description Decisions 미리보기 (D-9~D-18 / D-20~D-23 누락 보충 별도 후속 트래커), 동기화 매트릭스 별도 파일 신설, VOLATILE 신호 평가 skip + regime UI 통계 후속 트래커.

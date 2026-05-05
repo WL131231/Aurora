@@ -148,7 +148,7 @@
 
                     <div class="section-title">지표 트리거 상태</div>
                     <div class="indicator-status-grid" id="indicator-status">
-                        <!-- 6 카테고리 — 상태 4값: 대기 / 활성-롱 / 활성-숏 / 비활성. hint = hover tooltip -->
+                        <!-- 7 카테고리 (v0.1.49 가격 매매 추가) — 상태 4값: 대기 / 활성-롱 / 활성-숏 / 비활성. hint = hover tooltip -->
                         <div class="indicator-pill" data-cat="EMA" title="가동 조건: 가격이 EMA 라인 ±0.3% 터치 + 거래량 동반">
                             <span class="ind-name">EMA</span><span class="ind-state">대기</span>
                         </div>
@@ -166,6 +166,9 @@
                         </div>
                         <div class="indicator-pill" data-cat="Harmonic" title="가동 조건: 5종 패턴 D 도달 (Bat/Butterfly/Gartley/Crab/Deep Crab)">
                             <span class="ind-name">Harmonic</span><span class="ind-state">대기</span>
+                        </div>
+                        <div class="indicator-pill" data-cat="가격 매매" title="가동 조건: BTC 1K 단위 zone (N.200~N.400 / N.600~N.800) 터치 + MA 추세 (PDF 나뇨띠)">
+                            <span class="ind-name">가격 매매</span><span class="ind-state">대기</span>
                         </div>
                     </div>
 

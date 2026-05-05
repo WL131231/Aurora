@@ -87,9 +87,12 @@ _DEFAULT_TIMEFRAMES = ["15m", "1H", "4H"]
 # default 레버리지 — TODO: GUI config 연결 시 settings.leverage 같은 필드 추가 (별도 PR)
 _DEFAULT_LEVERAGE = 10
 
-# 지표 트리거 패널 카테고리 (UI 표시 6개) — signal.source 의 prefix 매핑.
+# 지표 트리거 패널 카테고리 (UI 표시 7개) — signal.source 의 prefix 매핑.
 # v0.1.14 — 사용자가 "각 지표 현재 어떻게 보고 있나" 한눈에 확인용.
-_INDICATOR_CATEGORIES: list[str] = ["EMA", "RSI", "BB", "MA", "Ichimoku", "Harmonic"]
+# v0.1.49 — "가격 매매" (zone_2468_*) 카테고리 추가 (사용자 결정).
+_INDICATOR_CATEGORIES: list[str] = [
+    "EMA", "RSI", "BB", "MA", "Ichimoku", "Harmonic", "가격 매매",
+]
 _SOURCE_PREFIX_MAP: dict[str, str] = {
     "ema_": "EMA",
     "rsi_": "RSI",
@@ -97,15 +100,16 @@ _SOURCE_PREFIX_MAP: dict[str, str] = {
     "ma_cross_": "MA",
     "ichimoku_": "Ichimoku",
     "harmonic_": "Harmonic",
+    "zone_2468_": "가격 매매",
 }
 
 
 def _categorize_source(source: str) -> str | None:
-    """signal.source ("ema_touch_200" 등) → UI 카테고리 ("EMA")."""
+    """signal.source ("ema_touch_200" / "zone_2468_short" 등) → UI 카테고리."""
     for prefix, cat in _SOURCE_PREFIX_MAP.items():
         if source.startswith(prefix):
             return cat
-    return None  # 매핑 없는 source — UI 표시 X (예: 2468 internal)
+    return None  # 매핑 없는 source — UI 표시 X
 
 
 class BotInstance:

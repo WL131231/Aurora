@@ -885,20 +885,28 @@ def _select_2468_df(df_by_tf: dict[str, pd.DataFrame]) -> tuple[str, pd.DataFram
 
 
 def _detect_ma_trend(df: pd.DataFrame, fast: int, slow: int) -> str | None:
-    """MA Cross 상태 기반 현재 추세 — 가장 최근 cross 의 방향.
+    """현재 추세 — fast SMA vs slow SMA 단순 비교 (v0.1.49 fix).
+
+    v0.1.49 변경: 이전 ``ma_cross().dropna().iloc[-1]`` 패턴은 cross 발생 봉
+    에서만 emit 되는 한계 있음 (그 외 봉은 None). 강한 추세 지속 시 cross 가
+    한참 전에 발생하면 ``cross.empty=True`` → trend=None → 2468 SKIP (사용자
+    보고 v0.1.48 환경, 비트 EMA200 위 +3.42% 인데 한 번도 안 잡힘).
+
+    PDF 의도 정합 — "상방 추세 / 하방 추세" 는 **현재 fast > slow / fast < slow**
+    상태이지 cross 발생 시점만 보는 게 아님. cross 후 추세 지속을 봐야 자연.
 
     Returns:
-        ``"up"`` (가장 최근 cross = golden) / ``"down"`` (dead) / ``None`` (아직 cross 없음).
+        ``"up"`` (fast > slow) / ``"down"`` (fast < slow) / ``None`` (데이터 부족).
     """
     if "close" not in df.columns or len(df) < slow:
         return None
-    cross = ma_cross(df["close"], fast=fast, slow=slow).dropna()
-    if cross.empty:
+    fast_ma_val = df["close"].rolling(window=fast, min_periods=fast).mean().iloc[-1]
+    slow_ma_val = df["close"].rolling(window=slow, min_periods=slow).mean().iloc[-1]
+    if pd.isna(fast_ma_val) or pd.isna(slow_ma_val):
         return None
-    last = cross.iloc[-1]
-    if last == "golden":
+    if fast_ma_val > slow_ma_val:
         return "up"
-    if last == "dead":
+    if fast_ma_val < slow_ma_val:
         return "down"
     return None
 

@@ -82,12 +82,12 @@
         <ul class="hidden md:flex items-center gap-10 text-[11px] tracking-[0.2em] text-zinc-400">
             <li><a href="#features" class="hover:text-white transition">FEATURES</a></li>
             <li><a href="#indicators" class="hover:text-white transition">INDICATORS</a></li>
-            <li><a href="#download" class="hover:text-white transition">DOWNLOAD</a></li>
+            <li><a href="#install" class="hover:text-white transition">DOWNLOAD</a></li>
         </ul>
 
         <div class="flex items-center gap-4 text-[11px] tracking-[0.2em] text-zinc-400">
-            <!-- nav 우측 — 작은 Download 링크 (Hero CTA 영역으로 anchor 점프) -->
-            <a href="#download"
+            <!-- nav 우측 — 작은 Download 링크 (Install 섹션 = 다운로드 + 설치 가이드 + 시스템 요구사항) -->
+            <a href="#install"
                class="nav-download-link hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-zinc-700 hover:border-[#60519b] hover:text-white transition">
                 <span>↓</span>
                 <span>DOWNLOAD</span>
@@ -370,6 +370,243 @@
                     </ul>
                 </div>
             </article>
+
+        </div>
+    </section>
+
+    <!-- ===== INSTALL 섹션 (다운로드 + 설치 가이드 + 시스템 요구사항) ===== -->
+    <section id="install" class="install-section relative z-10 py-32 px-8 lg:px-16">
+        <div class="max-w-5xl mx-auto">
+
+            <!-- 섹션 헤더 -->
+            <div class="text-center mb-20">
+                <div class="inline-flex items-center gap-3 mb-6 text-[10px] tracking-[0.4em] text-zinc-500">
+                    <span class="w-8 h-px bg-zinc-700"></span>
+                    INSTALL
+                    <span class="w-8 h-px bg-zinc-700"></span>
+                </div>
+                <h2 class="text-4xl md:text-5xl font-light leading-tight">
+                    <span class="indicators-title">Get Started</span>
+                </h2>
+                <p class="mt-6 text-zinc-500 text-sm md:text-base font-light max-w-xl mx-auto">
+                    Windows · macOS · Android 모두 지원
+                    <br />
+                    런처 한 번 클릭으로 자동 업데이트 + 본체 실행
+                </p>
+            </div>
+
+            <!-- ===== 다운로드 카드 (3-grid) ===== -->
+            <div class="install-grid mb-24">
+
+                <!-- Windows -->
+                <div class="install-card">
+                    <div class="install-card-head">
+                        <svg class="install-card-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M3 5.557L10.026 4.5V11.5H3V5.557ZM3 18.443L10.026 19.5V12.5H3V18.443ZM10.995 19.638L21 21V12.5H10.995V19.638ZM10.995 4.362V11.5H21V3L10.995 4.362Z"/>
+                        </svg>
+                        <div>
+                            <p class="install-card-title">Windows</p>
+                            <p class="install-card-sub">Windows 10 / 11</p>
+                        </div>
+                    </div>
+                    <a href="https://github.com/WL131231/Aurora/releases/latest/download/Aurora-windows.exe"
+                       class="install-btn-primary">
+                        Aurora.exe 다운로드
+                    </a>
+                    <a href="https://github.com/WL131231/Aurora/releases/latest/download/Aurora-launcher.exe"
+                       class="install-btn-secondary">
+                        Launcher.exe (자동 업데이트용)
+                    </a>
+                </div>
+
+                <!-- macOS -->
+                <div class="install-card">
+                    <div class="install-card-head">
+                        <svg class="install-card-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 22 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.1 22C7.78 22.05 6.8 20.68 5.96 19.47C4.25 17 2.94 12.45 4.7 9.39C5.57 7.87 7.13 6.91 8.82 6.88C10.1 6.86 11.32 7.75 12.11 7.75C12.89 7.75 14.37 6.68 15.92 6.84C16.57 6.87 18.39 7.1 19.56 8.82C19.47 8.88 17.39 10.1 17.41 12.63C17.44 15.65 20.06 16.66 20.09 16.67C20.06 16.74 19.67 18.11 18.71 19.5ZM13 3.5C13.73 2.67 14.94 2.04 15.94 2C16.07 3.17 15.6 4.35 14.9 5.19C14.21 6.04 13.07 6.7 11.95 6.61C11.8 5.46 12.36 4.26 13 3.5Z"/>
+                        </svg>
+                        <div>
+                            <p class="install-card-title">macOS</p>
+                            <p class="install-card-sub">macOS 12 Monterey+</p>
+                        </div>
+                    </div>
+                    <a href="https://github.com/WL131231/Aurora/releases/latest/download/Aurora-macOS.zip"
+                       class="install-btn-primary">
+                        Aurora-macOS.zip 다운로드
+                    </a>
+                    <a href="https://github.com/WL131231/Aurora/releases/latest/download/Aurora-launcher-macOS.zip"
+                       class="install-btn-secondary">
+                        Launcher-macOS.zip (자동 업데이트용)
+                    </a>
+                </div>
+
+                <!-- Android -->
+                <div class="install-card">
+                    <div class="install-card-head">
+                        <svg class="install-card-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M17.523 0.976l-1.53 2.65a7.98 7.98 0 0 1 2.757 5.874H5.25a7.98 7.98 0 0 1 2.757-5.874L6.477.976a.25.25 0 0 0-.341-.092l-.922.534a.25.25 0 0 0-.091.341l1.55 2.685A9.975 9.975 0 0 0 2 9.5v.5h20v-.5c0-2.47-.9-4.73-2.373-6.456l1.55-2.685a.25.25 0 0 0-.091-.341l-.922-.534a.25.25 0 0 0-.341.092zM8.5 7a.75.75 0 1 1 0-1.5A.75.75 0 0 1 8.5 7zm7 0a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5zM2 11v8a2 2 0 0 0 2 2h1v2a1 1 0 0 0 2 0v-2h6v2a1 1 0 0 0 2 0v-2h1a2 2 0 0 0 2-2v-8H2z"/>
+                        </svg>
+                        <div>
+                            <p class="install-card-title">Android</p>
+                            <p class="install-card-sub">Android 7.0+ (API 24)</p>
+                        </div>
+                    </div>
+                    <a href="https://github.com/WL131231/Aurora/releases/latest/download/Aurora-android.apk"
+                       class="install-btn-primary">
+                        Aurora-android.apk 다운로드
+                    </a>
+                    <p class="install-note">설치 전 "알 수 없는 출처" 허용 필요</p>
+                </div>
+
+            </div>
+
+            <!-- ===== 설치 가이드 (아코디언) ===== -->
+            <h3 class="install-h3">설치 가이드</h3>
+            <div class="install-accordion mb-24">
+
+                <!-- Windows 가이드 -->
+                <details class="install-detail">
+                    <summary class="install-detail-summary">
+                        <div class="install-detail-title">
+                            <svg class="install-detail-icon" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M3 5.557L10.026 4.5V11.5H3V5.557ZM3 18.443L10.026 19.5V12.5H3V18.443ZM10.995 19.638L21 21V12.5H10.995V19.638ZM10.995 4.362V11.5H21V3L10.995 4.362Z"/>
+                            </svg>
+                            <span>Windows 설치 방법</span>
+                        </div>
+                        <svg class="install-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M6 9l6 6 6-6"/>
+                        </svg>
+                    </summary>
+                    <div class="install-detail-body">
+                        <div class="install-step">
+                            <span class="install-step-num">1</span>
+                            <span><strong>Aurora.exe</strong> 다운로드 후 원하는 폴더에 저장 (설치 프로그램 불필요 — 단일 .exe)</span>
+                        </div>
+                        <div class="install-step">
+                            <span class="install-step-num">2</span>
+                            <span>처음 실행 시 "Windows의 PC 보호" 경고 → <strong>추가 정보 → 실행</strong> 클릭</span>
+                        </div>
+                        <div class="install-step">
+                            <span class="install-step-num">3</span>
+                            <span>Aurora GUI가 열리면 <strong>거래소 API 키</strong>를 설정 탭에 입력 후 시작</span>
+                        </div>
+                        <div class="install-tip">
+                            자동 업데이트: <code>Aurora-launcher.exe</code>를 대신 실행하면 새 버전 자동 다운로드 후 본체를 기동합니다.
+                        </div>
+                    </div>
+                </details>
+
+                <!-- macOS 가이드 -->
+                <details class="install-detail">
+                    <summary class="install-detail-summary">
+                        <div class="install-detail-title">
+                            <svg class="install-detail-icon" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 22 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.1 22C7.78 22.05 6.8 20.68 5.96 19.47C4.25 17 2.94 12.45 4.7 9.39C5.57 7.87 7.13 6.91 8.82 6.88C10.1 6.86 11.32 7.75 12.11 7.75C12.89 7.75 14.37 6.68 15.92 6.84C16.57 6.87 18.39 7.1 19.56 8.82C19.47 8.88 17.39 10.1 17.41 12.63C17.44 15.65 20.06 16.66 20.09 16.67C20.06 16.74 19.67 18.11 18.71 19.5ZM13 3.5C13.73 2.67 14.94 2.04 15.94 2C16.07 3.17 15.6 4.35 14.9 5.19C14.21 6.04 13.07 6.7 11.95 6.61C11.8 5.46 12.36 4.26 13 3.5Z"/>
+                            </svg>
+                            <span>macOS 설치 방법</span>
+                        </div>
+                        <svg class="install-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M6 9l6 6 6-6"/>
+                        </svg>
+                    </summary>
+                    <div class="install-detail-body">
+                        <div class="install-step">
+                            <span class="install-step-num">1</span>
+                            <span><strong>Aurora-macOS.zip</strong> 다운로드 후 압축 해제</span>
+                        </div>
+                        <div class="install-step">
+                            <span class="install-step-num">2</span>
+                            <span>터미널에서 격리 속성 해제: <code>xattr -cr Aurora</code></span>
+                        </div>
+                        <div class="install-step">
+                            <span class="install-step-num">3</span>
+                            <span><strong>Aurora</strong> 실행 → "확인되지 않은 개발자" 경고 시 <strong>시스템 설정 → 개인 정보 보호 및 보안 → 허용</strong></span>
+                        </div>
+                        <div class="install-step">
+                            <span class="install-step-num">4</span>
+                            <span>거래소 API 키를 설정 탭에 입력 후 시작</span>
+                        </div>
+                    </div>
+                </details>
+
+                <!-- Android 가이드 -->
+                <details class="install-detail">
+                    <summary class="install-detail-summary">
+                        <div class="install-detail-title">
+                            <svg class="install-detail-icon" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M17.523 0.976l-1.53 2.65a7.98 7.98 0 0 1 2.757 5.874H5.25a7.98 7.98 0 0 1 2.757-5.874L6.477.976a.25.25 0 0 0-.341-.092l-.922.534a.25.25 0 0 0-.091.341l1.55 2.685A9.975 9.975 0 0 0 2 9.5v.5h20v-.5c0-2.47-.9-4.73-2.373-6.456l1.55-2.685a.25.25 0 0 0-.091-.341l-.922-.534a.25.25 0 0 0-.341.092zM8.5 7a.75.75 0 1 1 0-1.5A.75.75 0 0 1 8.5 7zm7 0a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5zM2 11v8a2 2 0 0 0 2 2h1v2a1 1 0 0 0 2 0v-2h6v2a1 1 0 0 0 2 0v-2h1a2 2 0 0 0 2-2v-8H2z"/>
+                            </svg>
+                            <span>Android 설치 방법</span>
+                        </div>
+                        <svg class="install-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M6 9l6 6 6-6"/>
+                        </svg>
+                    </summary>
+                    <div class="install-detail-body">
+                        <div class="install-step">
+                            <span class="install-step-num">1</span>
+                            <span><strong>알 수 없는 출처 허용</strong> — 설정 → 보안 → "알 수 없는 출처" 또는 브라우저/파일관리자에서 APK 설치 허용</span>
+                        </div>
+                        <div class="install-step">
+                            <span class="install-step-num">2</span>
+                            <span>위 버튼으로 <strong>Aurora-android.apk</strong> 다운로드</span>
+                        </div>
+                        <div class="install-step">
+                            <span class="install-step-num">3</span>
+                            <span>다운로드된 APK 파일 탭 → <strong>설치</strong> 버튼 클릭</span>
+                        </div>
+                        <div class="install-step">
+                            <span class="install-step-num">4</span>
+                            <span>설치 완료 후 Aurora 앱 실행 → 거래소 API 키 입력 후 시작</span>
+                        </div>
+                        <div class="install-tip">
+                            자동 업데이트: 앱 내에서 새 버전 감지 시 "재시작하기" 버튼으로 바로 업데이트 가능합니다.
+                        </div>
+                        <div class="install-warning">
+                            Android 8 이상에서는 앱별로 "알 수 없는 출처" 허용이 필요합니다. 브라우저(Chrome 등) 설정에서 해당 브라우저의 설치 권한을 허용하세요.
+                        </div>
+                    </div>
+                </details>
+
+            </div>
+
+            <!-- ===== 시스템 요구사항 ===== -->
+            <h3 class="install-h3">시스템 요구사항</h3>
+            <div class="install-spec-card mb-12">
+                <table class="install-spec-table">
+                    <thead>
+                        <tr>
+                            <th>플랫폼</th>
+                            <th>OS</th>
+                            <th>최소 사양</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="install-spec-platform">Windows</td>
+                            <td>Windows 10 / 11 (64-bit)</td>
+                            <td class="install-spec-min">RAM 4GB · 저장공간 500MB</td>
+                        </tr>
+                        <tr>
+                            <td class="install-spec-platform">macOS</td>
+                            <td>macOS 12 Monterey 이상</td>
+                            <td class="install-spec-min">RAM 4GB · 저장공간 500MB</td>
+                        </tr>
+                        <tr>
+                            <td class="install-spec-platform">Android</td>
+                            <td>Android 7.0 (API 24) 이상</td>
+                            <td class="install-spec-min">RAM 3GB · 저장공간 300MB</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 모든 릴리스 보기 -->
+            <div class="text-center text-[11px] tracking-[0.3em] text-zinc-500">
+                <a href="https://github.com/WL131231/Aurora/releases" class="install-releases-link">
+                    모든 릴리스 보기 →
+                </a>
+            </div>
 
         </div>
     </section>

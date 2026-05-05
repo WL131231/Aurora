@@ -10,6 +10,7 @@ from aurora.core.strategy import (
     Direction,
     EntrySignal,
     Regime,
+    RegimeConfig,
     StrategyConfig,
     classify_regime,
     detect_2468_signal,
@@ -1357,3 +1358,76 @@ def test_regime_fallback_range_on_zero_atr() -> None:
         "open": closes, "high": closes, "low": closes, "close": closes,
     })
     assert classify_regime(df) == Regime.RANGE
+
+
+# ============================================================
+# D-5 보충 F3 — RegimeConfig 임계 매개변수화 (Issue #110 후속)
+# ============================================================
+
+
+def test_classify_regime_custom_threshold() -> None:
+    """D5-7 — `RegimeConfig(trend_threshold=0.01)` 주입 시 디폴트 0.005 로는 TREND_UP
+    분류되는 중간 강도 상승 추세가 RANGE 로 분류됨 (임계 ↑ 효과 검증, F3).
+
+    Closes 100→103 (250 봉, EMA50/200 격차 ≈ 0.79%) → 디폴트 0.005 임계로 TREND_UP,
+    custom 0.01 (1%) 임계로는 RANGE fallback (gap < threshold).
+    """
+    closes = list(np.linspace(100.0, 103.0, 250))
+    df = _make_4h_df(closes, spread=0.1)
+    # 디폴트 (trend_threshold=0.005) → TREND_UP 정합 (회귀 가드)
+    assert classify_regime(df) == Regime.TREND_UP
+    # custom (trend_threshold=0.01) → RANGE (격차 < 1%)
+    cfg = RegimeConfig(trend_threshold=0.01)
+    assert classify_regime(df, regime_config=cfg) == Regime.RANGE
+
+
+def test_classify_regime_custom_volatility_multiplier() -> None:
+    """D5-8 — `RegimeConfig(volatility_multiplier=5.0)` 주입 시 디폴트 2.0 으로는
+    VOLATILE 분류되는 df 가 다른 regime 으로 분류됨 (변동성 임계 ↑ 효과, F3).
+
+    test_regime_volatile_takes_priority 의 spike df (atr_now/atr_avg ≈ 2.x ~ 3.x)
+    → 디폴트 (multiplier=2.0) 로 VOLATILE, custom (multiplier=5.0) 로는
+    VOLATILE 미발동 → TREND_UP fallback (선형 상승 추세 유지).
+    """
+    base = list(np.linspace(100.0, 103.0, 30))
+    spike = [105.0, 110.0, 115.0, 120.0, 125.0]
+    closes = base + spike
+    arr = np.array(closes, dtype=float)
+    high = arr.copy()
+    low = arr.copy()
+    high[:30] = arr[:30] + 0.5
+    low[:30] = arr[:30] - 0.5
+    high[30:] = arr[30:] + 10.0
+    low[30:] = arr[30:] - 10.0
+    df = pd.DataFrame({"open": arr, "high": high, "low": low, "close": arr})
+    # 디폴트 (multiplier=2.0) → VOLATILE 정합 (회귀 가드)
+    assert classify_regime(df) == Regime.VOLATILE
+    # custom (multiplier=5.0) → VOLATILE 미발동 → TREND_UP (상승 추세 유지)
+    cfg = RegimeConfig(volatility_multiplier=5.0)
+    assert classify_regime(df, regime_config=cfg) == Regime.TREND_UP
+
+
+def test_classify_regime_default_module_constants() -> None:
+    """D5-9 — `regime_config=None` (디폴트) 호출 시 `RegimeConfig()` 인스턴스와
+    동일 결과 보장 — 모듈 상수 디폴트 source 정합 (배포 호환성, 회귀 X).
+
+    Group D5-1~D5-6 패턴 4 종 (TREND_UP / TREND_DOWN / RANGE / VOLATILE) 모두에서
+    None 호출 vs RegimeConfig() 명시 호출 결과 동일 verify.
+    """
+    cfg_default = RegimeConfig()
+
+    # TREND_UP — 강한 상승 추세
+    df_up = _make_4h_df(list(np.linspace(100.0, 130.0, 250)), spread=0.5)
+    assert classify_regime(df_up) == classify_regime(df_up, regime_config=cfg_default)
+    assert classify_regime(df_up) == Regime.TREND_UP
+
+    # TREND_DOWN — 강한 하락 추세
+    df_down = _make_4h_df(list(np.linspace(130.0, 100.0, 250)), spread=0.5)
+    assert classify_regime(df_down) == classify_regime(df_down, regime_config=cfg_default)
+    assert classify_regime(df_down) == Regime.TREND_DOWN
+
+    # RANGE — 평탄 시장
+    rng = np.random.default_rng(seed=42)
+    df_range = _make_4h_df(list(100.0 + rng.uniform(-0.05, 0.05, 250)), spread=0.1)
+    assert classify_regime(df_range) == classify_regime(df_range, regime_config=cfg_default)
+    assert classify_regime(df_range) == Regime.RANGE

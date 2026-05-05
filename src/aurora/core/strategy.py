@@ -995,36 +995,75 @@ class Regime(StrEnum):
 
 
 # Regime 분류 임계 — 정책 spec drafts/D-5-regime-policy-spec.md 5/5 LGTM 합치 (잠정안)
+# RegimeConfig 디폴트 source — 본 4 상수 보존 (배포 호환성, 외부 import path 유지).
+# 모듈 상수 deprecation 은 후속 트래커 (외부 import 영향 점검 후 결정).
 TREND_THRESHOLD = 0.005          # EMA50/200 격차 ±0.5% — TREND vs RANGE 경계
 VOLATILITY_MULTIPLIER = 2.0      # atr_now / atr_avg ≥ 2.0 → VOLATILE
 VOLATILITY_LOOKBACK = 20         # ATR 평균 산출 윈도우 (4H 봉 20 개 = 약 3.3 일)
 
 
-def classify_regime(df_4h: pd.DataFrame) -> Regime:
+@dataclass(slots=True)
+class RegimeConfig:
+    """Regime 분류 임계 + F1 옵트인 가드 매개변수 (D-5 보충 F1 + F3, Issue #110 후속).
+
+    F3 — `classify_regime` 임계 3 개 매개변수화 (디폴트는 모듈 상수 그대로,
+    배포 호환성 보존). F1 — `skip_on_volatile` 옵트인 (디폴트 False — D-5 #124
+    현 동작 보존). `BacktestConfig.regime_config` 노출 (D-1 risk_config 패턴 정합)
+    + `BacktestEngine.__init__` 시점 `self._regime_config` 박음 + `step()` 8 단계
+    인자 전달 + 9b 진입 직전 가드 (옵션 C).
+
+    Attributes:
+        trend_threshold: TREND vs RANGE 경계 — `|gap| ≥ trend_threshold` 시 TREND.
+            디폴트 ``TREND_THRESHOLD = 0.005`` (±0.5%).
+        volatility_multiplier: VOLATILE 분류 — `atr_now / atr_avg ≥ multiplier`.
+            디폴트 ``VOLATILITY_MULTIPLIER = 2.0``.
+        volatility_lookback: ATR 평균 산출 윈도우 (4H 봉 N 개). 디폴트
+            ``VOLATILITY_LOOKBACK = 20`` (≈ 3.3 일).
+        skip_on_volatile: True 시 `BacktestEngine.step()` 9b 가드 — `_last_regime`
+            이 VOLATILE 일 때 진입 skip (옵션 C, drafts/D-5-supplements-policy-spec.md
+            Q1 정합). 디폴트 False — D-5 #124 현 동작 보존 (옵트인).
+    """
+
+    trend_threshold: float = TREND_THRESHOLD
+    volatility_multiplier: float = VOLATILITY_MULTIPLIER
+    volatility_lookback: int = VOLATILITY_LOOKBACK
+    skip_on_volatile: bool = False
+
+
+def classify_regime(
+    df_4h: pd.DataFrame,
+    regime_config: RegimeConfig | None = None,
+) -> Regime:
     """4H DataFrame 기반 시장 국면 분류 — 4 regime + UNKNOWN fallback.
 
     분류 우선순위 (정책 spec, 5/5 LGTM 합치 — Issue #110):
-        1. **VOLATILE** — ``atr_now / atr_avg ≥ VOLATILITY_MULTIPLIER`` (변동성 우선,
+        1. **VOLATILE** — ``atr_now / atr_avg ≥ volatility_multiplier`` (변동성 우선,
            TREND 동시 발동 시에도 VOLATILE 채택).
-        2. **TREND_UP** — ``(ema50 - ema200) / ema200 ≥ TREND_THRESHOLD``.
-        3. **TREND_DOWN** — ``(ema50 - ema200) / ema200 ≤ -TREND_THRESHOLD``.
+        2. **TREND_UP** — ``(ema50 - ema200) / ema200 ≥ trend_threshold``.
+        3. **TREND_DOWN** — ``(ema50 - ema200) / ema200 ≤ -trend_threshold``.
         4. **RANGE** — fallback (격차 미만 또는 변동성 평균 안정).
 
-    Sample 부족 (``len(df_4h) < VOLATILITY_LOOKBACK``) 또는 NaN 발생 시
+    Sample 부족 (``len(df_4h) < volatility_lookback``) 또는 NaN 발생 시
     ``RANGE`` fallback (silent — UNKNOWN 은 진입 시점 박는 디폴트로만 사용).
 
     Args:
         df_4h: 4H OHLC DataFrame (``open/high/low/close`` 컬럼 필요).
+        regime_config: 임계 매개변수화 (D-5 보충 F3). ``None`` 시 ``RegimeConfig()``
+            디폴트 (모듈 상수 그대로 — 배포 호환성). mutable default 안티패턴
+            회피 위해 ``None`` 분기 + 함수 내 인스턴스 생성 패턴.
 
     Returns:
         ``Regime`` enum (VOLATILE / TREND_UP / TREND_DOWN / RANGE).
 
     Note:
-        본 함수는 분류만 책임. VOLATILE 시 신호 평가 skip 등의 액션은 별도 후속
-        PR 책임 (보충 의견 트래커 F1).
+        본 함수는 분류만 책임. VOLATILE 시 신호 평가 skip 등의 액션은 호출자
+        (`BacktestEngine.step()` 9b 가드, D-5 보충 F1) 책임 — `RegimeConfig.
+        skip_on_volatile` 옵트인.
     """
+    cfg = regime_config or RegimeConfig()
+
     # Sample 부족 가드 — lookback 미만이면 ATR 평균 산출 무의미 → RANGE fallback
-    if len(df_4h) < VOLATILITY_LOOKBACK:
+    if len(df_4h) < cfg.volatility_lookback:
         return Regime.RANGE
 
     close = df_4h["close"]
@@ -1040,20 +1079,20 @@ def classify_regime(df_4h: pd.DataFrame) -> Regime:
     if pd.isna(ema50_now) or pd.isna(ema200_now) or pd.isna(atr_now):
         return Regime.RANGE
 
-    # VOLATILE 우선 (정책 spec — 변동성 평균 ≥ 2.0)
-    atr_avg = atr.iloc[-VOLATILITY_LOOKBACK:].mean()
+    # VOLATILE 우선 (정책 spec — 변동성 평균 ≥ multiplier)
+    atr_avg = atr.iloc[-cfg.volatility_lookback:].mean()
     # Why: atr_avg=0 가드 — 완전 정적 가격 (high=low=close 모든 봉) 시 ZeroDiv 회피
-    if atr_avg > 0 and atr_now / atr_avg >= VOLATILITY_MULTIPLIER:
+    if atr_avg > 0 and atr_now / atr_avg >= cfg.volatility_multiplier:
         return Regime.VOLATILE
 
-    # TREND 분류 — EMA50/200 상대 격차 (정책 spec ±0.5%)
+    # TREND 분류 — EMA50/200 상대 격차 (정책 spec ±trend_threshold)
     # Why: ema200_now=0 가드 — 산출가 0 (이론상 비정상) 시 ZeroDiv 회피 → RANGE
     if ema200_now == 0:
         return Regime.RANGE
     gap = (ema50_now - ema200_now) / ema200_now
-    if gap >= TREND_THRESHOLD:
+    if gap >= cfg.trend_threshold:
         return Regime.TREND_UP
-    if gap <= -TREND_THRESHOLD:
+    if gap <= -cfg.trend_threshold:
         return Regime.TREND_DOWN
 
     return Regime.RANGE

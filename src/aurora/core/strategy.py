@@ -982,6 +982,15 @@ def detect_2468_signal(
             ),
             bar_timestamp=ts,
             pattern_id=f"2468@{tf}@N{int(k_floor)}_short",
+            # v0.1.47: 2468 자체 SL (zone 끝 + 1K USDT, PDF 룰) 을 meta 에 박아
+            # build_risk_plan 이 structural_sl_price 로 사용. 이전엔 note 에만
+            # 박혀 ROI 기반 좁은 SL 사용 (PDF 의도 대비 ~5배 좁음).
+            meta={
+                "sl_price": float(sl_price),
+                "zone_lo": float(short_zone_lo),
+                "zone_hi": float(short_zone_hi),
+                "k_floor": float(k_floor),
+            },
         )]
 
     # 하방 추세 + N.600~N.800 zone 터치 → LONG
@@ -999,6 +1008,12 @@ def detect_2468_signal(
             ),
             bar_timestamp=ts,
             pattern_id=f"2468@{tf}@N{int(k_floor)}_long",
+            meta={
+                "sl_price": float(sl_price),
+                "zone_lo": float(long_zone_lo),
+                "zone_hi": float(long_zone_hi),
+                "k_floor": float(k_floor),
+            },
         )]
 
     return []

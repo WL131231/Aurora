@@ -9,7 +9,9 @@ from aurora.core.indicators import HarmonicMatch
 from aurora.core.strategy import (
     Direction,
     EntrySignal,
+    Regime,
     StrategyConfig,
+    classify_regime,
     detect_2468_signal,
     detect_bollinger_touch,
     detect_ema_touch,
@@ -1276,3 +1278,82 @@ def test_2468_evaluate_selectable_btc_only() -> None:
     config = StrategyConfig(ma_cross_fast=3, ma_cross_slow=5)
     signals = evaluate_selectable({"15m": df}, config, symbol="ETH/USDT")
     assert all(not s.source.startswith("zone_2468") for s in signals)
+
+
+# ============================================================
+# D-5 classify_regime — 4H 시장 국면 분류 (Issue #110)
+# ============================================================
+
+
+def _make_4h_df(closes: list[float], spread: float = 0.5) -> pd.DataFrame:
+    """4H OHLC DataFrame 헬퍼 — high/low = close ± spread (절대값, ATR TR 정합)."""
+    arr = np.array(closes, dtype=float)
+    return pd.DataFrame({
+        "open": arr,
+        "high": arr + spread,
+        "low": arr - spread,
+        "close": arr,
+    })
+
+
+def test_regime_trend_up_strong_uptrend() -> None:
+    """선형 상승 추세 (close 100→130, 250 봉) → EMA50 > EMA200 격차 ≥ 0.5% → TREND_UP."""
+    closes = list(np.linspace(100.0, 130.0, 250))
+    df = _make_4h_df(closes, spread=0.5)
+    assert classify_regime(df) == Regime.TREND_UP
+
+
+def test_regime_trend_down_strong_downtrend() -> None:
+    """선형 하락 추세 (close 130→100, 250 봉) → EMA50 < EMA200 격차 ≥ 0.5% → TREND_DOWN."""
+    closes = list(np.linspace(130.0, 100.0, 250))
+    df = _make_4h_df(closes, spread=0.5)
+    assert classify_regime(df) == Regime.TREND_DOWN
+
+
+def test_regime_range_flat_market() -> None:
+    """평탄 시장 (close 100±0.05 작은 노이즈, 250 봉) → EMA50/200 격차 < 0.5% → RANGE."""
+    rng = np.random.default_rng(seed=42)
+    closes = list(100.0 + rng.uniform(-0.05, 0.05, 250))
+    df = _make_4h_df(closes, spread=0.1)
+    assert classify_regime(df) == Regime.RANGE
+
+
+def test_regime_volatile_takes_priority() -> None:
+    """ATR 평균 ≥ 2.0 (TREND 동시 발동) → VOLATILE 우선 (정책 spec 우선순위 정합).
+
+    30 봉 선형 상승 (TR≈1) + 5 봉 큰 변동성 (TR≈20) → atr_now / atr_avg ≥ 2.0.
+    상승 추세 + 변동성 동시 발동 시 VOLATILE 우선 채택 (TREND_UP X).
+    """
+    base = list(np.linspace(100.0, 103.0, 30))
+    spike = [105.0, 110.0, 115.0, 120.0, 125.0]
+    closes = base + spike
+    arr = np.array(closes, dtype=float)
+    # 마지막 5 봉만 spread 20 (TR ≈ 20), 그 외 spread 0.5 (TR ≈ 1)
+    high = arr.copy()
+    low = arr.copy()
+    high[:30] = arr[:30] + 0.5
+    low[:30] = arr[:30] - 0.5
+    high[30:] = arr[30:] + 10.0
+    low[30:] = arr[30:] - 10.0
+    df = pd.DataFrame({"open": arr, "high": high, "low": low, "close": arr})
+    assert classify_regime(df) == Regime.VOLATILE
+
+
+def test_regime_fallback_range_on_short_df() -> None:
+    """sample 부족 (len < VOLATILITY_LOOKBACK=20) → RANGE fallback."""
+    closes = [100.0] * 10
+    df = _make_4h_df(closes, spread=0.5)
+    assert classify_regime(df) == Regime.RANGE
+
+
+def test_regime_fallback_range_on_zero_atr() -> None:
+    """완전 정적 가격 (high=low=close 모든 봉) → atr_avg=0 ZeroDiv 가드 정합 → RANGE.
+
+    Why: 변동성 ratio 산출 시 ``atr_avg > 0`` 가드로 ZeroDivisionError 회피.
+    EMA50/200 모두 같은 값 → gap=0 → TREND 미발동 → RANGE 자연 fallback.
+    """
+    closes = [100.0] * 30
+    df = pd.DataFrame({
+        "open": closes, "high": closes, "low": closes, "close": closes,
+    })
+    assert classify_regime(df) == Regime.RANGE

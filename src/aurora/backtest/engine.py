@@ -40,7 +40,9 @@ from aurora.core.signal import compose_entry, compose_exit
 from aurora.core.strategy import (
     Direction,
     EntrySignal,
+    Regime,
     StrategyConfig,
+    classify_regime,
     detect_ema_touch,
     detect_rsi_divergence,
     evaluate_selectable,
@@ -131,6 +133,9 @@ class Position:
             (full close 분기).
         highest_since_entry: 진입 후 최고가 (롱 트레일링용).
         lowest_since_entry: 진입 후 최저가 (숏 트레일링용).
+        regime: 진입 시점 4H 시장 국면 (D-5, Issue #110). ``classify_regime``
+            산출값 박힘 — ``_close`` / ``_partial_close`` 가 ``TradeRecord.regime``
+            에 전파. 4H 미닫힘 진입 시 ``Regime.UNKNOWN`` (디폴트).
     """
 
     plan: RiskPlan
@@ -140,6 +145,7 @@ class Position:
     tp_hits: int = 0
     highest_since_entry: float = 0.0
     lowest_since_entry: float = 0.0
+    regime: Regime = Regime.UNKNOWN
 
 
 # ============================================================
@@ -218,6 +224,10 @@ class BacktestEngine:
         self._last_high: float = 0.0
         self._last_low: float = 0.0
         self._last_close: float = 0.0
+
+        # D-5 regime — step() 8 단계 (4H 닫힘 시) 갱신 + _open() 시점 Position.regime 박음.
+        # 4H 미닫힘 상태로 진입하는 경우 디폴트 UNKNOWN 박힘 (분류 미산출 자연 처리).
+        self._last_regime: Regime = Regime.UNKNOWN
 
     # ─────────────────────────────────────────────
     # public API — Group 2 본문 구현 자리
@@ -338,6 +348,13 @@ class BacktestEngine:
             evaluate_selectable(df_by_tf, sc, symbol=self.config.symbol),
         )
 
+        # 7b. D-5 regime 갱신 — 4H 닫힘 시만 (Issue #110, 정책 spec 8 단계 위치).
+        # 4H 미닫힘 시 self._last_regime 보존 (이전 4H 닫힘 분류값 유지). 진입 직전
+        # _open() 시점에 Position.regime 박힘 → _close/_partial_close 가 TradeRecord
+        # 로 전파. VOLATILE 시 신호 평가 skip 등 액션은 별도 후속 (보충 의견 F1).
+        if "4H" in df_by_tf:
+            self._last_regime = classify_regime(df_by_tf["4H"])
+
         # 8. 보유 중 분기 — REVERSE 체크 (D-24, compose_exit 활용)
         # Why: signal.is_reverse_signal 부재 — compose_exit(direction, signals)
         # 이 내부에서 compose_entry 호출 후 반대 방향 비교. 동일 1m close+open
@@ -413,6 +430,7 @@ class BacktestEngine:
             tp_hits=0,
             highest_since_entry=plan.entry_price,
             lowest_since_entry=plan.entry_price,
+            regime=self._last_regime,
         )
 
     def _close(self, fill: float, ts_ms: int, reason: str) -> TradeRecord:
@@ -511,7 +529,7 @@ class BacktestEngine:
             pnl=lev_pnl,
             r_multiple=r_multiple,
             duration_minutes=int(duration_min),
-            regime=None,
+            regime=str(p.regime),
         )
         self.trades.append(trade)
         self.position = None
@@ -604,7 +622,7 @@ class BacktestEngine:
             pnl=lev_pnl,
             r_multiple=r_multiple,
             duration_minutes=int(duration_min),
-            regime=None,
+            regime=str(p.regime),
         )
         self.trades.append(trade)
         return trade

@@ -57,6 +57,11 @@ class EntrySignal:
     """패턴 단위 식별자 (Harmonic 등). 예: ``"bat@d_bar=50"``.
     같은 패턴이 여러 봉에 걸쳐 검출될 때 재진입 방지용."""
 
+    meta: dict[str, float] | None = None
+    """신호별 부가 정보 (v0.1.42). BB 신호의 경우 ``{"bb_upper": x,
+    "bb_lower": y}`` 형태로 진입 시점 BB 값 박음. ``build_risk_plan`` 이
+    BB Structural SL 산출에 사용. 다른 신호는 None."""
+
 
 def _last_bar_timestamp(df: pd.DataFrame) -> pd.Timestamp | None:
     """DataFrame 의 마지막 봉 timestamp (DatetimeIndex 일 때만, 그 외 None)."""
@@ -95,8 +100,9 @@ class StrategyConfig:
     # Bollinger Bands (Selectable — 1H 고정)
     bollinger_period: int = 20           # John Bollinger 1980 표준 (20 SMA)
     bollinger_std: float = 2.0           # ±2σ — 표준 정규분포 95% 구간
-    bollinger_proximity_pct: float = 0.005
-    """가장자리 라인에서 안쪽 ``proximity_pct`` 이내 = 진입 zone (예: 0.005 = 0.5%)."""
+    bollinger_breakout_buffer_pct: float = 0.003
+    """BB 이탈/회귀 buffer (v0.1.42). BB 라인 ± buffer 가 진입 + SL 라인 동시.
+    기본 0.003 = 0.3%. 호가 noise (~0.08%) 위로 진입 안정성 확보."""
     bollinger_squeeze_threshold: float = 0.015
     """폭(upper-lower) / middle 이 이 값 이하면 squeeze 상태로 진입 보류 (기본 0.015 = 1.5%)."""
 
@@ -311,26 +317,32 @@ def detect_bollinger_touch(
     df_1h: pd.DataFrame,
     config: StrategyConfig,
 ) -> list[EntrySignal]:
-    """볼린저 밴드 4-tier 진입 룰 (1H 고정, 양방향 진입+청산 정책).
+    """볼린저 밴드 buffered reversal 진입 룰 (1H 고정, v0.1.42 재설계).
+
+    v0.1.42 변경: ``proximity`` 진입 폐기 + buffer 도입.
+    Reversal/Wick reversal 만 신호. 진입 + SL 라인 = ``BB ± buffer`` 동일.
+    Why: proximity 진입은 ``last_high`` 누적 max 기반이라 봉 안 wick 한 번
+    닿으면 봉 닫힐 때까지 신호 stateful ON → 무한 재진입 사이클 발생
+    (사용자 보고 v0.1.41 사고팔고 무한 루프). 또 진입 + SL 라인이 동일
+    buffer (BB ± 0.3%) 라야 호가 noise (~0.08%) 위로 안정.
 
     우선순위 순:
-        1. **Squeeze 보류**: 폭 / middle ≤ ``squeeze_threshold`` (밴드 좁음, 추세 대기) → []
-        2. **Reversal 진입** (강도 1.5): 직전 봉 종가가 BB 밖 + 현재 봉 종가 안쪽
-           → 위로 찢어졌다 회귀 = SHORT / 아래로 찢어졌다 회귀 = LONG
-        3. **찢어짐 보류**: 현재 봉 종가가 BB 밖 (위 또는 아래) → []
-        4. **Proximity 터치 진입** (강도 1.0): 봉의 high/low 가 가장자리 zone 진입
-           → high ≥ ``upper × (1 - proximity)`` + close 안쪽 = SHORT
-           → low  ≤ ``lower × (1 + proximity)`` + close 안쪽 = LONG
+        1. **Squeeze 보류**: 폭 / middle ≤ ``squeeze_threshold`` → []
+        2. **Reversal 진입** (강도 1.5): 직전 봉 종가가 BB ± buffer 밖 +
+           현재 봉 종가 BB ± buffer 안쪽 → SHORT (위 회귀) / LONG (아래 회귀)
+        3. **Wick reversal** (강도 1.5, v0.1.28 신규): 현재 봉 안에서 wick 만
+           BB ± buffer 밖 + close 안쪽 → SHORT/LONG.
+        4. **나머지**: 진입 신호 X (proximity 폐기됨).
 
     "양방향 진입+청산": BB 신호 = 진입 신호 + 반대 포지션 청산 신호.
-    구체 동작은 ``signal.compose_entry`` / ``compose_exit`` 가 처리.
 
     Args:
         df_1h: 1H OHLC DataFrame (close/high/low 컬럼).
-        config: 전략 설정 (bollinger_period/std/proximity_pct/squeeze_threshold).
+        config: 전략 설정 (bollinger_period/std/breakout_buffer_pct/squeeze).
 
     Returns:
-        ``EntrySignal`` 리스트 (마지막 봉 기준).
+        ``EntrySignal`` 리스트 (마지막 봉 기준). BB 신호엔 ``meta`` 박힘
+        (bb_upper / bb_lower / buffer_pct).
     """
     if df_1h is None or df_1h.empty:
         return []
@@ -363,7 +375,20 @@ def detect_bollinger_touch(
         if narrowness <= config.bollinger_squeeze_threshold:
             return []
 
-    # ─── 2. Reversal 진입 (직전 봉 outside → 현재 봉 inside) ───
+    # ─── buffer 적용 라인 (진입 + SL 동일 라인, v0.1.42) ───
+    buffer = config.bollinger_breakout_buffer_pct
+    upper_threshold = last_upper_f * (1.0 + buffer)
+    lower_threshold = last_lower_f * (1.0 - buffer)
+
+    # BB 메타 — 진입 시점 BB 값. build_risk_plan 이 SL 산출에 사용.
+    bb_meta = {
+        "bb_upper": last_upper_f,
+        "bb_lower": last_lower_f,
+        "bb_middle": last_middle_f,
+        "buffer_pct": buffer,
+    }
+
+    # ─── 2. Reversal 진입 (직전 봉 buffer 밖 → 현재 봉 buffer 안 회귀) ───
     prev_close = float(df_1h["close"].iloc[-2])
     prev_upper = bb["upper"].iloc[-2]
     prev_lower = bb["lower"].iloc[-2]
@@ -371,82 +396,62 @@ def detect_bollinger_touch(
     if not pd.isna(prev_upper) and not pd.isna(prev_lower):
         prev_upper_f = float(prev_upper)
         prev_lower_f = float(prev_lower)
-        # 위로 찢어졌다 회귀
-        if prev_close > prev_upper_f and last_close <= last_upper_f:
+        prev_upper_thr = prev_upper_f * (1.0 + buffer)
+        prev_lower_thr = prev_lower_f * (1.0 - buffer)
+        # 위로 buffer 이탈 → buffer 안 회귀
+        if prev_close > prev_upper_thr and last_close <= upper_threshold:
             return [EntrySignal(
                 direction=Direction.SHORT,
                 timeframe="1H",
                 source="bollinger_reversal_upper",
                 strength=1.5,
-                note=f"BB 상단 찢어짐 회귀 (prev={prev_close:.4f}>{prev_upper_f:.4f}, "
-                     f"last={last_close:.4f}≤{last_upper_f:.4f})",
+                note=f"BB 상단 buffer 이탈 회귀 (prev={prev_close:.4f}>{prev_upper_thr:.4f}, "
+                     f"last={last_close:.4f}≤{upper_threshold:.4f})",
                 bar_timestamp=ts,
+                meta=bb_meta,
             )]
-        # 아래로 찢어졌다 회귀
-        if prev_close < prev_lower_f and last_close >= last_lower_f:
+        # 아래로 buffer 이탈 → buffer 안 회귀
+        if prev_close < prev_lower_thr and last_close >= lower_threshold:
             return [EntrySignal(
                 direction=Direction.LONG,
                 timeframe="1H",
                 source="bollinger_reversal_lower",
                 strength=1.5,
-                note=f"BB 하단 찢어짐 회귀 (prev={prev_close:.4f}<{prev_lower_f:.4f}, "
-                     f"last={last_close:.4f}≥{last_lower_f:.4f})",
+                note=f"BB 하단 buffer 이탈 회귀 (prev={prev_close:.4f}<{prev_lower_thr:.4f}, "
+                     f"last={last_close:.4f}≥{lower_threshold:.4f})",
                 bar_timestamp=ts,
+                meta=bb_meta,
             )]
 
-    # ─── 3. 단일 봉 wick reversal (v0.1.28 신규, 사용자 차트 진단) ────
-    # 현재 봉 안에서 wick 만 outside (high > upper or low < lower) + close inside.
-    # 직전 봉이 upper 안에서 닫혔어도 현재 봉 wick reversion 자체로 진입 신호.
-    # 강도 1.5 (Reversal 과 동일) — 단일 봉이 reversion candle 자체.
-    if last_high > last_upper_f and last_close <= last_upper_f:
+    # ─── 3. 단일 봉 wick reversal (v0.1.28 + v0.1.42 buffer 적용) ────
+    # 현재 봉 안에서 wick 만 buffer 밖 (high > upper_thr or low < lower_thr)
+    # + close 가 buffer 안쪽 → 단일 봉 reversion candle 자체.
+    if last_high > upper_threshold and last_close <= upper_threshold:
         return [EntrySignal(
             direction=Direction.SHORT,
             timeframe="1H",
             source="bollinger_wick_reversal_upper",
             strength=1.5,
-            note=f"BB 상단 wick reversal (high={last_high:.4f}>{last_upper_f:.4f}, "
-                 f"close={last_close:.4f}≤{last_upper_f:.4f})",
+            note=f"BB 상단 wick reversal (high={last_high:.4f}>{upper_threshold:.4f}, "
+                 f"close={last_close:.4f}≤{upper_threshold:.4f})",
             bar_timestamp=ts,
+            meta=bb_meta,
         )]
-    if last_low < last_lower_f and last_close >= last_lower_f:
+    if last_low < lower_threshold and last_close >= lower_threshold:
         return [EntrySignal(
             direction=Direction.LONG,
             timeframe="1H",
             source="bollinger_wick_reversal_lower",
             strength=1.5,
-            note=f"BB 하단 wick reversal (low={last_low:.4f}<{last_lower_f:.4f}, "
-                 f"close={last_close:.4f}≥{last_lower_f:.4f})",
+            note=f"BB 하단 wick reversal (low={last_low:.4f}<{lower_threshold:.4f}, "
+                 f"close={last_close:.4f}≥{lower_threshold:.4f})",
             bar_timestamp=ts,
+            meta=bb_meta,
         )]
 
-    # ─── 4. 찢어짐 보류 (현재 봉 종가가 BB 밖) ────────────
-    if last_close > last_upper_f or last_close < last_lower_f:
-        return []
-
-    # ─── 5. Proximity 터치 진입 (가장자리 안쪽 zone) ──────
-    upper_zone_start = last_upper_f * (1.0 - config.bollinger_proximity_pct)
-    lower_zone_end = last_lower_f * (1.0 + config.bollinger_proximity_pct)
-
-    signals: list[EntrySignal] = []
-    if last_high >= upper_zone_start:
-        signals.append(EntrySignal(
-            direction=Direction.SHORT,
-            timeframe="1H",
-            source="bollinger_upper",
-            strength=1.0,
-            note=f"BB 상단 zone 진입 (high={last_high:.4f}, zone_start={upper_zone_start:.4f})",
-            bar_timestamp=ts,
-        ))
-    if last_low <= lower_zone_end:
-        signals.append(EntrySignal(
-            direction=Direction.LONG,
-            timeframe="1H",
-            source="bollinger_lower",
-            strength=1.0,
-            note=f"BB 하단 zone 진입 (low={last_low:.4f}, zone_end={lower_zone_end:.4f})",
-            bar_timestamp=ts,
-        ))
-    return signals
+    # v0.1.42: Proximity 터치 진입 폐기 (last_high 누적 max trap →
+    # 사고팔고 무한 사이클). Reversal + Wick reversal 만 신호.
+    return []
 
 
 # ============================================================

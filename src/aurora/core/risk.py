@@ -279,6 +279,9 @@ def build_risk_plan(
     risk_pct: float = 0.01,
     full_seed: bool = False,
     min_seed_pct: float = DEFAULT_MIN_SEED_PCT,
+    bb_upper: float | None = None,
+    bb_lower: float | None = None,
+    bb_buffer_pct: float = 0.003,
 ) -> RiskPlan:
     """진입 시점에 SL/TP 가격 + 포지션 사이즈를 한 번에 계산.
 
@@ -289,6 +292,15 @@ def build_risk_plan(
                           ``tp[i] = entry × fixed_tp_pcts[i]%``.
         - ``MANUAL``: ``sl = entry × manual_sl_pct%``,
                        ``tp[i] = entry × manual_tp_pcts[i]%``.
+
+    **BB Structural SL override (v0.1.42)**:
+        ``bb_upper`` / ``bb_lower`` 둘 다 주어지면 (BB 신호 진입), SL 가격은
+        모드 무관하게 BB 라인 ± ``bb_buffer_pct`` 로 override:
+            - short: ``sl_price = bb_upper × (1 + bb_buffer_pct)``
+            - long:  ``sl_price = bb_lower × (1 - bb_buffer_pct)``
+        TP 는 그대로 모드별 산출. Why: BB 진입 신호의 자연스러운 손절 = BB
+        이탈. 호가 noise (0.08%) 위 안전 폭 (0.3%) 으로 사고팔고 사이클 차단
+        (사용자 보고 v0.1.41 무한 루프 fix).
 
     방향별 가격 산출:
         - long: ``sl_price = entry - sl_dist``, ``tp_price[i] = entry + tp_dist[i]``.
@@ -304,6 +316,9 @@ def build_risk_plan(
         risk_pct: risk-based 모드의 거래당 최대 손실 비율.
         full_seed: 풀시드 모드 사용.
         min_seed_pct: 최소 진입 마진 비율.
+        bb_upper: BB 신호 진입 시 진입 시점 BB 상단 (v0.1.42, optional).
+        bb_lower: BB 신호 진입 시 진입 시점 BB 하단 (v0.1.42, optional).
+        bb_buffer_pct: BB 이탈 buffer (default 0.003 = 0.3%).
 
     Returns:
         ``RiskPlan`` (entry/direction/leverage/position/tp_prices/sl_price/trailing).
@@ -349,15 +364,27 @@ def build_risk_plan(
     else:
         raise ValueError(f"unknown TpSlMode: {config.mode}")
 
-    sl_distance_pct = sl_dist / entry_price
-
-    # 방향별 가격
+    # 방향별 가격 — SL 은 BB 신호 진입 시 override (v0.1.42)
     if direction_norm == "long":
-        sl_price = entry_price - sl_dist
+        if bb_lower is not None and bb_lower > 0:
+            # BB Structural SL override — long 진입 시 BB 하단 - buffer
+            sl_price = bb_lower * (1.0 - bb_buffer_pct)
+        else:
+            sl_price = entry_price - sl_dist
         tp_prices = [entry_price + d for d in tp_dists]
     else:
-        sl_price = entry_price + sl_dist
+        if bb_upper is not None and bb_upper > 0:
+            # BB Structural SL override — short 진입 시 BB 상단 + buffer
+            sl_price = bb_upper * (1.0 + bb_buffer_pct)
+        else:
+            sl_price = entry_price + sl_dist
         tp_prices = [entry_price - d for d in tp_dists]
+
+    # sl_distance_pct 재산출 (SL override 후 변경 가능). position size 계산 입력.
+    sl_distance_pct = abs(sl_price - entry_price) / entry_price
+    if sl_distance_pct <= 0:
+        # SL 가격이 진입가와 같거나 잘못된 경우 fallback (BB 가 진입가 부근일 때)
+        sl_distance_pct = sl_dist / entry_price
 
     # 포지션 사이즈
     position = calc_position_size(

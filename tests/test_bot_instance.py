@@ -108,6 +108,18 @@ def test_is_configured_initially_false() -> None:
     assert bot.has_position is False
 
 
+def test_v0_1_42_bar_dedup_initial_state() -> None:
+    """v0.1.42: bar-level 진입 dedup 변수 초기 상태 검증.
+
+    Why: 같은 봉 + 같은 source 재진입 차단 로직의 기반. 봇 첫 시작 시
+    빈 dict / 빈 tuple 이어야 모든 신호가 첫 평가 통과 가능.
+    실 dedup 동작은 _step 진입 분기에서 (bar_ts, sources) 비교로 작동.
+    """
+    bot = bot_instance.get_instance()
+    assert bot._last_entry_bar_ts == {}
+    assert bot._last_entry_sources == ()
+
+
 def test_configure_sets_client_and_options() -> None:
     """configure(client, ...) — 어댑터 + 설정 inject."""
     bot = bot_instance.get_instance()

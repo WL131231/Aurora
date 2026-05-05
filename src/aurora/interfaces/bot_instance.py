@@ -167,6 +167,13 @@ class BotInstance:
         self._funds_blocked_until_ms: int = 0
         self._funds_blocked_warned: bool = False
 
+        # v0.1.42: bar-level 진입 dedup — 같은 봉 안 같은 source 재진입 차단.
+        # Why: BB 신호 (또는 다른 stateful 신호) 가 봉 안 살아있으면 청산 후 즉시
+        # 재진입 → 사고팔고 무한 사이클. 같은 1H 봉 + 같은 source 진입 1회만 보장.
+        # 다음 봉부터 새 평가. SL 청산 후에도 그 봉 닫힐 때까지 재진입 X.
+        self._last_entry_bar_ts: dict[str, int] = {}  # {tf: bar_ts_ms}
+        self._last_entry_sources: tuple[str, ...] = ()
+
         # 거래내역 (v0.1.20) — close_position 마다 ClosedTrade 추가 (rolling 100).
         # GUI "거래내역" 표 표시 + Telegram 알림 + PnL 카드 데이터 source.
         # v0.1.25: 디스크에서 영속화된 record 복원 → 봇 재시작 후 표 / 통계 유지.
@@ -1050,6 +1057,18 @@ class BotInstance:
         if not decision.enter or decision.direction is None:
             return
 
+        # v0.1.42: bar-level 진입 dedup — 같은 1H 봉 + 같은 source 재진입 차단.
+        # Why: BB stateful 신호 (또는 last_high 누적) 가 봉 닫힐 때까지 살아있어
+        # 청산 후 즉시 재진입 → 사고팔고 무한 사이클 (사용자 보고 v0.1.41).
+        # SL hit 나도 그 봉 닫힐 때까지 같은 source 로 재진입 X. 다음 봉부터 새 평가.
+        decision_sources = tuple(sorted(decision.triggered_by))
+        if (
+            self._last_entry_bar_ts.get(primary_tf) == bar_ts
+            and self._last_entry_sources == decision_sources
+        ):
+            # silent skip — 같은 봉 + 같은 source. 신호 평가 로그는 정상 출력 (위에서).
+            return
+
         # v0.1.36: InsufficientFunds backoff check — place_order 거부 후 5분간 진입 시도
         # skip (매 1초 폭주 회피). external_position flag 와 별개 (다른 페어 외부 포지션 케이스
         # — 본 페어 fetch_position=None 이라 external_position 가 reset 되어도 backoff 유지).
@@ -1064,6 +1083,19 @@ class BotInstance:
             self._funds_blocked_warned = False
             logger.info("InsufficientFunds backoff 만료 — 진입 시도 재개")
 
+        # v0.1.42: BB 신호 진입 시 진입 시점 BB 값 캡처 → build_risk_plan 에 전달.
+        # SL = BB 라인 ± buffer (호가 noise 위 안전). signals 중 source 가
+        # bollinger_* 인 것에서 meta 읽음. 없으면 None (기존 ROI 기반 SL).
+        bb_upper_at_entry: float | None = None
+        bb_lower_at_entry: float | None = None
+        bb_buffer_at_entry: float = self._strategy_config.bollinger_breakout_buffer_pct
+        for sig in signals:
+            if sig.source.startswith("bollinger_") and sig.meta is not None:
+                bb_upper_at_entry = sig.meta.get("bb_upper")
+                bb_lower_at_entry = sig.meta.get("bb_lower")
+                bb_buffer_at_entry = sig.meta.get("buffer_pct", bb_buffer_at_entry)
+                break
+
         # 6. 진입 실행 — equity 조회 + RiskPlan 산출
         balance = await self._client.get_equity()
         plan = build_risk_plan(
@@ -1074,6 +1106,9 @@ class BotInstance:
             config=self._tpsl_config,
             risk_pct=self._risk_pct,
             full_seed=self._full_seed,
+            bb_upper=bb_upper_at_entry,
+            bb_lower=bb_lower_at_entry,
+            bb_buffer_pct=bb_buffer_at_entry,
         )
         # v0.1.38: 진입 시점 EMA/BB/RSI 진단 1줄 — 차트와 비교 가능 (사용자 검증용)
         diag_entry = self._compute_diagnostic_line(df_by_tf, current_price)
@@ -1097,10 +1132,14 @@ class BotInstance:
                 )
                 self._funds_blocked_warned = True
             return
+        # v0.1.42: bar dedup 기록 — 진입 성공 후. 같은 봉 + 같은 source 재진입 차단.
+        self._last_entry_bar_ts[primary_tf] = bar_ts
+        self._last_entry_sources = decision_sources
+
         logger.info(
-            "BotInstance: 진입 — %s %s qty=%.6f (triggered_by=%s, score=%.2f)",
+            "BotInstance: 진입 — %s %s qty=%.6f (triggered_by=%s, score=%.2f, sl=%.2f)",
             self._symbol, decision.direction.value, plan.position.coin_amount,
-            decision.triggered_by, decision.score,
+            decision.triggered_by, decision.score, plan.sl_price,
         )
         _fire_trade_alert("entry", {
             "symbol": self._symbol,

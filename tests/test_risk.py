@@ -324,6 +324,44 @@ def test_build_risk_plan_bb_structural_sl_long_v0_1_42() -> None:
     assert plan.tp_prices[0] > 80_300.0  # long 의 TP 는 진입가 위
 
 
+def test_build_risk_plan_structural_sl_price_override_v0_1_44() -> None:
+    """v0.1.44: ``structural_sl_price`` 인자가 BB / ROI 기반 SL 보다 우선.
+
+    Why: Ichimoku / EMA 등 strategy 측에서 진입 시점 SL 가격 직접 계산해 박는
+    일반화 메커니즘. BB 인자 (bb_upper/bb_lower) 와 동시 주어지면 structural
+    값이 우선 (더 명시적).
+    """
+    cfg = TpSlConfig(mode=TpSlMode.FIXED_PCT)
+
+    # SHORT — Ichimoku cloud_lower × 1.006 같은 명시 SL 가격
+    plan_s = build_risk_plan(
+        entry_price=80_500.0, direction="short",
+        leverage=34, equity_usd=1000.0,
+        config=cfg, risk_pct=0.01,
+        structural_sl_price=81_000.0,
+    )
+    assert plan_s.sl_price == pytest.approx(81_000.0)
+
+    # LONG — Ichimoku cloud_upper × 0.994 같은 명시 SL 가격
+    plan_l = build_risk_plan(
+        entry_price=80_500.0, direction="long",
+        leverage=34, equity_usd=1000.0,
+        config=cfg, risk_pct=0.01,
+        structural_sl_price=80_000.0,
+    )
+    assert plan_l.sl_price == pytest.approx(80_000.0)
+
+    # 우선순위 — structural_sl_price 가 BB 인자보다 우선
+    plan_p = build_risk_plan(
+        entry_price=80_500.0, direction="short",
+        leverage=34, equity_usd=1000.0,
+        config=cfg, risk_pct=0.01,
+        bb_upper=80_650.0, bb_lower=80_200.0,  # BB 도 같이 주어졌지만
+        structural_sl_price=81_500.0,            # structural 이 우선
+    )
+    assert plan_p.sl_price == pytest.approx(81_500.0)
+
+
 def test_build_risk_plan_atr_requires_atr_value() -> None:
     """ATR 모드인데 atr 인자 없으면 raise."""
     cfg = TpSlConfig(mode=TpSlMode.ATR)

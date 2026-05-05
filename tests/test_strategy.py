@@ -607,6 +607,39 @@ def test_ichimoku_signal_short_on_cloud_lower_touch() -> None:
     assert shorts[0].timeframe == "1H"
 
 
+def test_ichimoku_signal_attaches_structural_sl_meta_v0_1_44() -> None:
+    """v0.1.44: Ichimoku 신호에 structural SL meta (sl_price/cloud_upper/lower/buffer) 박힘.
+
+    Why: build_risk_plan 이 ``meta.sl_price`` 우선 override → SL = cloud ± 0.6%.
+    호가 noise (~0.08%) 위로 안전 + 봉 안 wick 흡수 + 진입 근거 (구름 지지/저항)
+    깨질 때만 손절. BB Structural SL 패턴 정합 (v0.1.42).
+    """
+    # LONG (구름 상단 지지)
+    closes = [100.0] * 30 + [101.0]
+    df = _ohlc_with_last(closes, last_high=101.5, last_low=99.5)
+    config = _ichimoku_cfg()
+    signals = detect_ichimoku_signal({"1H": df}, config)
+    long_sig = next(s for s in signals if s.source == "ichimoku_cloud_upper")
+    assert long_sig.meta is not None
+    assert "sl_price" in long_sig.meta
+    assert "cloud_upper" in long_sig.meta
+    assert "cloud_lower" in long_sig.meta
+    assert abs(long_sig.meta["buffer_pct"] - 0.006) < 1e-9
+    # LONG SL = cloud_upper × (1 - 0.006) — 구름 안으로 들어가면 손절
+    expected_sl = long_sig.meta["cloud_upper"] * (1.0 - 0.006)
+    assert abs(long_sig.meta["sl_price"] - expected_sl) < 1e-6
+
+    # SHORT (구름 하단 저항)
+    closes_s = [100.0] * 30 + [99.0]
+    df_s = _ohlc_with_last(closes_s, last_high=100.5, last_low=98.5)
+    signals_s = detect_ichimoku_signal({"1H": df_s}, config)
+    short_sig = next(s for s in signals_s if s.source == "ichimoku_cloud_lower")
+    assert short_sig.meta is not None
+    # SHORT SL = cloud_lower × (1 + 0.006) — 구름 위로 가면 손절
+    expected_sl_s = short_sig.meta["cloud_lower"] * (1.0 + 0.006)
+    assert abs(short_sig.meta["sl_price"] - expected_sl_s) < 1e-6
+
+
 def test_ichimoku_signal_no_signal_inside_cloud() -> None:
     """가격이 구름 안에 있을 때 무신호."""
     # 가격 변동이 충분해서 cloud_upper/lower 가 구분되도록 sine 형 데이터

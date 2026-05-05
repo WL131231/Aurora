@@ -1083,18 +1083,25 @@ class BotInstance:
             self._funds_blocked_warned = False
             logger.info("InsufficientFunds backoff 만료 — 진입 시도 재개")
 
-        # v0.1.42: BB 신호 진입 시 진입 시점 BB 값 캡처 → build_risk_plan 에 전달.
-        # SL = BB 라인 ± buffer (호가 noise 위 안전). signals 중 source 가
-        # bollinger_* 인 것에서 meta 읽음. 없으면 None (기존 ROI 기반 SL).
+        # v0.1.42 + v0.1.44: 구조적 신호 진입 시 진입 시점 SL 라인 캡처.
+        # 우선순위 (v0.1.44): meta.sl_price (Ichimoku 등 일반화) > BB 인자 (v0.1.42).
+        # signals 중 같은 direction + meta 박힌 신호 첫 번째 사용.
         bb_upper_at_entry: float | None = None
         bb_lower_at_entry: float | None = None
         bb_buffer_at_entry: float = self._strategy_config.bollinger_breakout_buffer_pct
+        structural_sl_at_entry: float | None = None
+        target_dir = decision.direction.value
         for sig in signals:
-            if sig.source.startswith("bollinger_") and sig.meta is not None:
+            if sig.meta is None or sig.direction.value != target_dir:
+                continue
+            # Ichimoku / 일반화 — meta.sl_price 직접 박혀있음 (v0.1.44)
+            if "sl_price" in sig.meta and structural_sl_at_entry is None:
+                structural_sl_at_entry = sig.meta.get("sl_price")
+            # BB 전용 인자 (v0.1.42, 호환성 보존)
+            if sig.source.startswith("bollinger_") and bb_upper_at_entry is None:
                 bb_upper_at_entry = sig.meta.get("bb_upper")
                 bb_lower_at_entry = sig.meta.get("bb_lower")
                 bb_buffer_at_entry = sig.meta.get("buffer_pct", bb_buffer_at_entry)
-                break
 
         # 6. 진입 실행 — equity 조회 + RiskPlan 산출
         balance = await self._client.get_equity()
@@ -1109,6 +1116,7 @@ class BotInstance:
             bb_upper=bb_upper_at_entry,
             bb_lower=bb_lower_at_entry,
             bb_buffer_pct=bb_buffer_at_entry,
+            structural_sl_price=structural_sl_at_entry,
         )
         # v0.1.38: 진입 시점 EMA/BB/RSI 진단 1줄 — 차트와 비교 가능 (사용자 검증용)
         diag_entry = self._compute_diagnostic_line(df_by_tf, current_price)

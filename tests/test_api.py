@@ -305,6 +305,8 @@ def test_market_trend_returns_disabled_without_api_key_v0_1_54() -> None:
     Why: bot._coinalyze 가 None (api_key 없음) → 비활성 응답. UI 가 카드 숨김.
     """
     client = _client()
+    # 사용자 .env 에 키 박혀있을 수 있음 — 명시 비활성으로 격리
+    bot_instance.get_instance()._coinalyze = None
     r = client.get("/market-trend")
     assert r.status_code == 200
     body = r.json()

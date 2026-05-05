@@ -126,7 +126,7 @@ def test_trend_filter_strong_same_direction_no_block() -> None:
 def test_trend_filter_weak_blocks_opposite() -> None:
     """v0.1.58: 약한 추세 (±1) + 반대 진입 → 차단 (사용자 요청).
 
-    추세 = 롭/강한 롭 이면 무조건 롭만, 추세 = 숙/강한 숙 이면 무조건 숙만.
+    추세 = 롱/강한 롱 이면 무조건 롱만, 추세 = 숏/강한 숏 이면 무조건 숏만.
     중립 (0) 만 양방향 허용.
     """
     assert trend_filter(_trend(1), "short") is True

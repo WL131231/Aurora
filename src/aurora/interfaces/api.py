@@ -634,12 +634,22 @@ def create_app() -> FastAPI:
         import platform as _platform
         import subprocess as _subprocess
 
+        # v0.1.52: 단계별 trace log — 무반응 root cause 디버깅 가능 (사용자 보고
+        # v0.1.50 fix 후도 안 먹힘). 로그 panel + WebSocket /ws/live 통해 사용자
+        # 가 어디서 막힌지 가시화.
+        logger.info("[/relaunch] step 1/5 — launcher_path env 확인 시작")
+
         launcher_path = _os.environ.get("AURORA_LAUNCHER_PATH")
         if not launcher_path or not _os.path.exists(launcher_path):
+            logger.warning(
+                "[/relaunch] FAIL — launcher_path env 없음 또는 존재 X (env=%s)",
+                launcher_path,
+            )
             return ControlResponse(
                 success=False,
                 message="launcher 경로 없음 — 본체 직접 실행 모드 (launcher 통해 시작 필요)",
             )
+        logger.info("[/relaunch] step 2/5 — launcher_path 확인 OK: %s", launcher_path)
 
         # PyInstaller 잔재 env 제거 + auto-start flag
         clean_env = {
@@ -657,35 +667,39 @@ def create_app() -> FastAPI:
             CREATE_BREAKAWAY_FROM_JOB = 0x01000000  # noqa: N806
             flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
 
+        logger.info("[/relaunch] step 3/5 — launcher Popen 시작 (flags=0x%x)", flags)
         try:
-            _subprocess.Popen(  # noqa: S603 — launcher path env 검증됨
+            popen_proc = _subprocess.Popen(  # noqa: S603 — launcher path env 검증됨
                 [launcher_path],
                 env=clean_env,
                 creationflags=flags,
                 close_fds=True,
                 cwd=_os.path.dirname(launcher_path),
             )
+            logger.info(
+                "[/relaunch] step 4/5 — Popen 성공 (pid=%d)", popen_proc.pid,
+            )
         except OSError as e:
+            logger.exception("[/relaunch] FAIL — launcher Popen OSError: %s", e)
             return ControlResponse(success=False, message=f"launcher 실행 실패: {e}")
 
-        # 응답 반환 후 본체 자기 종료 — v0.1.50 fix: webview destroy 제거.
-        # Why: v0.1.48 까지 webview.windows[0].destroy() 호출했으나 daemon=False
-        # thread 에서 destroy 시 hang (pywebview 는 main thread 에서만 destroy
-        # 가능). try/except 가 hang 잡지 못함 (예외 발생 X, 그냥 무한 대기) →
-        # os._exit(0) 도달 X → 본체 안 죽음 → UI 안전장치 (2초 후 button reset)
-        # 발동 → 사용자 입장 "재시작 중... 에서 다시 돌아옴" (사용자 보고 v0.1.48).
-        #
-        # destroy 제거해도 안전: os._exit(0) 가 system call 로 process 즉시 종료
-        # → OS 가 windowing 자동 정리. pywebview 윈도우도 같이 닫힘.
+        # 응답 반환 후 본체 자기 종료 — v0.1.50: webview destroy 제거 + os._exit.
+        # v0.1.52: trace log 추가 (사용자 보고 v0.1.50 무반응 디버깅용).
         import threading as _threading
         import time as _time
 
         def _shutdown_thread() -> None:
-            _time.sleep(0.5)  # 클라이언트 응답 받을 시간 (0.8 → 0.5 단축, UI 반응성)
-            _os._exit(0)  # noqa: S603 — system call 즉시 종료 (윈도우 OS 자동 정리)
+            try:
+                logger.info("[/relaunch shutdown] sleep 0.5s 시작")
+                _time.sleep(0.5)
+                logger.info("[/relaunch shutdown] os._exit(0) 호출 — 본체 종료")
+            except Exception as e:  # noqa: BLE001 — 종료 흐름이라 예외 무시
+                logger.warning("[/relaunch shutdown] log/sleep 예외 (무시): %s", e)
+            _os._exit(0)  # noqa: S603 — system call 즉시 종료
 
         # daemon=False — main thread 종료에 의존 X (강제 종료 보장)
         _threading.Thread(target=_shutdown_thread, daemon=False).start()
+        logger.info("[/relaunch] step 5/5 — shutdown thread 시작 + 응답 반환")
         return ControlResponse(success=True, message="launcher 재실행 + 본체 0.5초 후 종료")
 
     # ───── 로그 (단순 폴링) ─────────────────────────

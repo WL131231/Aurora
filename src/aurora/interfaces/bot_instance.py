@@ -202,6 +202,12 @@ class BotInstance:
         self._last_entry_bar_ts: dict[str, int] = {}  # {tf: bar_ts_ms}
         self._last_entry_sources: tuple[str, ...] = ()
 
+        # v0.1.52: fetch_position 일시 None 보호 — 연속 N회 None 일 때만 reset.
+        # Why: Bybit demo API 일시 응답 지연 / 빈 응답 → 봇 자기 진입 포지션을
+        # 외부 포지션으로 오인지 (사용자 보고 v0.1.51, "외부 포지션 감지" 경고
+        # 박스 표시). 1회 None 으로는 reset X — 3회 연속 None 시만 확정 청산.
+        self._fetch_position_none_count: int = 0
+
         # 거래내역 (v0.1.20) — close_position 마다 ClosedTrade 추가 (rolling 100).
         # GUI "거래내역" 표 표시 + Telegram 알림 + PnL 카드 데이터 source.
         # v0.1.25: 디스크에서 영속화된 record 복원 → 봇 재시작 후 표 / 통계 유지.
@@ -917,17 +923,28 @@ class BotInstance:
             # 3-1. 거래소 측 sync — 사용자 직접 청산 / liquidation 감지 (v0.1.7).
             # paper 모드는 fetch_position 항상 None 반환 (정책) → sync skip
             # (v0.1.9 fix: 안 그러면 paper 진입 직후 즉시 reset 무한 루프).
+            # v0.1.52 fix: 3회 연속 None 일 때만 reset — Bybit demo 일시 응답
+            # 지연 보호 (사용자 보고 v0.1.51 외부 포지션 오인지).
             if settings.run_mode != "paper":
                 actual = await self._client.fetch_position(self._symbol)
                 if actual is None:
-                    logger.info(
-                        "외부 청산 감지: %s 봇 자기 포지션 거래소 측 사라짐 — state reset",
-                        self._symbol,
+                    self._fetch_position_none_count += 1
+                    if self._fetch_position_none_count >= 3:
+                        logger.info(
+                            "외부 청산 감지 (3회 연속 fetch_position None): %s state reset",
+                            self._symbol,
+                        )
+                        self._executor.reset_position()
+                        self._persist_active()
+                        self._fetch_position_none_count = 0
+                        return  # 다음 step 부터 진입 평가 분기 진입
+                    logger.debug(
+                        "fetch_position None (%d/3) — 일시 응답 지연 가능, 대기",
+                        self._fetch_position_none_count,
                     )
-                    self._executor.reset_position()
-                    # v0.1.26: 영속 데이터도 같이 clear — 다음 시작 시 안 떠올리게
-                    self._persist_active()
-                    return  # 다음 step 부터 진입 평가 분기 진입
+                    return  # 이번 step skip (포지션 인지 유지)
+                # 정상 응답 — 카운터 리셋
+                self._fetch_position_none_count = 0
 
                 # 3-2. qty sync — 사용자 직접 추가 진입 / 부분 청산 인지 (v0.1.8 + v0.1.38).
                 # Why: 봇 기록 _remaining_qty 와 거래소 실제 qty 가 다르면 SL 청산 시

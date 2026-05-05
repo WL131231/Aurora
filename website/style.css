@@ -15,10 +15,10 @@
     --aurora-purple: #60519b;
     --text-base: #bfc0d1;
 
-    /* 로고 그라디언트만 예외 (사용자 유지) */
-    --logo-purple: #a855f7;
-    --logo-indigo: #6366f1;
-    --logo-cyan: #22d3ee;
+    /* 로고 그라디언트 — 팔레트 통일 */
+    --logo-purple: #60519b;
+    --logo-indigo: #7a68b5;
+    --logo-cyan: #bfc0d1;
 
     /* Painterly fractalNoise 텍스처 */
     --paint-texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.16 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
@@ -89,7 +89,7 @@ body {
     height: 45vh;
     top: 25vh;
     left: 35vw;
-    background: radial-gradient(circle, rgba(236, 72, 153, 0.55), transparent 65%);
+    background: radial-gradient(circle, rgba(96, 81, 155, 0.55), transparent 65%);
     animation: drift 20s ease-in-out infinite alternate-reverse;
 }
 
@@ -235,7 +235,7 @@ body {
     left: 0;
     width: 60vw;
     height: 35vh;
-    background: radial-gradient(ellipse, rgba(217, 70, 239, 0.4), transparent 70%);
+    background: radial-gradient(ellipse, rgba(96, 81, 155, 0.4), transparent 70%);
     animation: cloud-drift 30s ease-in-out infinite alternate;
 }
 
@@ -261,7 +261,7 @@ body {
     left: 10vw;
     background: linear-gradient(90deg,
         transparent 0%,
-        rgba(217, 70, 239, 0.35) 30%,
+        rgba(96, 81, 155, 0.35) 30%,
         rgba(96, 81, 155, 0.4) 50%,
         rgba(96, 81, 155, 0.3) 70%,
         transparent 100%
@@ -281,7 +281,7 @@ body {
     background: linear-gradient(90deg,
         transparent 0%,
         rgba(96, 81, 155, 0.3) 30%,
-        rgba(20, 184, 166, 0.4) 50%,
+        rgba(96, 81, 155, 0.4) 50%,
         rgba(96, 81, 155, 0.3) 70%,
         transparent 100%
     );
@@ -385,8 +385,8 @@ body {
     background: linear-gradient(
         135deg,
         #ffffff 0%,
-        #d8b4fe 40%,
-        #a855f7 100%
+        #bfc0d1 40%,
+        #60519b 100%
     );
     -webkit-background-clip: text;
     background-clip: text;
@@ -493,7 +493,7 @@ body {
 .photo-fallback .fb-icon {
     font-size: 4rem;
     opacity: 0.5;
-    background: linear-gradient(135deg, #a855f7, #22d3ee);
+    background: linear-gradient(135deg, #60519b, #bfc0d1);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -622,8 +622,7 @@ body {
    Hero Download CTA — 메인 다운로드 버튼 (사용자 진입 1순위)
    ============================================================ */
 .hero-download-btn {
-    /* Aurora 그라디언트 — purple → indigo → cyan (로고와 일관) */
-    background: linear-gradient(135deg, #a855f7 0%, #6366f1 50%, #22d3ee 100%);
+    background: linear-gradient(135deg, #60519b 0%, #7a68b5 50%, #bfc0d1 100%);
     color: #1e202c;
     font-family: "Space Grotesk", system-ui, sans-serif;
     text-transform: uppercase;
@@ -659,4 +658,367 @@ body {
    scroll-margin-top 으로 여백 추가 → 클릭 시 Hero 전체 보이는 위치. */
 #download {
     scroll-margin-top: 50vh;
+}
+
+/* ============================================================
+   INSTALL 섹션 — 다운로드 + 설치 가이드 + 시스템 요구사항
+   메인 사이트 톤 매칭 (--aurora-purple #60519b 계열)
+   ============================================================ */
+
+.install-section {
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+#install {
+    scroll-margin-top: 80px;
+}
+
+/* ===== 다운로드 카드 3-grid ===== */
+.install-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.25rem;
+}
+
+@media (max-width: 768px) {
+    .install-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+}
+
+.install-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1.75rem;
+    border-radius: 16px;
+    background:
+        radial-gradient(ellipse at 30% 20%, rgba(96, 81, 155, 0.08), transparent 60%),
+        linear-gradient(135deg, rgba(31, 32, 44, 0.6), rgba(10, 10, 20, 0.6));
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(20px);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.04) inset,
+        0 20px 40px -20px rgba(0, 0, 0, 0.5);
+    transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.install-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(96, 81, 155, 0.4);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.06) inset,
+        0 30px 60px -20px rgba(0, 0, 0, 0.7),
+        0 0 60px -10px rgba(96, 81, 155, 0.25);
+}
+
+.install-card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding-bottom: 0.5rem;
+}
+
+.install-card-icon {
+    width: 32px;
+    height: 32px;
+    color: rgba(255, 255, 255, 0.85);
+    flex-shrink: 0;
+}
+
+.install-card-title {
+    font-family: var(--font-wordmark, "Bodoni Moda"), serif;
+    font-weight: 500;
+    font-size: 1.25rem;
+    color: #fafafa;
+    margin: 0;
+    letter-spacing: -0.01em;
+}
+
+.install-card-sub {
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.4);
+    margin: 0;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+/* primary 다운로드 버튼 — Hero CTA 그라디언트 톤 (절제) */
+.install-btn-primary {
+    display: block;
+    text-align: center;
+    padding: 0.7rem 1rem;
+    border-radius: 10px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    color: #1e202c;
+    background: linear-gradient(135deg, #60519b 0%, #7a68b5 50%, #bfc0d1 100%);
+    box-shadow:
+        0 0 16px -4px rgba(96, 81, 155, 0.4),
+        0 4px 12px -4px rgba(96, 81, 155, 0.25);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+    text-decoration: none;
+}
+
+.install-btn-primary:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.08);
+    box-shadow:
+        0 0 24px -4px rgba(96, 81, 155, 0.6),
+        0 6px 18px -4px rgba(96, 81, 155, 0.4);
+}
+
+/* secondary 버튼 (런처) — subtle */
+.install-btn-secondary {
+    display: block;
+    text-align: center;
+    padding: 0.6rem 1rem;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.6);
+    background: rgba(96, 81, 155, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    letter-spacing: 0.05em;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+    text-decoration: none;
+}
+
+.install-btn-secondary:hover {
+    background: rgba(96, 81, 155, 0.15);
+    color: rgba(255, 255, 255, 0.9);
+    border-color: rgba(96, 81, 155, 0.4);
+}
+
+.install-note {
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.4);
+    text-align: center;
+    margin: 0;
+    letter-spacing: 0.02em;
+}
+
+/* ===== 설치 가이드 / 시스템 요구사항 헤더 ===== */
+.install-h3 {
+    font-family: var(--font-wordmark, "Bodoni Moda"), serif;
+    font-weight: 500;
+    font-size: 1.5rem;
+    color: #fafafa;
+    margin-bottom: 1.25rem;
+    letter-spacing: -0.005em;
+}
+
+/* ===== 아코디언 ===== */
+.install-accordion {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.install-detail {
+    border-radius: 14px;
+    background: rgba(31, 32, 44, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(12px);
+    overflow: hidden;
+    transition: border-color 0.25s ease, background 0.25s ease;
+}
+
+.install-detail[open] {
+    border-color: rgba(96, 81, 155, 0.3);
+    background: rgba(31, 32, 44, 0.6);
+}
+
+.install-detail-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.1rem 1.4rem;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+
+.install-detail-summary::-webkit-details-marker {
+    display: none;
+}
+
+.install-detail-title {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #fafafa;
+    letter-spacing: 0.005em;
+}
+
+.install-detail-icon {
+    width: 20px;
+    height: 20px;
+    color: rgba(255, 255, 255, 0.7);
+    flex-shrink: 0;
+}
+
+.install-chevron {
+    width: 16px;
+    height: 16px;
+    color: rgba(255, 255, 255, 0.4);
+    transition: transform 0.25s ease;
+}
+
+.install-detail[open] .install-chevron {
+    transform: rotate(180deg);
+    color: #bfc0d1;
+}
+
+.install-detail-body {
+    padding: 0.25rem 1.4rem 1.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    font-size: 0.875rem;
+    color: rgba(255, 255, 255, 0.72);
+    line-height: 1.6;
+}
+
+.install-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.85rem;
+}
+
+.install-step strong {
+    color: #fafafa;
+    font-weight: 500;
+}
+
+.install-step code {
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 0.78rem;
+    color: #bfc0d1;
+    font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+.install-step-num {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    margin-top: 0.1rem;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #1e202c;
+    background: linear-gradient(135deg, #60519b, #7a68b5);
+    box-shadow: 0 0 12px -2px rgba(96, 81, 155, 0.5);
+}
+
+.install-tip,
+.install-warning {
+    margin-top: 0.25rem;
+    padding: 0.7rem 0.9rem;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    line-height: 1.55;
+}
+
+.install-tip {
+    background: rgba(96, 81, 155, 0.1);
+    border: 1px solid rgba(96, 81, 155, 0.25);
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.install-tip code {
+    background: rgba(0, 0, 0, 0.35);
+    color: #bfc0d1;
+}
+
+.install-warning {
+    background: rgba(180, 130, 60, 0.08);
+    border: 1px solid rgba(180, 130, 60, 0.3);
+    color: rgba(230, 200, 140, 0.85);
+}
+
+/* ===== 시스템 요구사항 테이블 ===== */
+.install-spec-card {
+    border-radius: 14px;
+    background: rgba(31, 32, 44, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(12px);
+    overflow: hidden;
+}
+
+.install-spec-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+.install-spec-table thead tr {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.install-spec-table th {
+    text-align: left;
+    padding: 0.95rem 1.4rem;
+    font-weight: 500;
+    font-size: 0.72rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.install-spec-table tbody tr {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    transition: background 0.2s ease;
+}
+
+.install-spec-table tbody tr:last-child {
+    border-bottom: none;
+}
+
+.install-spec-table tbody tr:hover {
+    background: rgba(96, 81, 155, 0.04);
+}
+
+.install-spec-table td {
+    padding: 0.85rem 1.4rem;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.install-spec-platform {
+    color: #fafafa !important;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+}
+
+.install-spec-min {
+    color: rgba(255, 255, 255, 0.55) !important;
+    font-size: 0.82rem;
+}
+
+@media (max-width: 640px) {
+    .install-spec-table th,
+    .install-spec-table td {
+        padding: 0.7rem 0.9rem;
+    }
+}
+
+/* ===== "모든 릴리스 보기" 링크 ===== */
+.install-releases-link {
+    color: rgba(255, 255, 255, 0.45);
+    transition: color 0.2s ease;
+    text-decoration: none;
+}
+
+.install-releases-link:hover {
+    color: #bfc0d1;
 }

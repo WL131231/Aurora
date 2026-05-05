@@ -220,7 +220,7 @@ def test_bb_squeeze_holds() -> None:
     closes = [100.0] * 30 + [99.5]
     df = _bb_df(closes)
     config = StrategyConfig()  # squeeze_threshold=0.015 기본
-    assert detect_bollinger_touch(df, config) == []
+    assert detect_bollinger_touch({'1H': df}, config) == []
 
 
 # ─── Tier 2: Reversal (찢어짐 회귀) ───
@@ -234,7 +234,7 @@ def test_bb_reversal_short_after_upper_break() -> None:
     closes.append(float(np.mean(closes[:-1])))    # 현재 봉: 안쪽 회귀
     df = _bb_df(closes)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     assert any(
         s.direction == Direction.SHORT
         and s.source == "bollinger_reversal_upper"
@@ -251,7 +251,7 @@ def test_bb_reversal_long_after_lower_break() -> None:
     closes.append(float(np.mean(closes[:-1])))
     df = _bb_df(closes)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     assert any(
         s.direction == Direction.LONG
         and s.source == "bollinger_reversal_lower"
@@ -272,7 +272,7 @@ def test_bb_reversal_attaches_meta_v0_1_42() -> None:
     closes.append(float(np.mean(closes[:-1])))    # 현재 봉: 안쪽 회귀
     df = _bb_df(closes)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     short_sig = next(
         s for s in signals if s.source == "bollinger_reversal_upper"
     )
@@ -295,7 +295,7 @@ def test_bb_holds_on_close_outside() -> None:
     closes.append(float(np.mean(closes)) + 8.0)
     df = _bb_df(closes)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     assert signals == []
 
 
@@ -325,7 +325,7 @@ def test_bb_proximity_touch_no_signal_v0_1_42() -> None:
     lows = list(closes)
     df = _bb_df(closes, highs=highs, lows=lows)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     # Proximity (bollinger_upper / bollinger_lower) source 신호 X
     assert not any(s.source in ("bollinger_upper", "bollinger_lower") for s in signals)
 
@@ -346,7 +346,7 @@ def test_bb_proximity_touch_long_no_signal_v0_1_42() -> None:
     lows = list(closes[:-1]) + [spike_low]
     df = _bb_df(closes, highs=highs, lows=lows)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     assert not any(s.source in ("bollinger_upper", "bollinger_lower") for s in signals)
 
 
@@ -370,7 +370,7 @@ def test_bb_wick_reversal_short_high_outside_close_inside() -> None:
     lows = list(closes)
     df = _bb_df(closes, highs=highs, lows=lows)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     assert any(
         s.direction == Direction.SHORT
         and s.source == "bollinger_wick_reversal_upper"
@@ -390,7 +390,7 @@ def test_bb_wick_reversal_long_low_outside_close_inside() -> None:
     lows = list(closes[:-1]) + [last_close - 10.0]
     df = _bb_df(closes, highs=highs, lows=lows)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     assert any(
         s.direction == Direction.LONG
         and s.source == "bollinger_wick_reversal_lower"
@@ -410,7 +410,7 @@ def test_bb_no_signal_when_high_low_far_from_band() -> None:
     closes.extend([mean_val, mean_val])  # 직전·현재 봉 모두 mean (안쪽 확정)
     df = _bb_df(closes)  # high=low=close (모두 안쪽)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     assert signals == []
 
 
@@ -426,7 +426,7 @@ def test_bb_touch_missing_columns() -> None:
     """high/low 컬럼 없으면 빈 결과."""
     df = pd.DataFrame({"close": [100.0] * 30})
     config = StrategyConfig()
-    assert detect_bollinger_touch(df, config) == []
+    assert detect_bollinger_touch({'1H': df}, config) == []
 
 
 # ============================================================
@@ -1091,7 +1091,7 @@ def test_bollinger_signal_fills_bar_timestamp() -> None:
     )
     df.loc[df.index[-1], "high"] = 103.0
     config = StrategyConfig(bollinger_period=10, bollinger_squeeze_threshold=0.001)
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     for sig in signals:
         assert sig.bar_timestamp == df.index[-1]
 

@@ -82,7 +82,7 @@ _WARMUP_DEFAULTS = {"15m": 200, "1H": 500, "2H": 250, "4H": 500, "1D": 200}
 
 # default 매매 페어 / TF 셋 — configure 안 하면 settings 기반 사용
 _DEFAULT_SYMBOL = "BTC/USDT:USDT"
-_DEFAULT_TIMEFRAMES = ["15m", "1H", "4H"]
+_DEFAULT_TIMEFRAMES = ["5m", "15m", "1H", "4H"]  # v0.1.51: BB 5m/15m/1H 활용
 
 # default 레버리지 — TODO: GUI config 연결 시 settings.leverage 같은 필드 추가 (별도 PR)
 _DEFAULT_LEVERAGE = 10
@@ -110,6 +110,30 @@ def _categorize_source(source: str) -> str | None:
         if source.startswith(prefix):
             return cat
     return None  # 매핑 없는 source — UI 표시 X
+
+
+# v0.1.51: 지표별 우선순위 (작은 숫자 = 더 높은 우선순위, 사용자 결정 2026-05-05).
+# PRIORITY swap 분기에 사용 — 보유 중 더 높은 우선순위 신호 발견 시:
+#   - 같은 방향: SL update (수수료 절약, 사용자 결정 옵션 b)
+#   - 반대 방향: 청산 + 재진입 (priority_swap 사유)
+# 같은 우선순위 = 동일 — swap 발동 X (BB / 가격 매매 공동 5순위).
+INDICATOR_PRIORITY: dict[str, int] = {
+    "EMA": 1,
+    "Ichimoku": 2,
+    "RSI": 3,
+    "MA": 4,
+    "BB": 5,
+    "가격 매매": 5,
+    "Harmonic": 5,  # Harmonic 도 공동 5순위 (PDF 패턴, 보강 신호)
+}
+
+
+def _signal_priority(source: str) -> int:
+    """signal.source → 우선순위 숫자 (작을수록 높음). 매핑 없으면 99."""
+    cat = _categorize_source(source)
+    if cat is None:
+        return 99
+    return INDICATOR_PRIORITY.get(cat, 99)
 
 
 class BotInstance:
@@ -964,8 +988,12 @@ class BotInstance:
                     self._record_closed(closed)
                     return
 
-            # 3-6. REVERSE 신호 (v0.1.8) — 보유 중 반대 방향 신호 → 청산.
-            # Why: 백테스트 D-24 정합 (engine.py L353). 라이브 누락 시 PF 괴리.
+            # 3-6. REVERSE / PRIORITY swap (보유 중 신호 평가).
+            # v0.1.51: PRIORITY swap 분기 신규 — 보유 중 더 높은 우선순위 신호 발견 시
+            #   · 같은 방향 → SL update (수수료 절약, 사용자 결정)
+            #   · 반대 방향 → 청산 + 재진입 (priority_swap 사유)
+            # REVERSE (compose_exit) 는 priority swap 분기 후 fallback (같거나 낮은
+            # 우선순위 + 반대 방향 신호 → 청산).
             if self._executor.has_position:
                 rev_signals = []
                 rev_signals.extend(detect_ema_touch(df_by_tf, self._strategy_config))
@@ -980,6 +1008,12 @@ class BotInstance:
                     ),
                 )
                 cur_dir = self._executor._plan.direction
+                cur_sources = self._executor.triggered_by
+                # 보유 중 신호 중 가장 높은 우선순위 (가장 작은 숫자)
+                cur_priority = min(
+                    (_signal_priority(s) for s in cur_sources), default=99,
+                )
+
                 # v0.1.32: 보유 중 REVERSE 평가도 매 step throttle (변화 + 60초 heartbeat)
                 # v0.1.33: 진단 1줄 동봉
                 bar_ts_pos = int(primary_df.index[-1].value // 1_000_000)
@@ -989,7 +1023,46 @@ class BotInstance:
                     rev_signals, rev_decision, bar_ts_pos, in_position=True,
                     diagnostic=diag_pos,
                 )
-                if compose_exit(cur_dir, rev_signals):
+
+                # v0.1.51: PRIORITY swap — 더 높은 우선순위 신호 (작은 숫자) 우선 처리.
+                # 가장 높은 우선순위 새 신호 한 개만 처리 (여러 개 동시면 first 우선).
+                priority_handled = False
+                for new_sig in sorted(rev_signals, key=lambda s: _signal_priority(s.source)):
+                    new_priority = _signal_priority(new_sig.source)
+                    if new_priority >= cur_priority:
+                        break  # 이후는 모두 같거나 낮은 우선순위 → swap 대상 X
+                    new_dir = new_sig.direction.value  # "long" / "short"
+                    if new_dir == cur_dir:
+                        # 같은 방향 → SL update (수수료 절약)
+                        new_sl = (new_sig.meta or {}).get("sl_price")
+                        if new_sl is not None and new_sl > 0:
+                            old_sl = self._executor._plan.sl_price
+                            self._executor._plan.sl_price = float(new_sl)
+                            self._executor._triggered_by = [new_sig.source]
+                            logger.info(
+                                "PRIORITY update (%s → %s, 같은 방향): SL %.4f → %.4f",
+                                cur_sources, new_sig.source, old_sl, new_sl,
+                            )
+                        priority_handled = True
+                        break
+                    # 반대 방향 → 청산 + 재진입 (다음 step 진입 평가에서 자연 진입)
+                    logger.info(
+                        "PRIORITY swap (%s → %s, 반대 방향): 청산 + 재진입 흐름",
+                        cur_sources, new_sig.source,
+                    )
+                    _, closed = await self._executor.close_position(
+                        reason="priority_swap",
+                    )
+                    self._record_closed(closed)
+                    priority_handled = True
+                    break
+
+                # PRIORITY swap 발동 안 했으면 기존 REVERSE 분기 (낮거나 같은 우선순위)
+                if (
+                    not priority_handled
+                    and self._executor.has_position
+                    and compose_exit(cur_dir, rev_signals)
+                ):
                     logger.info("REVERSE 신호 (%s) → 청산 (다음 step 진입 평가)", cur_dir)
                     _, closed = await self._executor.close_position(reason="reverse")
                     self._record_closed(closed)

@@ -108,6 +108,33 @@ def test_is_configured_initially_false() -> None:
     assert bot.has_position is False
 
 
+def test_v0_1_51_indicator_priority_constants() -> None:
+    """v0.1.51: 지표 우선순위 상수 (사용자 결정 2026-05-05) — EMA=1 < Ichi=2 < RSI=3
+    < MA=4 < BB/가격 매매/Harmonic=5 (공동 5순위)."""
+    from aurora.interfaces.bot_instance import (
+        INDICATOR_PRIORITY,
+        _signal_priority,
+    )
+    assert INDICATOR_PRIORITY["EMA"] == 1
+    assert INDICATOR_PRIORITY["Ichimoku"] == 2
+    assert INDICATOR_PRIORITY["RSI"] == 3
+    assert INDICATOR_PRIORITY["MA"] == 4
+    assert INDICATOR_PRIORITY["BB"] == 5
+    assert INDICATOR_PRIORITY["가격 매매"] == 5
+    assert INDICATOR_PRIORITY["Harmonic"] == 5
+
+    # source → priority lookup
+    assert _signal_priority("ema_touch_200") == 1
+    assert _signal_priority("ichimoku_cloud_upper") == 2
+    assert _signal_priority("rsi_div_regular_bull") == 3
+    assert _signal_priority("ma_cross_golden") == 4
+    assert _signal_priority("bollinger_reversal_upper") == 5
+    assert _signal_priority("zone_2468_short") == 5
+    assert _signal_priority("harmonic_bat") == 5
+    # 매핑 없는 source → 99 (가장 낮음)
+    assert _signal_priority("unknown_source") == 99
+
+
 def test_v0_1_42_bar_dedup_initial_state() -> None:
     """v0.1.42: bar-level 진입 dedup 변수 초기 상태 검증.
 

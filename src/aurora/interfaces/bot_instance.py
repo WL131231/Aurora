@@ -45,6 +45,12 @@ from aurora.exchange.base import ExchangeClient
 from aurora.exchange.data import MultiTfCache
 from aurora.exchange.execution import ClosedTrade, Executor
 from aurora.interfaces import active_position_store, trades_store
+from aurora.market.coinalyze import (
+    CoinalyzeClient,
+    MarketTrend,
+    trend_filter,
+    trend_score_multiplier,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +213,21 @@ class BotInstance:
         # 외부 포지션으로 오인지 (사용자 보고 v0.1.51, "외부 포지션 감지" 경고
         # 박스 표시). 1회 None 으로는 reset X — 3회 연속 None 시만 확정 청산.
         self._fetch_position_none_count: int = 0
+
+        # v0.1.53: Coinalyze 추세 클라이언트 + cache. settings.coinalyze_api_key 있으면
+        # 5분 cache 박힌 client 생성. 없으면 None (추세 인지 비활성, 기존 동작 유지).
+        # 진입 평가 시 client.fetch_trend(coin) 호출 → MarketTrend cache hit 시
+        # 즉시 반환 / 5분 만료 시 새 fetch.
+        self._coinalyze: CoinalyzeClient | None = None
+        if settings.coinalyze_api_key:
+            try:
+                self._coinalyze = CoinalyzeClient(
+                    api_key=settings.coinalyze_api_key,
+                    cache_ttl_sec=300,
+                )
+                logger.info("Coinalyze 추세 클라이언트 활성 (5분 cache)")
+            except ValueError as e:
+                logger.warning("Coinalyze 클라이언트 생성 실패 (무시): %s", e)
 
         # 거래내역 (v0.1.20) — close_position 마다 ClosedTrade 추가 (rolling 100).
         # GUI "거래내역" 표 표시 + Telegram 알림 + PnL 카드 데이터 source.
@@ -1150,6 +1171,37 @@ class BotInstance:
 
         if not decision.enter or decision.direction is None:
             return
+
+        # v0.1.53: Coinalyze 추세 인지 — 진입 평가 시점에 5분 cache 활용.
+        # 1) 강한 추세 반대 (|score| ≥ 2 + 진입 방향 반대) → 진입 차단 (필터)
+        # 2) 그 외 → score 가중치 부스트 (일치 ×1.3~1.5 / 중립 ×1.0 / 약 반대 ×0.7)
+        # client None (api_key 미설정) → 기존 동작 유지 (필터 X, boost 1.0).
+        market_trend: MarketTrend | None = None
+        if self._coinalyze is not None:
+            try:
+                market_trend = await self._coinalyze.fetch_trend_for_symbol(self._symbol)
+            except Exception as e:  # noqa: BLE001 — 네트워크 실패 시 None
+                logger.debug("Coinalyze fetch 실패 (진입 평가 진행): %s", e)
+                market_trend = None
+
+        sig_dir = decision.direction.value  # "long" / "short"
+        if trend_filter(market_trend, sig_dir):
+            # 강한 추세 반대 — 진입 차단
+            logger.info(
+                "진입 차단 (강한 추세 반대): trend=%s score=%+d / 신호 방향=%s",
+                market_trend.direction if market_trend else "?",
+                market_trend.score if market_trend else 0,
+                sig_dir,
+            )
+            return
+
+        # 가중치 부스트 (decision.score 직접 mutation X — 로그용 + 향후 활용)
+        boost = trend_score_multiplier(market_trend, sig_dir)
+        if market_trend is not None and boost != 1.0:
+            logger.info(
+                "추세 가중치 적용: trend=%s score=%+d / 신호 방향=%s / boost ×%.1f",
+                market_trend.direction, market_trend.score, sig_dir, boost,
+            )
 
         # v0.1.42: bar-level 진입 dedup — 같은 1H 봉 + 같은 source 재진입 차단.
         # Why: BB stateful 신호 (또는 last_high 누적) 가 봉 닫힐 때까지 살아있어

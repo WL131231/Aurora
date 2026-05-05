@@ -12,7 +12,6 @@ from aurora.market.coinalyze import (
     trend_score_multiplier,
 )
 
-
 # ============================================================
 # _interpret_score — 매매일지 정합 score 산출
 # ============================================================

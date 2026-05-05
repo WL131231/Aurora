@@ -15,6 +15,13 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import NamedTuple
 
+# v0.1.45: 모든 신호 일괄 SL 안전망 — 산출된 SL 폭이 가격 변동 % 기준 이 값 미만
+# 이면 강제로 floor 적용. 호가 noise (~0.08%) + 봉 안 wick (~0.1~0.2%) 위 안전.
+# Why: 사용자가 좁은 SL config 박아도 (manual_sl_pct + 고레버리지) 호가 떨림에
+# SL hit 무한 루프 차단. structural SL (BB/Ichimoku/EMA/MA) 은 이미 buffer 0.3%+
+# 이라 floor 영향 X. Fixed/Manual ROI 기반만 이 floor 가 안전망.
+MIN_SL_DISTANCE_PCT: float = 0.003
+
 
 class TpSlMode(StrEnum):
     ATR = "atr"
@@ -279,6 +286,11 @@ def build_risk_plan(
     risk_pct: float = 0.01,
     full_seed: bool = False,
     min_seed_pct: float = DEFAULT_MIN_SEED_PCT,
+    bb_upper: float | None = None,
+    bb_lower: float | None = None,
+    bb_buffer_pct: float = 0.003,
+    structural_sl_price: float | None = None,
+    apply_sl_floor: bool = False,
 ) -> RiskPlan:
     """진입 시점에 SL/TP 가격 + 포지션 사이즈를 한 번에 계산.
 
@@ -289,6 +301,15 @@ def build_risk_plan(
                           ``tp[i] = entry × fixed_tp_pcts[i]%``.
         - ``MANUAL``: ``sl = entry × manual_sl_pct%``,
                        ``tp[i] = entry × manual_tp_pcts[i]%``.
+
+    **BB Structural SL override (v0.1.42)**:
+        ``bb_upper`` / ``bb_lower`` 둘 다 주어지면 (BB 신호 진입), SL 가격은
+        모드 무관하게 BB 라인 ± ``bb_buffer_pct`` 로 override:
+            - short: ``sl_price = bb_upper × (1 + bb_buffer_pct)``
+            - long:  ``sl_price = bb_lower × (1 - bb_buffer_pct)``
+        TP 는 그대로 모드별 산출. Why: BB 진입 신호의 자연스러운 손절 = BB
+        이탈. 호가 noise (0.08%) 위 안전 폭 (0.3%) 으로 사고팔고 사이클 차단
+        (사용자 보고 v0.1.41 무한 루프 fix).
 
     방향별 가격 산출:
         - long: ``sl_price = entry - sl_dist``, ``tp_price[i] = entry + tp_dist[i]``.
@@ -304,6 +325,9 @@ def build_risk_plan(
         risk_pct: risk-based 모드의 거래당 최대 손실 비율.
         full_seed: 풀시드 모드 사용.
         min_seed_pct: 최소 진입 마진 비율.
+        bb_upper: BB 신호 진입 시 진입 시점 BB 상단 (v0.1.42, optional).
+        bb_lower: BB 신호 진입 시 진입 시점 BB 하단 (v0.1.42, optional).
+        bb_buffer_pct: BB 이탈 buffer (default 0.003 = 0.3%).
 
     Returns:
         ``RiskPlan`` (entry/direction/leverage/position/tp_prices/sl_price/trailing).
@@ -349,15 +373,47 @@ def build_risk_plan(
     else:
         raise ValueError(f"unknown TpSlMode: {config.mode}")
 
-    sl_distance_pct = sl_dist / entry_price
-
-    # 방향별 가격
+    # 방향별 가격 — SL 은 구조적 신호 진입 시 override.
+    # 우선순위 (v0.1.44): structural_sl_price (일반화, Ichimoku/EMA 등) >
+    # bb_upper/bb_lower (v0.1.42 BB 전용) > 기존 ROI 기반.
     if direction_norm == "long":
-        sl_price = entry_price - sl_dist
+        if structural_sl_price is not None and structural_sl_price > 0:
+            sl_price = structural_sl_price
+        elif bb_lower is not None and bb_lower > 0:
+            # BB Structural SL override — long 진입 시 BB 하단 - buffer (v0.1.42)
+            sl_price = bb_lower * (1.0 - bb_buffer_pct)
+        else:
+            sl_price = entry_price - sl_dist
         tp_prices = [entry_price + d for d in tp_dists]
     else:
-        sl_price = entry_price + sl_dist
+        if structural_sl_price is not None and structural_sl_price > 0:
+            sl_price = structural_sl_price
+        elif bb_upper is not None and bb_upper > 0:
+            # BB Structural SL override — short 진입 시 BB 상단 + buffer (v0.1.42)
+            sl_price = bb_upper * (1.0 + bb_buffer_pct)
+        else:
+            sl_price = entry_price + sl_dist
         tp_prices = [entry_price - d for d in tp_dists]
+
+    # sl_distance_pct 재산출 (SL override 후 변경 가능). position size 계산 입력.
+    sl_distance_pct = abs(sl_price - entry_price) / entry_price
+    if sl_distance_pct <= 0:
+        # SL 가격이 진입가와 같거나 잘못된 경우 fallback (BB 가 진입가 부근일 때)
+        sl_distance_pct = sl_dist / entry_price
+
+    # v0.1.45: SL 호가 noise floor — 라이브 봇 한정 안전망 (apply_sl_floor=True).
+    # 산출된 SL 폭이 MIN_SL_DISTANCE_PCT 미만이면 강제 floor 적용.
+    # Why: 호가 떨림 + 봉 안 wick 으로 SL hit 후 즉시 재진입 사이클 차단.
+    # structural SL (BB 0.3% / Ichimoku 0.6% / EMA 0.5% / MA cross 0.3%) 은 이미
+    # buffer >= 0.3% 라 floor 영향 X. Fixed/Manual ROI 기반만 floor 효과 있음.
+    # 백테스트는 봉 단위 close 평가라 호가 noise 무관 → apply_sl_floor=False (default)
+    # 로 floor 미적용 (BotInstance 만 명시 True 호출).
+    if apply_sl_floor and sl_distance_pct < MIN_SL_DISTANCE_PCT:
+        sl_distance_pct = MIN_SL_DISTANCE_PCT
+        if direction_norm == "long":
+            sl_price = entry_price * (1.0 - MIN_SL_DISTANCE_PCT)
+        else:
+            sl_price = entry_price * (1.0 + MIN_SL_DISTANCE_PCT)
 
     # 포지션 사이즈
     position = calc_position_size(

@@ -58,6 +58,13 @@ AURORA_LOCALAPPDATA_NAME = "Aurora"
 
 # 본체에 전달할 env 마커 — 본체 자기-swap 중복 방지
 LAUNCHER_ENV_MARKER = "AURORA_FROM_LAUNCHER"
+LAUNCHER_PATH_ENV = "AURORA_LAUNCHER_PATH"
+"""launcher .exe 절대 경로 (frozen 모드만). 본체가 재시작 요청 시 launcher 다시
+spawn 하기 위함. v0.1.43 신규 — UI 업데이트 팝업의 '재시작하기' 버튼 흐름."""
+
+LAUNCHER_AUTO_START_ENV = "AURORA_LAUNCHER_AUTO_START"
+"""launcher 가 시작 시 자동으로 START 클릭 (auto-launch 본체). 본체 /relaunch
+엔드포인트가 launcher spawn 시 박음. v0.1.43 신규."""
 
 
 # ============================================================
@@ -423,6 +430,14 @@ def launch_aurora() -> bool:
 
     env = os.environ.copy()
     env[LAUNCHER_ENV_MARKER] = "1"
+    # v0.1.43: launcher .exe 경로 박음 — 본체 /relaunch 가 launcher 다시 spawn 가능.
+    # frozen 환경 (sys.executable = launcher.exe) 만 의미. dev 환경은 skip (직접 본체
+    # 실행 모드로 안전 fallback).
+    if _is_frozen():
+        env[LAUNCHER_PATH_ENV] = sys.executable
+    # auto-start env 는 launcher 가 본체 spawn 시 절대 박지 않음 — 새 본체가 자기
+    # 다시 재시작 명령 무한 루프 위험 차단.
+    env.pop(LAUNCHER_AUTO_START_ENV, None)
 
     # detached + fds 분리 — launcher 종료 후에도 본체 살림
     DETACHED_PROCESS = 0x00000008  # noqa: N806
@@ -456,6 +471,16 @@ def launch_aurora() -> bool:
 
 class LauncherApi:
     """Pywebview JS bridge — UI 가 호출하는 백엔드 메서드."""
+
+    def __init__(self, *, auto_start: bool = False) -> None:
+        # v0.1.43: 본체 /relaunch 가 자식 launcher spawn 시 env 박음.
+        # UI 가 ``is_auto_start()`` 로 확인 후 START 자동 클릭.
+        self._auto_start = auto_start
+
+    def is_auto_start(self) -> bool:
+        """v0.1.43: auto-start 모드 여부 — 본체 재시작 흐름에서 launcher 가
+        spawn 됐을 때 True. UI 가 START 자동 클릭 결정에 사용."""
+        return self._auto_start
 
     def get_local_version(self) -> str:
         """현재 설치된 본체 버전. 모르면 'unknown'."""
@@ -569,7 +594,12 @@ def main() -> None:
     # v0.1.19: 백그라운드 launcher 자기 update check + 다운 (다음 시작 시 apply).
     start_background_launcher_check()
 
-    api = LauncherApi()
+    # v0.1.43: 본체 /relaunch 흐름 — env 또는 sys.argv 로 auto-start 모드 결정.
+    auto_start = (
+        os.environ.get(LAUNCHER_AUTO_START_ENV) == "1"
+        or "--auto-start" in sys.argv
+    )
+    api = LauncherApi(auto_start=auto_start)
     ui_path = _ui_index_path()
 
     webview.create_window(

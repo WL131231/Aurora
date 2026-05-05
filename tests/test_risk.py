@@ -213,6 +213,9 @@ def test_build_risk_plan_fixed_pct_long() -> None:
     가격 변동 % = ROI / leverage.
         sl=2.0 ROI / 10x → 가격 변동 0.2% → 100 × (1-0.002) = 99.8
         tp=[1,2,3,4] ROI / 10x → 가격 [0.1, 0.2, 0.3, 0.4]% → [100.1, 100.2, 100.3, 100.4]
+
+    Note: v0.1.45 SL floor (0.3%) 는 ``apply_sl_floor=True`` (라이브 봇 한정)
+    에서만 발동. 본 테스트는 default False 라 floor 영향 X.
     """
     cfg = TpSlConfig(
         mode=TpSlMode.FIXED_PCT,
@@ -272,7 +275,11 @@ def test_build_risk_plan_atr_mode() -> None:
 
 
 def test_build_risk_plan_manual_mode() -> None:
-    """MANUAL 모드: manual_sl_pct / manual_tp_pcts (ROI 단위, v0.1.13)."""
+    """MANUAL 모드: manual_sl_pct / manual_tp_pcts (ROI 단위, v0.1.13).
+
+    Note: v0.1.45 SL floor 는 ``apply_sl_floor=True`` (라이브 한정) 에서만 발동.
+    본 테스트는 default False 라 floor 영향 X.
+    """
     cfg = TpSlConfig(
         mode=TpSlMode.MANUAL,
         manual_sl_pct=1.0,
@@ -286,6 +293,143 @@ def test_build_risk_plan_manual_mode() -> None:
     # ROI 1% / 10x = 가격 0.1%, ROI [0.5,1,1.5,2] / 10x = 가격 [0.05,0.1,0.15,0.2]%
     assert plan.sl_price == pytest.approx(99.9)
     assert plan.tp_prices == pytest.approx([100.05, 100.1, 100.15, 100.2])
+
+
+def test_build_risk_plan_bb_structural_sl_short_v0_1_42() -> None:
+    """v0.1.42: BB 신호 진입 시 SL = BB upper × (1 + buffer) override (short).
+
+    기존 ROI 기반 SL 무시하고 BB 라인 기반 SL. 호가 noise (~0.08%) 위 안전.
+    Why: 사용자 보고 v0.1.41 사고팔고 무한 루프 fix.
+    """
+    cfg = TpSlConfig(mode=TpSlMode.FIXED_PCT)
+    plan = build_risk_plan(
+        entry_price=80_500.0, direction="short",
+        leverage=34, equity_usd=1000.0,
+        config=cfg, risk_pct=0.01,
+        bb_upper=80_650.0, bb_lower=80_200.0,
+        bb_buffer_pct=0.003,
+    )
+    # SL = 80,650 × 1.003 = 80,891.95 (진입가 +391.95 USDT, ~0.49% 위)
+    assert plan.sl_price == pytest.approx(80_650.0 * 1.003)
+    # TP 는 기존 ROI 기반 그대로 (override X)
+    assert len(plan.tp_prices) == 4
+    assert plan.tp_prices[0] < 80_500.0  # short 의 TP 는 진입가 아래
+
+
+def test_build_risk_plan_bb_structural_sl_long_v0_1_42() -> None:
+    """v0.1.42: BB 신호 진입 시 SL = BB lower × (1 - buffer) override (long)."""
+    cfg = TpSlConfig(mode=TpSlMode.FIXED_PCT)
+    plan = build_risk_plan(
+        entry_price=80_300.0, direction="long",
+        leverage=34, equity_usd=1000.0,
+        config=cfg, risk_pct=0.01,
+        bb_upper=80_650.0, bb_lower=80_200.0,
+        bb_buffer_pct=0.003,
+    )
+    # SL = 80,200 × 0.997 = 79,959.4 (진입가 -340.6 USDT, ~0.42% 아래)
+    assert plan.sl_price == pytest.approx(80_200.0 * 0.997)
+    assert plan.tp_prices[0] > 80_300.0  # long 의 TP 는 진입가 위
+
+
+def test_build_risk_plan_structural_sl_price_override_v0_1_44() -> None:
+    """v0.1.44: ``structural_sl_price`` 인자가 BB / ROI 기반 SL 보다 우선.
+
+    Why: Ichimoku / EMA 등 strategy 측에서 진입 시점 SL 가격 직접 계산해 박는
+    일반화 메커니즘. BB 인자 (bb_upper/bb_lower) 와 동시 주어지면 structural
+    값이 우선 (더 명시적).
+    """
+    cfg = TpSlConfig(mode=TpSlMode.FIXED_PCT)
+
+    # SHORT — Ichimoku cloud_lower × 1.006 같은 명시 SL 가격
+    plan_s = build_risk_plan(
+        entry_price=80_500.0, direction="short",
+        leverage=34, equity_usd=1000.0,
+        config=cfg, risk_pct=0.01,
+        structural_sl_price=81_000.0,
+    )
+    assert plan_s.sl_price == pytest.approx(81_000.0)
+
+    # LONG — Ichimoku cloud_upper × 0.994 같은 명시 SL 가격
+    plan_l = build_risk_plan(
+        entry_price=80_500.0, direction="long",
+        leverage=34, equity_usd=1000.0,
+        config=cfg, risk_pct=0.01,
+        structural_sl_price=80_000.0,
+    )
+    assert plan_l.sl_price == pytest.approx(80_000.0)
+
+    # 우선순위 — structural_sl_price 가 BB 인자보다 우선
+    plan_p = build_risk_plan(
+        entry_price=80_500.0, direction="short",
+        leverage=34, equity_usd=1000.0,
+        config=cfg, risk_pct=0.01,
+        bb_upper=80_650.0, bb_lower=80_200.0,  # BB 도 같이 주어졌지만
+        structural_sl_price=81_500.0,            # structural 이 우선
+    )
+    assert plan_p.sl_price == pytest.approx(81_500.0)
+
+
+def test_build_risk_plan_sl_noise_floor_v0_1_45() -> None:
+    """v0.1.45: SL 폭이 0.3% 미만이면 강제 floor 적용 — 라이브 봇 호가 noise 안전망.
+
+    Why: 사용자가 좁은 SL config (예: ROI 1% × lev 34 = 가격 0.029%) 박아도
+    호가 떨림 (~0.08%) 에 SL hit 무한 사이클 차단. structural SL (BB/Ichimoku
+    /EMA/MA cross) 은 이미 buffer >= 0.3% 라 floor 영향 X. ``apply_sl_floor=True``
+    (라이브 봇 호출 한정) 에서만 발동 — 백테스트는 봉 단위 평가라 floor 무관.
+    """
+    cfg = TpSlConfig(mode=TpSlMode.MANUAL, manual_sl_pct=1.0)  # ROI 1%
+
+    # lev 34 — 가격 변동 0.029% → floor 0.3% 강제 적용 (라이브 봇 호출)
+    plan_long = build_risk_plan(
+        entry_price=80_500.0, direction="long",
+        leverage=34, equity_usd=1000.0,
+        config=cfg, risk_pct=0.01,
+        apply_sl_floor=True,
+    )
+    # SL = entry × (1 - 0.003) = 80,258.5 (floor 0.3% 강제)
+    assert plan_long.sl_price == pytest.approx(80_500.0 * 0.997)
+
+    plan_short = build_risk_plan(
+        entry_price=80_500.0, direction="short",
+        leverage=34, equity_usd=1000.0,
+        config=cfg, risk_pct=0.01,
+        apply_sl_floor=True,
+    )
+    # SL = entry × (1 + 0.003) = 80,741.5
+    assert plan_short.sl_price == pytest.approx(80_500.0 * 1.003)
+
+
+def test_build_risk_plan_sl_floor_default_off_for_backtest_v0_1_45() -> None:
+    """v0.1.45: ``apply_sl_floor`` default False — 백테스트는 floor 무관.
+
+    Why: 백테스트는 봉 단위 close 가격 평가라 호가 noise 가 의미 없음.
+    BacktestEngine 의 build_risk_plan 호출은 그대로 두고 (영역 침범 X), default
+    False 로 회귀 0 보장. BotInstance 만 명시 True 호출 (라이브 한정).
+    """
+    cfg = TpSlConfig(mode=TpSlMode.MANUAL, manual_sl_pct=1.0)
+    plan = build_risk_plan(
+        entry_price=80_500.0, direction="long",
+        leverage=34, equity_usd=1000.0,
+        config=cfg, risk_pct=0.01,
+        # apply_sl_floor 안 박음 → default False
+    )
+    # floor 미발동 — ROI 1% (manual_sl_pct=1.0) / 34x = 가격 변동 1/34/100 = 0.0294%
+    expected_sl = 80_500.0 * (1.0 - 1.0 / 34.0 / 100.0)
+    assert plan.sl_price == pytest.approx(expected_sl, rel=1e-9)
+
+
+def test_build_risk_plan_sl_floor_not_applied_to_wider_sl_v0_1_45() -> None:
+    """v0.1.45: SL 폭이 floor 보다 넓으면 ``apply_sl_floor=True`` 여도 floor 영향 X."""
+    cfg = TpSlConfig(mode=TpSlMode.MANUAL, manual_sl_pct=10.0)  # ROI 10%
+
+    # lev 10 — 가격 변동 1.0% > floor 0.3% → floor 미적용
+    plan = build_risk_plan(
+        entry_price=100.0, direction="long",
+        leverage=10, equity_usd=1000.0,
+        config=cfg, risk_pct=0.50,
+        apply_sl_floor=True,
+    )
+    assert plan.sl_price == pytest.approx(99.0)  # floor 무관 정상 산출
 
 
 def test_build_risk_plan_atr_requires_atr_value() -> None:

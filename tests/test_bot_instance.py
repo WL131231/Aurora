@@ -108,6 +108,45 @@ def test_is_configured_initially_false() -> None:
     assert bot.has_position is False
 
 
+def test_v0_1_51_indicator_priority_constants() -> None:
+    """v0.1.51: 지표 우선순위 상수 (사용자 결정 2026-05-05) — EMA=1 < Ichi=2 < RSI=3
+    < MA=4 < BB/가격 매매/Harmonic=5 (공동 5순위)."""
+    from aurora.interfaces.bot_instance import (
+        INDICATOR_PRIORITY,
+        _signal_priority,
+    )
+    assert INDICATOR_PRIORITY["EMA"] == 1
+    assert INDICATOR_PRIORITY["Ichimoku"] == 2
+    assert INDICATOR_PRIORITY["RSI"] == 3
+    assert INDICATOR_PRIORITY["MA"] == 4
+    assert INDICATOR_PRIORITY["BB"] == 5
+    assert INDICATOR_PRIORITY["가격 매매"] == 5
+    assert INDICATOR_PRIORITY["Harmonic"] == 5
+
+    # source → priority lookup
+    assert _signal_priority("ema_touch_200") == 1
+    assert _signal_priority("ichimoku_cloud_upper") == 2
+    assert _signal_priority("rsi_div_regular_bull") == 3
+    assert _signal_priority("ma_cross_golden") == 4
+    assert _signal_priority("bollinger_reversal_upper") == 5
+    assert _signal_priority("zone_2468_short") == 5
+    assert _signal_priority("harmonic_bat") == 5
+    # 매핑 없는 source → 99 (가장 낮음)
+    assert _signal_priority("unknown_source") == 99
+
+
+def test_v0_1_42_bar_dedup_initial_state() -> None:
+    """v0.1.42: bar-level 진입 dedup 변수 초기 상태 검증.
+
+    Why: 같은 봉 + 같은 source 재진입 차단 로직의 기반. 봇 첫 시작 시
+    빈 dict / 빈 tuple 이어야 모든 신호가 첫 평가 통과 가능.
+    실 dedup 동작은 _step 진입 분기에서 (bar_ts, sources) 비교로 작동.
+    """
+    bot = bot_instance.get_instance()
+    assert bot._last_entry_bar_ts == {}
+    assert bot._last_entry_sources == ()
+
+
 def test_configure_sets_client_and_options() -> None:
     """configure(client, ...) — 어댑터 + 설정 inject."""
     bot = bot_instance.get_instance()
@@ -188,6 +227,9 @@ async def test_step_resets_position_when_externally_closed() -> None:
     v0.1.7 fix: 이전엔 _plan 영원히 살아 has_position=True → 트레일링만 돌고
     신규 진입 평가 안 함 → 봇 멈춤. _step 시작 부분에서 fetch_position 으로
     sync → 거래소 측 None 면 reset_position 호출.
+
+    v0.1.52 변경: 1회 None 즉시 reset → 3회 연속 None 에서만 reset (Bybit
+    demo 일시 응답 지연 보호, 사용자 보고 v0.1.51 외부 포지션 오인지).
     """
     from aurora.core.risk import TpSlConfig, build_risk_plan
 
@@ -204,16 +246,88 @@ async def test_step_resets_position_when_externally_closed() -> None:
         equity_usd=10000.0, config=TpSlConfig(), risk_pct=0.01,
     )
     await bot.start()
+    # v0.1.52: background _run_loop 정지 — 직접 _step 호출만으로 검증 (loop 가
+    # 카운터 누적시켜 race 방지).
+    import asyncio as _asyncio
+    if bot._task is not None:
+        bot._task.cancel()
+        try:
+            await bot._task
+        except _asyncio.CancelledError:
+            pass
     bot._executor._plan = plan
     bot._executor._remaining_qty = plan.position.coin_amount
+    bot._fetch_position_none_count = 0
     assert bot._executor.has_position
 
-    # _step 1회 — fetch_position=None 감지 → reset_position 호출
+    # 1회/2회 None 으로는 reset X (일시 응답 지연 보호)
     await bot._step()
+    assert bot._executor.has_position, "1회 None — reset 안 함"
+    await bot._step()
+    assert bot._executor.has_position, "2회 None — reset 안 함"
 
-    # Executor state reset 확인
+    # 3회 연속 None — reset 발동
+    await bot._step()
     assert not bot._executor.has_position
     assert bot._executor._plan is None
+
+    await bot.stop()
+
+
+async def test_step_does_not_reset_on_intermittent_none_v0_1_52() -> None:
+    """v0.1.52: fetch_position 일시 None (1~2회) 후 정상 응답 시 카운터 리셋.
+
+    Why: Bybit demo API 일시 응답 지연 → 봇 자기 진입 포지션을 외부 포지션으로
+    오인지하던 v0.1.51 버그 fix. 1~2회 None 후 정상 응답 시 reset X.
+    """
+    from aurora.core.risk import TpSlConfig, build_risk_plan
+    from aurora.exchange.base import Position
+
+    bot = bot_instance.get_instance()
+    rows = _make_ohlcv_rows(start_ts_ms=1_700_000_000_000, count=200, tf_minutes=60)
+    client = _make_mock_client(ohlcv_rows=rows)
+
+    # entry_price + qty 모두 mock OHLCV base (100) 와 매칭 — SL trigger / qty
+    # sync race 차단 (테스트 의도 = fetch_position 카운터 리셋만 검증).
+    fake_pos = Position(
+        symbol="BTC/USDT:USDT", side="long", qty=1.0,
+        entry_price=100.0, leverage=10, unrealized_pnl=0.0,
+        margin_mode="isolated",
+    )
+    # None, None, fake_pos 순서대로 반환 (3회 호출 시뮬)
+    client.fetch_position = AsyncMock(side_effect=[None, None, fake_pos])
+    bot.configure(client=client, timeframes=["1H"], tpsl_config=TpSlConfig())
+
+    plan = build_risk_plan(
+        entry_price=100.0, direction="long", leverage=10,
+        equity_usd=10000.0, config=TpSlConfig(), risk_pct=0.01,
+    )
+    # SL/TP 무한 (mock close 와 분리) — 테스트 의도 = fetch_position 카운터만
+    plan.sl_price = 0.0
+    plan.tp_prices = [9999.0, 9999.0, 9999.0, 9999.0]
+
+    await bot.start()
+    import asyncio as _asyncio
+    if bot._task is not None:
+        bot._task.cancel()
+        try:
+            await bot._task
+        except _asyncio.CancelledError:
+            pass
+    bot._executor._plan = plan
+    bot._executor._remaining_qty = 1.0  # fake_pos.qty 와 일치 (qty sync race 차단)
+    bot._fetch_position_none_count = 0
+
+    # 1회 None
+    await bot._step()
+    assert bot._executor.has_position
+    # 2회 None
+    await bot._step()
+    assert bot._executor.has_position
+    # 정상 응답 (fake_pos) — 카운터 리셋
+    await bot._step()
+    assert bot._executor.has_position  # 포지션 그대로
+    assert bot._fetch_position_none_count == 0  # 카운터 리셋 확인
 
     await bot.stop()
 

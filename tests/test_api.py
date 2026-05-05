@@ -299,6 +299,36 @@ def test_restart_bot_from_stopped_state() -> None:
     assert s.json()["running"] is True
 
 
+def test_market_trend_returns_disabled_without_api_key_v0_1_54() -> None:
+    """v0.1.54: COINALYZE_API_KEY 미설정 시 /market-trend 가 enabled=False 반환.
+
+    Why: bot._coinalyze 가 None (api_key 없음) → 비활성 응답. UI 가 카드 숨김.
+    """
+    client = _client()
+    # 사용자 .env 에 키 박혀있을 수 있음 — 명시 비활성으로 격리
+    bot_instance.get_instance()._coinalyze = None
+    r = client.get("/market-trend")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["enabled"] is False
+    assert body["trends"] == []
+
+
+def test_relaunch_without_launcher_path_v0_1_43(monkeypatch) -> None:
+    """v0.1.43: ``/relaunch`` 호출 시 launcher path env 없으면 실패 응답.
+
+    Why: 사용자가 launcher 없이 직접 본체 .exe 실행한 경우 launcher path 모름.
+    위험한 spawn 방지 위해 명시 실패 응답 (silent 종료 X).
+    """
+    monkeypatch.delenv("AURORA_LAUNCHER_PATH", raising=False)
+    client = _client()
+    r = client.post("/relaunch")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is False
+    assert "launcher" in body["message"].lower()
+
+
 # ============================================================
 # Logs
 # ============================================================

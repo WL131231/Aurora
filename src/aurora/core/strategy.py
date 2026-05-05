@@ -12,6 +12,7 @@ import pandas as pd
 
 from aurora.core.indicators import (
     HarmonicMatch,
+    atr_wilder,
     bollinger_bands,
     ema,
     harmonic_pattern,
@@ -57,6 +58,11 @@ class EntrySignal:
     """패턴 단위 식별자 (Harmonic 등). 예: ``"bat@d_bar=50"``.
     같은 패턴이 여러 봉에 걸쳐 검출될 때 재진입 방지용."""
 
+    meta: dict[str, float] | None = None
+    """신호별 부가 정보 (v0.1.42). BB 신호의 경우 ``{"bb_upper": x,
+    "bb_lower": y}`` 형태로 진입 시점 BB 값 박음. ``build_risk_plan`` 이
+    BB Structural SL 산출에 사용. 다른 신호는 None."""
+
 
 def _last_bar_timestamp(df: pd.DataFrame) -> pd.Timestamp | None:
     """DataFrame 의 마지막 봉 timestamp (DatetimeIndex 일 때만, 그 외 None)."""
@@ -80,6 +86,10 @@ class StrategyConfig:
     # 진입 파라미터
     ema_touch_tolerance: float = 0.003  # ±0.3% — 노이즈는 통과시키고 의미있는 터치만 잡는 출발값
     ema_periods: tuple[int, ...] = (200, 480)  # 200=중기 추세, 480=장기 추세 (EMA 보스 자료 기반)
+    ema_breakout_buffer_pct: float = 0.005
+    """EMA 이탈 buffer (v0.1.45). EMA 진입 시점 EMA 라인 ± buffer 가 SL.
+    LONG (지지): SL = EMA × (1 - buffer), SHORT (저항): SL = EMA × (1 + buffer).
+    기본 0.005 = 0.5% (touch tolerance 0.3% 보다 약간 위 — wick 흡수). 사용자 결정."""
     rsi_period: int = 14                 # Wilder 1978 표준
     rsi_div_lb_left: int = 5             # 트뷰 RSI Divergence 표준 lookback (좌)
     rsi_div_lb_right: int = 5            # 트뷰 RSI Divergence 표준 lookback (우)
@@ -95,8 +105,9 @@ class StrategyConfig:
     # Bollinger Bands (Selectable — 1H 고정)
     bollinger_period: int = 20           # John Bollinger 1980 표준 (20 SMA)
     bollinger_std: float = 2.0           # ±2σ — 표준 정규분포 95% 구간
-    bollinger_proximity_pct: float = 0.005
-    """가장자리 라인에서 안쪽 ``proximity_pct`` 이내 = 진입 zone (예: 0.005 = 0.5%)."""
+    bollinger_breakout_buffer_pct: float = 0.003
+    """BB 이탈/회귀 buffer (v0.1.42). BB 라인 ± buffer 가 진입 + SL 라인 동시.
+    기본 0.003 = 0.3%. 호가 noise (~0.08%) 위로 진입 안정성 확보."""
     bollinger_squeeze_threshold: float = 0.015
     """폭(upper-lower) / middle 이 이 값 이하면 squeeze 상태로 진입 보류 (기본 0.015 = 1.5%)."""
 
@@ -104,6 +115,10 @@ class StrategyConfig:
     ma_cross_fast: int = 50
     ma_cross_slow: int = 200
     """SMA 기간. 골크/데크 표준은 50/200."""
+    ma_cross_breakout_buffer_pct: float = 0.003
+    """MA cross 이탈 buffer (v0.1.45). 진입 시점 slow MA ± buffer 가 SL.
+    LONG (golden): SL = slowMA × (1 - buffer), SHORT (dead): SL = slowMA × (1 + buffer).
+    기본 0.003 = 0.3% (cross 무효화 — 가격이 slow 깨면 추세 끝)."""
 
     # Ichimoku Cloud (Selectable — 1H/2H/4H 멀티 TF, HTF 가중치 자동 적용)
     ichimoku_conversion_period: int = 9
@@ -114,6 +129,10 @@ class StrategyConfig:
     """Leading Span B donchian 기간."""
     ichimoku_displacement: int = 26
     """forward shift 양 (트뷰 표준 26 → 실제 shift = 25봉)."""
+    ichimoku_breakout_buffer_pct: float = 0.006
+    """Ichimoku 구름 이탈 buffer (v0.1.44). 진입 시점 cloud 라인 ± buffer 가
+    SL 라인. 기본 0.006 = 0.6% (BB 0.3% 보다 2배 여유 — Ichimoku 는 멀티 TF
+    추세 지표라 wick 흡수 폭 더 필요. 사용자 결정)."""
 
     # Harmonic Pattern (Selectable — 15m/1H 멀티 TF, HTF 가중치 자동 적용)
     harmonic_pivot_length: int = 10
@@ -214,12 +233,18 @@ def detect_ema_touch(
                 continue  # 터치 거리 초과 → 신호 X
 
             # 종가 위치로 지지/저항 판단
+            ema_val_f = float(ema_val)
+            ema_buffer = config.ema_breakout_buffer_pct
             if last_close >= ema_val:
                 direction = Direction.LONG
                 note = f"EMA{period} 지지 (close ≥ EMA, 거리 {distance:.4f})"
+                # v0.1.45: LONG (지지) — EMA 아래로 buffer 이탈 시 손절
+                ema_sl_price = ema_val_f * (1.0 - ema_buffer)
             else:
                 direction = Direction.SHORT
                 note = f"EMA{period} 저항 (close < EMA, 거리 {distance:.4f})"
+                # v0.1.45: SHORT (저항) — EMA 위로 buffer 이탈 시 손절
+                ema_sl_price = ema_val_f * (1.0 + ema_buffer)
 
             # 거래량 동반 시 공격적 진입 = strength 부스트
             strength = config.volume_boost if vol_confirmed else 1.0
@@ -233,6 +258,12 @@ def detect_ema_touch(
                     source=f"ema_touch_{period}",
                     strength=strength,
                     note=note,
+                    meta={
+                        "ema_value": ema_val_f,
+                        "ema_period": float(period),
+                        "buffer_pct": ema_buffer,
+                        "sl_price": ema_sl_price,
+                    },
                     bar_timestamp=ts,
                 )
             )
@@ -303,48 +334,70 @@ def detect_rsi_divergence(
 
 
 # ============================================================
-# Selectable: Bollinger Bands (1H 고정, 횡보장 특화)
+# Selectable: Bollinger Bands (멀티 TF — 5m/15m/1H, v0.1.51)
 # ============================================================
+
+# v0.1.51: 1H 고정 → 5m/15m/1H 멀티 TF. HTF 가중치 (5m=1, 15m=1, 1H=2) 자동.
+BB_TIMEFRAMES: tuple[str, ...] = ("5m", "15m", "1H")
 
 
 def detect_bollinger_touch(
-    df_1h: pd.DataFrame,
+    df_by_tf: dict[str, pd.DataFrame],
     config: StrategyConfig,
 ) -> list[EntrySignal]:
-    """볼린저 밴드 4-tier 진입 룰 (1H 고정, 양방향 진입+청산 정책).
+    """볼린저 밴드 buffered reversal 진입 룰 (멀티 TF, v0.1.51 확장).
 
-    우선순위 순:
-        1. **Squeeze 보류**: 폭 / middle ≤ ``squeeze_threshold`` (밴드 좁음, 추세 대기) → []
-        2. **Reversal 진입** (강도 1.5): 직전 봉 종가가 BB 밖 + 현재 봉 종가 안쪽
-           → 위로 찢어졌다 회귀 = SHORT / 아래로 찢어졌다 회귀 = LONG
-        3. **찢어짐 보류**: 현재 봉 종가가 BB 밖 (위 또는 아래) → []
-        4. **Proximity 터치 진입** (강도 1.0): 봉의 high/low 가 가장자리 zone 진입
-           → high ≥ ``upper × (1 - proximity)`` + close 안쪽 = SHORT
-           → low  ≤ ``lower × (1 + proximity)`` + close 안쪽 = LONG
+    v0.1.51 변경: 1H 고정 → 5m/15m/1H 각 TF 별개 신호 emit. HTF 가중치 자연
+    적용 (compose_entry 가 처리). signal.timeframe 은 해당 TF.
 
-    "양방향 진입+청산": BB 신호 = 진입 신호 + 반대 포지션 청산 신호.
-    구체 동작은 ``signal.compose_entry`` / ``compose_exit`` 가 처리.
+    v0.1.42 ~ v0.1.50 흐름 (그대로 유지):
+        - proximity 폐기 + buffer 도입
+        - Reversal / Wick reversal 만 신호 emit
+        - 진입 + SL 라인 = BB ± buffer 동일 (호가 noise 위 안전)
+        - meta.sl_price 박음 (build_risk_plan 이 structural_sl_price 로 사용)
+
+    각 TF 별 독립 평가 — 5m / 15m / 1H 모두 reversal/wick reversal 발생 가능.
+    예: 1H BB SHORT (가중치 2) + 15m BB SHORT (가중치 1) 동시 → 둘 다 emit,
+    compose_entry 가 가중치 곱해 score 합산.
 
     Args:
-        df_1h: 1H OHLC DataFrame (close/high/low 컬럼).
-        config: 전략 설정 (bollinger_period/std/proximity_pct/squeeze_threshold).
+        df_by_tf: TF 별 OHLC DataFrame ({"5m": df, "15m": df, "1H": df, ...}).
+                  누락 TF 는 skip.
+        config: 전략 설정 (bollinger_period/std/breakout_buffer_pct/squeeze).
 
     Returns:
-        ``EntrySignal`` 리스트 (마지막 봉 기준).
+        ``EntrySignal`` 리스트 (각 TF 0~1 개, 총 0~3 개).
     """
-    if df_1h is None or df_1h.empty:
-        return []
+    signals: list[EntrySignal] = []
+    for tf in BB_TIMEFRAMES:
+        df = df_by_tf.get(tf)
+        if df is None or df.empty:
+            continue
+        signals.extend(_detect_bb_for_tf(df, tf, config))
+    return signals
+
+
+def _detect_bb_for_tf(
+    df: pd.DataFrame,
+    tf: str,
+    config: StrategyConfig,
+) -> list[EntrySignal]:
+    """단일 TF BB reversal/wick reversal 검출 (v0.1.51 분리).
+
+    v0.1.42 detect_bollinger_touch 본체 그대로 — TF 별 호출만 분리. 본체 로직
+    변경 X (회귀 0 보장). signal.timeframe 만 인자로 받은 ``tf`` 사용.
+    """
     required = {"close", "high", "low"}
-    if not required.issubset(df_1h.columns):
+    if not required.issubset(df.columns):
         return []
 
-    bb = bollinger_bands(df_1h["close"], period=config.bollinger_period, std=config.bollinger_std)
+    bb = bollinger_bands(df["close"], period=config.bollinger_period, std=config.bollinger_std)
     if len(bb) < 2:
         return []
 
-    last_close = float(df_1h["close"].iloc[-1])
-    last_high = float(df_1h["high"].iloc[-1])
-    last_low = float(df_1h["low"].iloc[-1])
+    last_close = float(df["close"].iloc[-1])
+    last_high = float(df["high"].iloc[-1])
+    last_low = float(df["low"].iloc[-1])
     last_upper = bb["upper"].iloc[-1]
     last_lower = bb["lower"].iloc[-1]
     last_middle = bb["middle"].iloc[-1]
@@ -355,7 +408,7 @@ def detect_bollinger_touch(
     last_upper_f = float(last_upper)
     last_lower_f = float(last_lower)
     last_middle_f = float(last_middle)
-    ts = _last_bar_timestamp(df_1h)
+    ts = _last_bar_timestamp(df)
 
     # ─── 1. Squeeze 보류 ──────────────────────────────────
     if last_middle_f > 0:
@@ -363,90 +416,87 @@ def detect_bollinger_touch(
         if narrowness <= config.bollinger_squeeze_threshold:
             return []
 
-    # ─── 2. Reversal 진입 (직전 봉 outside → 현재 봉 inside) ───
-    prev_close = float(df_1h["close"].iloc[-2])
+    # ─── buffer 적용 라인 (진입 + SL 동일 라인, v0.1.42) ───
+    buffer = config.bollinger_breakout_buffer_pct
+    upper_threshold = last_upper_f * (1.0 + buffer)
+    lower_threshold = last_lower_f * (1.0 - buffer)
+
+    # BB 메타 — 진입 시점 BB 값. build_risk_plan 이 SL 산출에 사용.
+    bb_meta = {
+        "bb_upper": last_upper_f,
+        "bb_lower": last_lower_f,
+        "bb_middle": last_middle_f,
+        "buffer_pct": buffer,
+    }
+
+    # ─── 2. Reversal 진입 (직전 봉 buffer 밖 → 현재 봉 buffer 안 회귀) ───
+    prev_close = float(df["close"].iloc[-2])
     prev_upper = bb["upper"].iloc[-2]
     prev_lower = bb["lower"].iloc[-2]
 
     if not pd.isna(prev_upper) and not pd.isna(prev_lower):
         prev_upper_f = float(prev_upper)
         prev_lower_f = float(prev_lower)
-        # 위로 찢어졌다 회귀
-        if prev_close > prev_upper_f and last_close <= last_upper_f:
+        prev_upper_thr = prev_upper_f * (1.0 + buffer)
+        prev_lower_thr = prev_lower_f * (1.0 - buffer)
+        # 위로 buffer 이탈 → buffer 안 회귀
+        if prev_close > prev_upper_thr and last_close <= upper_threshold:
+            # SHORT 시 SL = bb_upper × (1 + buffer) (BB 상단 위로 더 가면 손절)
+            short_sl = last_upper_f * (1.0 + buffer)
             return [EntrySignal(
                 direction=Direction.SHORT,
-                timeframe="1H",
+                timeframe=tf,
                 source="bollinger_reversal_upper",
                 strength=1.5,
-                note=f"BB 상단 찢어짐 회귀 (prev={prev_close:.4f}>{prev_upper_f:.4f}, "
-                     f"last={last_close:.4f}≤{last_upper_f:.4f})",
+                note=f"BB 상단 buffer 이탈 회귀 ({tf}, prev={prev_close:.4f}>{prev_upper_thr:.4f}, "
+                     f"last={last_close:.4f}≤{upper_threshold:.4f})",
                 bar_timestamp=ts,
+                meta={**bb_meta, "sl_price": short_sl},
             )]
-        # 아래로 찢어졌다 회귀
-        if prev_close < prev_lower_f and last_close >= last_lower_f:
+        # 아래로 buffer 이탈 → buffer 안 회귀
+        if prev_close < prev_lower_thr and last_close >= lower_threshold:
+            long_sl = last_lower_f * (1.0 - buffer)
             return [EntrySignal(
                 direction=Direction.LONG,
-                timeframe="1H",
+                timeframe=tf,
                 source="bollinger_reversal_lower",
                 strength=1.5,
-                note=f"BB 하단 찢어짐 회귀 (prev={prev_close:.4f}<{prev_lower_f:.4f}, "
-                     f"last={last_close:.4f}≥{last_lower_f:.4f})",
+                note=f"BB 하단 buffer 이탈 회귀 ({tf}, prev={prev_close:.4f}<{prev_lower_thr:.4f}, "
+                     f"last={last_close:.4f}≥{lower_threshold:.4f})",
                 bar_timestamp=ts,
+                meta={**bb_meta, "sl_price": long_sl},
             )]
 
-    # ─── 3. 단일 봉 wick reversal (v0.1.28 신규, 사용자 차트 진단) ────
-    # 현재 봉 안에서 wick 만 outside (high > upper or low < lower) + close inside.
-    # 직전 봉이 upper 안에서 닫혔어도 현재 봉 wick reversion 자체로 진입 신호.
-    # 강도 1.5 (Reversal 과 동일) — 단일 봉이 reversion candle 자체.
-    if last_high > last_upper_f and last_close <= last_upper_f:
+    # ─── 3. 단일 봉 wick reversal (v0.1.28 + v0.1.42 buffer 적용) ────
+    # 현재 봉 안에서 wick 만 buffer 밖 (high > upper_thr or low < lower_thr)
+    # + close 가 buffer 안쪽 → 단일 봉 reversion candle 자체.
+    if last_high > upper_threshold and last_close <= upper_threshold:
+        short_sl = last_upper_f * (1.0 + buffer)
         return [EntrySignal(
             direction=Direction.SHORT,
-            timeframe="1H",
+            timeframe=tf,
             source="bollinger_wick_reversal_upper",
             strength=1.5,
-            note=f"BB 상단 wick reversal (high={last_high:.4f}>{last_upper_f:.4f}, "
-                 f"close={last_close:.4f}≤{last_upper_f:.4f})",
+            note=f"BB 상단 wick reversal ({tf}, high={last_high:.4f}>{upper_threshold:.4f}, "
+                 f"close={last_close:.4f}≤{upper_threshold:.4f})",
             bar_timestamp=ts,
+            meta=bb_meta,
         )]
-    if last_low < last_lower_f and last_close >= last_lower_f:
+    if last_low < lower_threshold and last_close >= lower_threshold:
         return [EntrySignal(
             direction=Direction.LONG,
-            timeframe="1H",
+            timeframe=tf,
             source="bollinger_wick_reversal_lower",
             strength=1.5,
-            note=f"BB 하단 wick reversal (low={last_low:.4f}<{last_lower_f:.4f}, "
-                 f"close={last_close:.4f}≥{last_lower_f:.4f})",
+            note=f"BB 하단 wick reversal ({tf}, low={last_low:.4f}<{lower_threshold:.4f}, "
+                 f"close={last_close:.4f}≥{lower_threshold:.4f})",
             bar_timestamp=ts,
+            meta={**bb_meta, "sl_price": last_lower_f * (1.0 - buffer)},
         )]
 
-    # ─── 4. 찢어짐 보류 (현재 봉 종가가 BB 밖) ────────────
-    if last_close > last_upper_f or last_close < last_lower_f:
-        return []
-
-    # ─── 5. Proximity 터치 진입 (가장자리 안쪽 zone) ──────
-    upper_zone_start = last_upper_f * (1.0 - config.bollinger_proximity_pct)
-    lower_zone_end = last_lower_f * (1.0 + config.bollinger_proximity_pct)
-
-    signals: list[EntrySignal] = []
-    if last_high >= upper_zone_start:
-        signals.append(EntrySignal(
-            direction=Direction.SHORT,
-            timeframe="1H",
-            source="bollinger_upper",
-            strength=1.0,
-            note=f"BB 상단 zone 진입 (high={last_high:.4f}, zone_start={upper_zone_start:.4f})",
-            bar_timestamp=ts,
-        ))
-    if last_low <= lower_zone_end:
-        signals.append(EntrySignal(
-            direction=Direction.LONG,
-            timeframe="1H",
-            source="bollinger_lower",
-            strength=1.0,
-            note=f"BB 하단 zone 진입 (low={last_low:.4f}, zone_end={lower_zone_end:.4f})",
-            bar_timestamp=ts,
-        ))
-    return signals
+    # v0.1.42: Proximity 터치 진입 폐기 (last_high 누적 max trap →
+    # 사고팔고 무한 사이클). Reversal + Wick reversal 만 신호.
+    return []
 
 
 # ============================================================
@@ -485,7 +535,23 @@ def detect_ma_cross(
         cross = ma_cross(df["close"], fast=config.ma_cross_fast, slow=config.ma_cross_slow)
         last = cross.iloc[-1]
         ts = _last_bar_timestamp(df)
+        if last not in ("golden", "dead"):
+            continue
+
+        # v0.1.45: slow MA 값 산출 — Structural SL = slowMA × (1 ± buffer).
+        # SMA 직접 계산 (ma_cross 함수가 cross 결과만 반환).
+        slow_ma_series = df["close"].rolling(
+            window=config.ma_cross_slow, min_periods=config.ma_cross_slow,
+        ).mean()
+        slow_ma_val = slow_ma_series.iloc[-1]
+        if pd.isna(slow_ma_val) or slow_ma_val <= 0:
+            continue
+        slow_ma_f = float(slow_ma_val)
+        ma_buffer = config.ma_cross_breakout_buffer_pct
+
         if last == "golden":
+            # LONG (골든크로스 진입) — 가격이 slow MA 아래로 이탈 시 cross 무효 → 손절
+            ma_sl_price = slow_ma_f * (1.0 - ma_buffer)
             signals.append(EntrySignal(
                 direction=Direction.LONG,
                 timeframe=tf,
@@ -493,8 +559,16 @@ def detect_ma_cross(
                 strength=1.0,
                 note=f"SMA{config.ma_cross_fast}/{config.ma_cross_slow} 골든크로스 ({tf})",
                 bar_timestamp=ts,
+                meta={
+                    "slow_ma_value": slow_ma_f,
+                    "slow_period": float(config.ma_cross_slow),
+                    "buffer_pct": ma_buffer,
+                    "sl_price": ma_sl_price,
+                },
             ))
-        elif last == "dead":
+        else:  # dead
+            # SHORT (데드크로스 진입) — 가격이 slow MA 위로 이탈 시 cross 무효 → 손절
+            ma_sl_price = slow_ma_f * (1.0 + ma_buffer)
             signals.append(EntrySignal(
                 direction=Direction.SHORT,
                 timeframe=tf,
@@ -502,6 +576,12 @@ def detect_ma_cross(
                 strength=1.0,
                 note=f"SMA{config.ma_cross_fast}/{config.ma_cross_slow} 데드크로스 ({tf})",
                 bar_timestamp=ts,
+                meta={
+                    "slow_ma_value": slow_ma_f,
+                    "slow_period": float(config.ma_cross_slow),
+                    "buffer_pct": ma_buffer,
+                    "sl_price": ma_sl_price,
+                },
             ))
 
     return signals
@@ -570,6 +650,11 @@ def detect_ichimoku_signal(
         lower_f = float(last_lower)
         ts = _last_bar_timestamp(df)
 
+        # v0.1.44: Ichimoku Structural SL meta — 진입 시점 cloud 값 + buffer 박음.
+        # build_risk_plan 이 SL = cloud_upper × (1 - buffer) (LONG) /
+        # cloud_lower × (1 + buffer) (SHORT) 로 override.
+        ichimoku_buffer = config.ichimoku_breakout_buffer_pct
+
         # 가격이 구름 위 + 상단 스팬 터치 → LONG
         if last_close > upper_f and last_low <= upper_f:
             signals.append(EntrySignal(
@@ -580,6 +665,12 @@ def detect_ichimoku_signal(
                 note=f"이치모쿠 구름 상단 지지 ({tf}, "
                      f"low={last_low:.4f}≤upper={upper_f:.4f}<close={last_close:.4f})",
                 bar_timestamp=ts,
+                meta={
+                    "cloud_upper": upper_f,
+                    "cloud_lower": lower_f,
+                    "buffer_pct": ichimoku_buffer,
+                    "sl_price": upper_f * (1.0 - ichimoku_buffer),
+                },
             ))
         # 가격이 구름 아래 + 하단 스팬 터치 → SHORT
         elif last_close < lower_f and last_high >= lower_f:
@@ -591,6 +682,12 @@ def detect_ichimoku_signal(
                 note=f"이치모쿠 구름 하단 저항 ({tf}, "
                      f"close={last_close:.4f}<lower={lower_f:.4f}≤high={last_high:.4f})",
                 bar_timestamp=ts,
+                meta={
+                    "cloud_upper": upper_f,
+                    "cloud_lower": lower_f,
+                    "buffer_pct": ichimoku_buffer,
+                    "sl_price": lower_f * (1.0 + ichimoku_buffer),
+                },
             ))
 
     return signals
@@ -717,6 +814,15 @@ def detect_harmonic_signal(
             bar_timestamp=_last_bar_timestamp(df),
             # 재진입 방지용 식별자: 같은 D 봉의 같은 패턴이면 같은 id
             pattern_id=f"{match.name}@{tf}@d_bar={match.d_bar}",
+            # v0.1.45: Harmonic 패턴 자체 SL (XABCD X 방향 연장, PDF 룰) 을 meta 에
+            # 박아 build_risk_plan 이 structural_sl_price 로 사용. 이전엔 match.sl_price
+            # 가 산출만 되고 build_risk_plan 에 전달 안 됐음 (lev × ROI SL 만 사용).
+            meta={
+                "sl_price": float(match.sl_price),
+                "tp1_price": float(match.tp1_price),
+                "tp2_price": float(match.tp2_price),
+                "pattern_name": match.name,
+            },
         ))
 
     return signals
@@ -799,20 +905,28 @@ def _select_2468_df(df_by_tf: dict[str, pd.DataFrame]) -> tuple[str, pd.DataFram
 
 
 def _detect_ma_trend(df: pd.DataFrame, fast: int, slow: int) -> str | None:
-    """MA Cross 상태 기반 현재 추세 — 가장 최근 cross 의 방향.
+    """현재 추세 — fast SMA vs slow SMA 단순 비교 (v0.1.49 fix).
+
+    v0.1.49 변경: 이전 ``ma_cross().dropna().iloc[-1]`` 패턴은 cross 발생 봉
+    에서만 emit 되는 한계 있음 (그 외 봉은 None). 강한 추세 지속 시 cross 가
+    한참 전에 발생하면 ``cross.empty=True`` → trend=None → 2468 SKIP (사용자
+    보고 v0.1.48 환경, 비트 EMA200 위 +3.42% 인데 한 번도 안 잡힘).
+
+    PDF 의도 정합 — "상방 추세 / 하방 추세" 는 **현재 fast > slow / fast < slow**
+    상태이지 cross 발생 시점만 보는 게 아님. cross 후 추세 지속을 봐야 자연.
 
     Returns:
-        ``"up"`` (가장 최근 cross = golden) / ``"down"`` (dead) / ``None`` (아직 cross 없음).
+        ``"up"`` (fast > slow) / ``"down"`` (fast < slow) / ``None`` (데이터 부족).
     """
     if "close" not in df.columns or len(df) < slow:
         return None
-    cross = ma_cross(df["close"], fast=fast, slow=slow).dropna()
-    if cross.empty:
+    fast_ma_val = df["close"].rolling(window=fast, min_periods=fast).mean().iloc[-1]
+    slow_ma_val = df["close"].rolling(window=slow, min_periods=slow).mean().iloc[-1]
+    if pd.isna(fast_ma_val) or pd.isna(slow_ma_val):
         return None
-    last = cross.iloc[-1]
-    if last == "golden":
+    if fast_ma_val > slow_ma_val:
         return "up"
-    if last == "dead":
+    if fast_ma_val < slow_ma_val:
         return "down"
     return None
 
@@ -896,6 +1010,15 @@ def detect_2468_signal(
             ),
             bar_timestamp=ts,
             pattern_id=f"2468@{tf}@N{int(k_floor)}_short",
+            # v0.1.47: 2468 자체 SL (zone 끝 + 1K USDT, PDF 룰) 을 meta 에 박아
+            # build_risk_plan 이 structural_sl_price 로 사용. 이전엔 note 에만
+            # 박혀 ROI 기반 좁은 SL 사용 (PDF 의도 대비 ~5배 좁음).
+            meta={
+                "sl_price": float(sl_price),
+                "zone_lo": float(short_zone_lo),
+                "zone_hi": float(short_zone_hi),
+                "k_floor": float(k_floor),
+            },
         )]
 
     # 하방 추세 + N.600~N.800 zone 터치 → LONG
@@ -913,6 +1036,12 @@ def detect_2468_signal(
             ),
             bar_timestamp=ts,
             pattern_id=f"2468@{tf}@N{int(k_floor)}_long",
+            meta={
+                "sl_price": float(sl_price),
+                "zone_lo": float(long_zone_lo),
+                "zone_hi": float(long_zone_hi),
+                "k_floor": float(k_floor),
+            },
         )]
 
     return []
@@ -950,9 +1079,8 @@ def evaluate_selectable(
     signals: list[EntrySignal] = []
 
     if config.use_bollinger:
-        df_1h = df_by_tf.get("1H")
-        if df_1h is not None:
-            signals.extend(detect_bollinger_touch(df_1h, config))
+        # v0.1.51: 1H 고정 → 5m/15m/1H 멀티 TF (HTF 가중치 자동)
+        signals.extend(detect_bollinger_touch(df_by_tf, config))
 
     if config.use_ma_cross:
         signals.extend(detect_ma_cross(df_by_tf, config))
@@ -967,3 +1095,126 @@ def evaluate_selectable(
     signals.extend(detect_2468_signal(df_by_tf, config, symbol=symbol))
 
     return signals
+
+
+# ============================================================
+# D-5 Regime breakdown — 4H 시장 국면 분류 (2026-05-05)
+# ============================================================
+
+
+class Regime(StrEnum):
+    """시장 국면 enum — TradeRecord.regime metadata 입력.
+
+    분류 우선순위 (정책 spec 5/5 LGTM 합치, Issue #110): VOLATILE > TREND > RANGE.
+    UNKNOWN 은 4H 미닫힘 진입 시 Position.regime 디폴트 (분류 미산출 자연 처리).
+    """
+
+    TREND_UP = "TREND_UP"
+    TREND_DOWN = "TREND_DOWN"
+    RANGE = "RANGE"
+    VOLATILE = "VOLATILE"
+    UNKNOWN = "UNKNOWN"
+
+
+# Regime 분류 임계 — 정책 spec drafts/D-5-regime-policy-spec.md 5/5 LGTM 합치 (잠정안)
+# RegimeConfig 디폴트 source — 본 4 상수 보존 (배포 호환성, 외부 import path 유지).
+# 모듈 상수 deprecation 은 후속 트래커 (외부 import 영향 점검 후 결정).
+TREND_THRESHOLD = 0.005          # EMA50/200 격차 ±0.5% — TREND vs RANGE 경계
+VOLATILITY_MULTIPLIER = 2.0      # atr_now / atr_avg ≥ 2.0 → VOLATILE
+VOLATILITY_LOOKBACK = 20         # ATR 평균 산출 윈도우 (4H 봉 20 개 = 약 3.3 일)
+
+
+@dataclass(slots=True)
+class RegimeConfig:
+    """Regime 분류 임계 + F1 옵트인 가드 매개변수 (D-5 보충 F1 + F3, Issue #110 후속).
+
+    F3 — `classify_regime` 임계 3 개 매개변수화 (디폴트는 모듈 상수 그대로,
+    배포 호환성 보존). F1 — `skip_on_volatile` 옵트인 (디폴트 False — D-5 #124
+    현 동작 보존). `BacktestConfig.regime_config` 노출 (D-1 risk_config 패턴 정합)
+    + `BacktestEngine.__init__` 시점 `self._regime_config` 박음 + `step()` 8 단계
+    인자 전달 + 9b 진입 직전 가드 (옵션 C).
+
+    Attributes:
+        trend_threshold: TREND vs RANGE 경계 — `|gap| ≥ trend_threshold` 시 TREND.
+            디폴트 ``TREND_THRESHOLD = 0.005`` (±0.5%).
+        volatility_multiplier: VOLATILE 분류 — `atr_now / atr_avg ≥ multiplier`.
+            디폴트 ``VOLATILITY_MULTIPLIER = 2.0``.
+        volatility_lookback: ATR 평균 산출 윈도우 (4H 봉 N 개). 디폴트
+            ``VOLATILITY_LOOKBACK = 20`` (≈ 3.3 일).
+        skip_on_volatile: True 시 `BacktestEngine.step()` 9b 가드 — `_last_regime`
+            이 VOLATILE 일 때 진입 skip (옵션 C, drafts/D-5-supplements-policy-spec.md
+            Q1 정합). 디폴트 False — D-5 #124 현 동작 보존 (옵트인).
+    """
+
+    trend_threshold: float = TREND_THRESHOLD
+    volatility_multiplier: float = VOLATILITY_MULTIPLIER
+    volatility_lookback: int = VOLATILITY_LOOKBACK
+    skip_on_volatile: bool = False
+
+
+def classify_regime(
+    df_4h: pd.DataFrame,
+    regime_config: RegimeConfig | None = None,
+) -> Regime:
+    """4H DataFrame 기반 시장 국면 분류 — 4 regime + UNKNOWN fallback.
+
+    분류 우선순위 (정책 spec, 5/5 LGTM 합치 — Issue #110):
+        1. **VOLATILE** — ``atr_now / atr_avg ≥ volatility_multiplier`` (변동성 우선,
+           TREND 동시 발동 시에도 VOLATILE 채택).
+        2. **TREND_UP** — ``(ema50 - ema200) / ema200 ≥ trend_threshold``.
+        3. **TREND_DOWN** — ``(ema50 - ema200) / ema200 ≤ -trend_threshold``.
+        4. **RANGE** — fallback (격차 미만 또는 변동성 평균 안정).
+
+    Sample 부족 (``len(df_4h) < volatility_lookback``) 또는 NaN 발생 시
+    ``RANGE`` fallback (silent — UNKNOWN 은 진입 시점 박는 디폴트로만 사용).
+
+    Args:
+        df_4h: 4H OHLC DataFrame (``open/high/low/close`` 컬럼 필요).
+        regime_config: 임계 매개변수화 (D-5 보충 F3). ``None`` 시 ``RegimeConfig()``
+            디폴트 (모듈 상수 그대로 — 배포 호환성). mutable default 안티패턴
+            회피 위해 ``None`` 분기 + 함수 내 인스턴스 생성 패턴.
+
+    Returns:
+        ``Regime`` enum (VOLATILE / TREND_UP / TREND_DOWN / RANGE).
+
+    Note:
+        본 함수는 분류만 책임. VOLATILE 시 신호 평가 skip 등의 액션은 호출자
+        (`BacktestEngine.step()` 9b 가드, D-5 보충 F1) 책임 — `RegimeConfig.
+        skip_on_volatile` 옵트인.
+    """
+    cfg = regime_config or RegimeConfig()
+
+    # Sample 부족 가드 — lookback 미만이면 ATR 평균 산출 무의미 → RANGE fallback
+    if len(df_4h) < cfg.volatility_lookback:
+        return Regime.RANGE
+
+    close = df_4h["close"]
+    ema50 = ema(close, 50)
+    ema200 = ema(close, 200)
+    atr = atr_wilder(df_4h, period=14)
+
+    ema50_now = ema50.iloc[-1]
+    ema200_now = ema200.iloc[-1]
+    atr_now = atr.iloc[-1]
+
+    # NaN 가드 — close 끝부분 NaN / 산출 실패 → RANGE fallback
+    if pd.isna(ema50_now) or pd.isna(ema200_now) or pd.isna(atr_now):
+        return Regime.RANGE
+
+    # VOLATILE 우선 (정책 spec — 변동성 평균 ≥ multiplier)
+    atr_avg = atr.iloc[-cfg.volatility_lookback:].mean()
+    # Why: atr_avg=0 가드 — 완전 정적 가격 (high=low=close 모든 봉) 시 ZeroDiv 회피
+    if atr_avg > 0 and atr_now / atr_avg >= cfg.volatility_multiplier:
+        return Regime.VOLATILE
+
+    # TREND 분류 — EMA50/200 상대 격차 (정책 spec ±trend_threshold)
+    # Why: ema200_now=0 가드 — 산출가 0 (이론상 비정상) 시 ZeroDiv 회피 → RANGE
+    if ema200_now == 0:
+        return Regime.RANGE
+    gap = (ema50_now - ema200_now) / ema200_now
+    if gap >= cfg.trend_threshold:
+        return Regime.TREND_UP
+    if gap <= -cfg.trend_threshold:
+        return Regime.TREND_DOWN
+
+    return Regime.RANGE

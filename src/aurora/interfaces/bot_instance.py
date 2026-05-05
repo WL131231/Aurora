@@ -45,6 +45,12 @@ from aurora.exchange.base import ExchangeClient
 from aurora.exchange.data import MultiTfCache
 from aurora.exchange.execution import ClosedTrade, Executor
 from aurora.interfaces import active_position_store, trades_store
+from aurora.market.coinalyze import (
+    CoinalyzeClient,
+    MarketTrend,
+    trend_filter,
+    trend_score_multiplier,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,14 +88,17 @@ _WARMUP_DEFAULTS = {"15m": 200, "1H": 500, "2H": 250, "4H": 500, "1D": 200}
 
 # default 매매 페어 / TF 셋 — configure 안 하면 settings 기반 사용
 _DEFAULT_SYMBOL = "BTC/USDT:USDT"
-_DEFAULT_TIMEFRAMES = ["15m", "1H", "4H"]
+_DEFAULT_TIMEFRAMES = ["5m", "15m", "1H", "4H"]  # v0.1.51: BB 5m/15m/1H 활용
 
 # default 레버리지 — TODO: GUI config 연결 시 settings.leverage 같은 필드 추가 (별도 PR)
 _DEFAULT_LEVERAGE = 10
 
-# 지표 트리거 패널 카테고리 (UI 표시 6개) — signal.source 의 prefix 매핑.
+# 지표 트리거 패널 카테고리 (UI 표시 7개) — signal.source 의 prefix 매핑.
 # v0.1.14 — 사용자가 "각 지표 현재 어떻게 보고 있나" 한눈에 확인용.
-_INDICATOR_CATEGORIES: list[str] = ["EMA", "RSI", "BB", "MA", "Ichimoku", "Harmonic"]
+# v0.1.49 — "가격 매매" (zone_2468_*) 카테고리 추가 (사용자 결정).
+_INDICATOR_CATEGORIES: list[str] = [
+    "EMA", "RSI", "BB", "MA", "Ichimoku", "Harmonic", "가격 매매",
+]
 _SOURCE_PREFIX_MAP: dict[str, str] = {
     "ema_": "EMA",
     "rsi_": "RSI",
@@ -97,15 +106,40 @@ _SOURCE_PREFIX_MAP: dict[str, str] = {
     "ma_cross_": "MA",
     "ichimoku_": "Ichimoku",
     "harmonic_": "Harmonic",
+    "zone_2468_": "가격 매매",
 }
 
 
 def _categorize_source(source: str) -> str | None:
-    """signal.source ("ema_touch_200" 등) → UI 카테고리 ("EMA")."""
+    """signal.source ("ema_touch_200" / "zone_2468_short" 등) → UI 카테고리."""
     for prefix, cat in _SOURCE_PREFIX_MAP.items():
         if source.startswith(prefix):
             return cat
-    return None  # 매핑 없는 source — UI 표시 X (예: 2468 internal)
+    return None  # 매핑 없는 source — UI 표시 X
+
+
+# v0.1.51: 지표별 우선순위 (작은 숫자 = 더 높은 우선순위, 사용자 결정 2026-05-05).
+# PRIORITY swap 분기에 사용 — 보유 중 더 높은 우선순위 신호 발견 시:
+#   - 같은 방향: SL update (수수료 절약, 사용자 결정 옵션 b)
+#   - 반대 방향: 청산 + 재진입 (priority_swap 사유)
+# 같은 우선순위 = 동일 — swap 발동 X (BB / 가격 매매 공동 5순위).
+INDICATOR_PRIORITY: dict[str, int] = {
+    "EMA": 1,
+    "Ichimoku": 2,
+    "RSI": 3,
+    "MA": 4,
+    "BB": 5,
+    "가격 매매": 5,
+    "Harmonic": 5,  # Harmonic 도 공동 5순위 (PDF 패턴, 보강 신호)
+}
+
+
+def _signal_priority(source: str) -> int:
+    """signal.source → 우선순위 숫자 (작을수록 높음). 매핑 없으면 99."""
+    cat = _categorize_source(source)
+    if cat is None:
+        return 99
+    return INDICATOR_PRIORITY.get(cat, 99)
 
 
 class BotInstance:
@@ -166,6 +200,34 @@ class BotInstance:
         # 5분 후 자동 재시도 — 사용자 청산 / 잔고 회복 가정.
         self._funds_blocked_until_ms: int = 0
         self._funds_blocked_warned: bool = False
+
+        # v0.1.42: bar-level 진입 dedup — 같은 봉 안 같은 source 재진입 차단.
+        # Why: BB 신호 (또는 다른 stateful 신호) 가 봉 안 살아있으면 청산 후 즉시
+        # 재진입 → 사고팔고 무한 사이클. 같은 1H 봉 + 같은 source 진입 1회만 보장.
+        # 다음 봉부터 새 평가. SL 청산 후에도 그 봉 닫힐 때까지 재진입 X.
+        self._last_entry_bar_ts: dict[str, int] = {}  # {tf: bar_ts_ms}
+        self._last_entry_sources: tuple[str, ...] = ()
+
+        # v0.1.52: fetch_position 일시 None 보호 — 연속 N회 None 일 때만 reset.
+        # Why: Bybit demo API 일시 응답 지연 / 빈 응답 → 봇 자기 진입 포지션을
+        # 외부 포지션으로 오인지 (사용자 보고 v0.1.51, "외부 포지션 감지" 경고
+        # 박스 표시). 1회 None 으로는 reset X — 3회 연속 None 시만 확정 청산.
+        self._fetch_position_none_count: int = 0
+
+        # v0.1.53: Coinalyze 추세 클라이언트 + cache. settings.coinalyze_api_key 있으면
+        # 5분 cache 박힌 client 생성. 없으면 None (추세 인지 비활성, 기존 동작 유지).
+        # 진입 평가 시 client.fetch_trend(coin) 호출 → MarketTrend cache hit 시
+        # 즉시 반환 / 5분 만료 시 새 fetch.
+        self._coinalyze: CoinalyzeClient | None = None
+        if settings.coinalyze_api_key:
+            try:
+                self._coinalyze = CoinalyzeClient(
+                    api_key=settings.coinalyze_api_key,
+                    cache_ttl_sec=300,
+                )
+                logger.info("Coinalyze 추세 클라이언트 활성 (5분 cache)")
+            except ValueError as e:
+                logger.warning("Coinalyze 클라이언트 생성 실패 (무시): %s", e)
 
         # 거래내역 (v0.1.20) — close_position 마다 ClosedTrade 추가 (rolling 100).
         # GUI "거래내역" 표 표시 + Telegram 알림 + PnL 카드 데이터 source.
@@ -882,17 +944,28 @@ class BotInstance:
             # 3-1. 거래소 측 sync — 사용자 직접 청산 / liquidation 감지 (v0.1.7).
             # paper 모드는 fetch_position 항상 None 반환 (정책) → sync skip
             # (v0.1.9 fix: 안 그러면 paper 진입 직후 즉시 reset 무한 루프).
+            # v0.1.52 fix: 3회 연속 None 일 때만 reset — Bybit demo 일시 응답
+            # 지연 보호 (사용자 보고 v0.1.51 외부 포지션 오인지).
             if settings.run_mode != "paper":
                 actual = await self._client.fetch_position(self._symbol)
                 if actual is None:
-                    logger.info(
-                        "외부 청산 감지: %s 봇 자기 포지션 거래소 측 사라짐 — state reset",
-                        self._symbol,
+                    self._fetch_position_none_count += 1
+                    if self._fetch_position_none_count >= 3:
+                        logger.info(
+                            "외부 청산 감지 (3회 연속 fetch_position None): %s state reset",
+                            self._symbol,
+                        )
+                        self._executor.reset_position()
+                        self._persist_active()
+                        self._fetch_position_none_count = 0
+                        return  # 다음 step 부터 진입 평가 분기 진입
+                    logger.debug(
+                        "fetch_position None (%d/3) — 일시 응답 지연 가능, 대기",
+                        self._fetch_position_none_count,
                     )
-                    self._executor.reset_position()
-                    # v0.1.26: 영속 데이터도 같이 clear — 다음 시작 시 안 떠올리게
-                    self._persist_active()
-                    return  # 다음 step 부터 진입 평가 분기 진입
+                    return  # 이번 step skip (포지션 인지 유지)
+                # 정상 응답 — 카운터 리셋
+                self._fetch_position_none_count = 0
 
                 # 3-2. qty sync — 사용자 직접 추가 진입 / 부분 청산 인지 (v0.1.8 + v0.1.38).
                 # Why: 봇 기록 _remaining_qty 와 거래소 실제 qty 가 다르면 SL 청산 시
@@ -953,8 +1026,12 @@ class BotInstance:
                     self._record_closed(closed)
                     return
 
-            # 3-6. REVERSE 신호 (v0.1.8) — 보유 중 반대 방향 신호 → 청산.
-            # Why: 백테스트 D-24 정합 (engine.py L353). 라이브 누락 시 PF 괴리.
+            # 3-6. REVERSE / PRIORITY swap (보유 중 신호 평가).
+            # v0.1.51: PRIORITY swap 분기 신규 — 보유 중 더 높은 우선순위 신호 발견 시
+            #   · 같은 방향 → SL update (수수료 절약, 사용자 결정)
+            #   · 반대 방향 → 청산 + 재진입 (priority_swap 사유)
+            # REVERSE (compose_exit) 는 priority swap 분기 후 fallback (같거나 낮은
+            # 우선순위 + 반대 방향 신호 → 청산).
             if self._executor.has_position:
                 rev_signals = []
                 rev_signals.extend(detect_ema_touch(df_by_tf, self._strategy_config))
@@ -969,6 +1046,12 @@ class BotInstance:
                     ),
                 )
                 cur_dir = self._executor._plan.direction
+                cur_sources = self._executor.triggered_by
+                # 보유 중 신호 중 가장 높은 우선순위 (가장 작은 숫자)
+                cur_priority = min(
+                    (_signal_priority(s) for s in cur_sources), default=99,
+                )
+
                 # v0.1.32: 보유 중 REVERSE 평가도 매 step throttle (변화 + 60초 heartbeat)
                 # v0.1.33: 진단 1줄 동봉
                 bar_ts_pos = int(primary_df.index[-1].value // 1_000_000)
@@ -978,7 +1061,46 @@ class BotInstance:
                     rev_signals, rev_decision, bar_ts_pos, in_position=True,
                     diagnostic=diag_pos,
                 )
-                if compose_exit(cur_dir, rev_signals):
+
+                # v0.1.51: PRIORITY swap — 더 높은 우선순위 신호 (작은 숫자) 우선 처리.
+                # 가장 높은 우선순위 새 신호 한 개만 처리 (여러 개 동시면 first 우선).
+                priority_handled = False
+                for new_sig in sorted(rev_signals, key=lambda s: _signal_priority(s.source)):
+                    new_priority = _signal_priority(new_sig.source)
+                    if new_priority >= cur_priority:
+                        break  # 이후는 모두 같거나 낮은 우선순위 → swap 대상 X
+                    new_dir = new_sig.direction.value  # "long" / "short"
+                    if new_dir == cur_dir:
+                        # 같은 방향 → SL update (수수료 절약)
+                        new_sl = (new_sig.meta or {}).get("sl_price")
+                        if new_sl is not None and new_sl > 0:
+                            old_sl = self._executor._plan.sl_price
+                            self._executor._plan.sl_price = float(new_sl)
+                            self._executor._triggered_by = [new_sig.source]
+                            logger.info(
+                                "PRIORITY update (%s → %s, 같은 방향): SL %.4f → %.4f",
+                                cur_sources, new_sig.source, old_sl, new_sl,
+                            )
+                        priority_handled = True
+                        break
+                    # 반대 방향 → 청산 + 재진입 (다음 step 진입 평가에서 자연 진입)
+                    logger.info(
+                        "PRIORITY swap (%s → %s, 반대 방향): 청산 + 재진입 흐름",
+                        cur_sources, new_sig.source,
+                    )
+                    _, closed = await self._executor.close_position(
+                        reason="priority_swap",
+                    )
+                    self._record_closed(closed)
+                    priority_handled = True
+                    break
+
+                # PRIORITY swap 발동 안 했으면 기존 REVERSE 분기 (낮거나 같은 우선순위)
+                if (
+                    not priority_handled
+                    and self._executor.has_position
+                    and compose_exit(cur_dir, rev_signals)
+                ):
                     logger.info("REVERSE 신호 (%s) → 청산 (다음 step 진입 평가)", cur_dir)
                     _, closed = await self._executor.close_position(reason="reverse")
                     self._record_closed(closed)
@@ -1050,6 +1172,49 @@ class BotInstance:
         if not decision.enter or decision.direction is None:
             return
 
+        # v0.1.53: Coinalyze 추세 인지 — 진입 평가 시점에 5분 cache 활용.
+        # 1) 강한 추세 반대 (|score| ≥ 2 + 진입 방향 반대) → 진입 차단 (필터)
+        # 2) 그 외 → score 가중치 부스트 (일치 ×1.3~1.5 / 중립 ×1.0 / 약 반대 ×0.7)
+        # client None (api_key 미설정) → 기존 동작 유지 (필터 X, boost 1.0).
+        market_trend: MarketTrend | None = None
+        if self._coinalyze is not None:
+            try:
+                market_trend = await self._coinalyze.fetch_trend_for_symbol(self._symbol)
+            except Exception as e:  # noqa: BLE001 — 네트워크 실패 시 None
+                logger.debug("Coinalyze fetch 실패 (진입 평가 진행): %s", e)
+                market_trend = None
+
+        sig_dir = decision.direction.value  # "long" / "short"
+        if trend_filter(market_trend, sig_dir):
+            # 강한 추세 반대 — 진입 차단
+            logger.info(
+                "진입 차단 (강한 추세 반대): trend=%s score=%+d / 신호 방향=%s",
+                market_trend.direction if market_trend else "?",
+                market_trend.score if market_trend else 0,
+                sig_dir,
+            )
+            return
+
+        # 가중치 부스트 (decision.score 직접 mutation X — 로그용 + 향후 활용)
+        boost = trend_score_multiplier(market_trend, sig_dir)
+        if market_trend is not None and boost != 1.0:
+            logger.info(
+                "추세 가중치 적용: trend=%s score=%+d / 신호 방향=%s / boost ×%.1f",
+                market_trend.direction, market_trend.score, sig_dir, boost,
+            )
+
+        # v0.1.42: bar-level 진입 dedup — 같은 1H 봉 + 같은 source 재진입 차단.
+        # Why: BB stateful 신호 (또는 last_high 누적) 가 봉 닫힐 때까지 살아있어
+        # 청산 후 즉시 재진입 → 사고팔고 무한 사이클 (사용자 보고 v0.1.41).
+        # SL hit 나도 그 봉 닫힐 때까지 같은 source 로 재진입 X. 다음 봉부터 새 평가.
+        decision_sources = tuple(sorted(decision.triggered_by))
+        if (
+            self._last_entry_bar_ts.get(primary_tf) == bar_ts
+            and self._last_entry_sources == decision_sources
+        ):
+            # silent skip — 같은 봉 + 같은 source. 신호 평가 로그는 정상 출력 (위에서).
+            return
+
         # v0.1.36: InsufficientFunds backoff check — place_order 거부 후 5분간 진입 시도
         # skip (매 1초 폭주 회피). external_position flag 와 별개 (다른 페어 외부 포지션 케이스
         # — 본 페어 fetch_position=None 이라 external_position 가 reset 되어도 backoff 유지).
@@ -1064,6 +1229,26 @@ class BotInstance:
             self._funds_blocked_warned = False
             logger.info("InsufficientFunds backoff 만료 — 진입 시도 재개")
 
+        # v0.1.42 + v0.1.44: 구조적 신호 진입 시 진입 시점 SL 라인 캡처.
+        # 우선순위 (v0.1.44): meta.sl_price (Ichimoku 등 일반화) > BB 인자 (v0.1.42).
+        # signals 중 같은 direction + meta 박힌 신호 첫 번째 사용.
+        bb_upper_at_entry: float | None = None
+        bb_lower_at_entry: float | None = None
+        bb_buffer_at_entry: float = self._strategy_config.bollinger_breakout_buffer_pct
+        structural_sl_at_entry: float | None = None
+        target_dir = decision.direction.value
+        for sig in signals:
+            if sig.meta is None or sig.direction.value != target_dir:
+                continue
+            # Ichimoku / 일반화 — meta.sl_price 직접 박혀있음 (v0.1.44)
+            if "sl_price" in sig.meta and structural_sl_at_entry is None:
+                structural_sl_at_entry = sig.meta.get("sl_price")
+            # BB 전용 인자 (v0.1.42, 호환성 보존)
+            if sig.source.startswith("bollinger_") and bb_upper_at_entry is None:
+                bb_upper_at_entry = sig.meta.get("bb_upper")
+                bb_lower_at_entry = sig.meta.get("bb_lower")
+                bb_buffer_at_entry = sig.meta.get("buffer_pct", bb_buffer_at_entry)
+
         # 6. 진입 실행 — equity 조회 + RiskPlan 산출
         balance = await self._client.get_equity()
         plan = build_risk_plan(
@@ -1074,6 +1259,11 @@ class BotInstance:
             config=self._tpsl_config,
             risk_pct=self._risk_pct,
             full_seed=self._full_seed,
+            bb_upper=bb_upper_at_entry,
+            bb_lower=bb_lower_at_entry,
+            bb_buffer_pct=bb_buffer_at_entry,
+            structural_sl_price=structural_sl_at_entry,
+            apply_sl_floor=True,  # v0.1.45: 라이브 한정 호가 noise 안전망 (0.3% 강제)
         )
         # v0.1.38: 진입 시점 EMA/BB/RSI 진단 1줄 — 차트와 비교 가능 (사용자 검증용)
         diag_entry = self._compute_diagnostic_line(df_by_tf, current_price)
@@ -1097,10 +1287,14 @@ class BotInstance:
                 )
                 self._funds_blocked_warned = True
             return
+        # v0.1.42: bar dedup 기록 — 진입 성공 후. 같은 봉 + 같은 source 재진입 차단.
+        self._last_entry_bar_ts[primary_tf] = bar_ts
+        self._last_entry_sources = decision_sources
+
         logger.info(
-            "BotInstance: 진입 — %s %s qty=%.6f (triggered_by=%s, score=%.2f)",
+            "BotInstance: 진입 — %s %s qty=%.6f (triggered_by=%s, score=%.2f, sl=%.2f)",
             self._symbol, decision.direction.value, plan.position.coin_amount,
-            decision.triggered_by, decision.score,
+            decision.triggered_by, decision.score, plan.sl_price,
         )
         _fire_trade_alert("entry", {
             "symbol": self._symbol,

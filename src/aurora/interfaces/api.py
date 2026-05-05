@@ -188,6 +188,34 @@ class ReleaseDTO(BaseModel):
     current_version: str = ""
 
 
+class MarketTrendCoinDTO(BaseModel):
+    """``GET /market-trend`` 응답의 단일 coin trend (v0.1.54)."""
+
+    coin: str
+    score: int  # -4 ~ +4
+    direction: str  # "long" / "short" / "neutral"
+    strong: bool
+    reasons: list[str] = []
+    price: float | None = None
+    price_24h: float | None = None
+    oi: float | None = None
+    oi_24h: float | None = None
+    cvd_spot: float | None = None
+    cvd_futures: float | None = None
+    funding_rate: float | None = None
+    fetched_at_ms: int = 0
+
+
+class MarketTrendDTO(BaseModel):
+    """``GET /market-trend`` 응답 — Coinalyze 추세 데이터 (v0.1.54).
+
+    ``enabled=False`` 면 COINALYZE_API_KEY 미설정. UI 가 카드 숨김.
+    """
+
+    enabled: bool
+    trends: list[MarketTrendCoinDTO] = []
+
+
 class StatsDTO(BaseModel):
     """``GET /stats`` — 거래 결과 통계 6 메트릭 (v0.1.24).
 
@@ -489,6 +517,39 @@ def create_app() -> FastAPI:
         merged.sort(key=lambda t: t.closed_at_ts, reverse=True)
         return merged[:limit]
 
+    # ───── Market Trend (Coinalyze, v0.1.54) ───────────
+
+    @app.get("/market-trend", response_model=MarketTrendDTO)
+    async def market_trend() -> MarketTrendDTO:
+        """Coinalyze 추세 데이터 — BTC/ETH score / direction / 원본.
+
+        BotInstance._coinalyze 의 5분 cache 활용. UI 대시보드 상단 Market Data
+        카드 + 5분 주기 polling. COINALYZE_API_KEY 미설정 시 enabled=False.
+        """
+        bot = bot_instance.get_instance()
+        coinalyze_client = getattr(bot, "_coinalyze", None)
+        if coinalyze_client is None:
+            return MarketTrendDTO(enabled=False)
+
+        trends: list[MarketTrendCoinDTO] = []
+        for coin in ("BTC", "ETH"):
+            try:
+                t = await coinalyze_client.fetch_trend(coin)
+            except Exception:  # noqa: BLE001 — 네트워크 실패 fallback
+                t = None
+            if t is None:
+                continue
+            trends.append(MarketTrendCoinDTO(
+                coin=t.coin, score=t.score, direction=t.direction,
+                strong=t.strong, reasons=list(t.reasons),
+                price=t.price, price_24h=t.price_24h,
+                oi=t.oi, oi_24h=t.oi_24h,
+                cvd_spot=t.cvd_spot, cvd_futures=t.cvd_futures,
+                funding_rate=t.funding_rate,
+                fetched_at_ms=t.fetched_at_ms,
+            ))
+        return MarketTrendDTO(enabled=True, trends=trends)
+
     # ───── Release 알림 (v0.1.25) ──────────────────────
 
     @app.get("/release/latest", response_model=ReleaseDTO)
@@ -617,6 +678,108 @@ def create_app() -> FastAPI:
             await bot.stop()
         await bot.start()
         return ControlResponse(success=True, message="봇 재시작됨")
+
+    @app.post("/relaunch", response_model=ControlResponse)
+    async def relaunch_via_launcher() -> ControlResponse:
+        """본체 자체 재시작 — launcher 다시 spawn + 본체 종료 (v0.1.43).
+
+        UI 업데이트 팝업의 "재시작하기" 버튼이 호출. launcher 가 본체 spawn 시
+        박은 ``AURORA_LAUNCHER_PATH`` env 사용해 launcher 다시 실행 +
+        ``AURORA_LAUNCHER_AUTO_START=1`` env 박아 launcher 가 시작 즉시 자동
+        START. 본체는 응답 반환 후 1초 뒤 자기 종료.
+
+        Why: 새 .exe 다운 후 사용자가 한 번 클릭으로 본체 재시작 흐름. 직접 본체
+        실행 모드 (launcher 없이) 면 launcher path env 없음 → 실패 응답.
+        """
+        import os as _os
+        import platform as _platform
+        import subprocess as _subprocess
+
+        # v0.1.52: 단계별 trace log — 무반응 root cause 디버깅 가능 (사용자 보고
+        # v0.1.50 fix 후도 안 먹힘). 로그 panel + WebSocket /ws/live 통해 사용자
+        # 가 어디서 막힌지 가시화.
+        logger.info("[/relaunch] step 1/5 — launcher_path env 확인 시작")
+
+        launcher_path = _os.environ.get("AURORA_LAUNCHER_PATH")
+        if not launcher_path or not _os.path.exists(launcher_path):
+            logger.warning(
+                "[/relaunch] FAIL — launcher_path env 없음 또는 존재 X (env=%s)",
+                launcher_path,
+            )
+            return ControlResponse(
+                success=False,
+                message="launcher 경로 없음 — 본체 직접 실행 모드 (launcher 통해 시작 필요)",
+            )
+        logger.info("[/relaunch] step 2/5 — launcher_path 확인 OK: %s", launcher_path)
+
+        # PyInstaller 잔재 env 제거 + auto-start flag
+        clean_env = {
+            k: v for k, v in _os.environ.items()
+            if not (k.startswith("_MEI") or k.startswith("_PYI"))
+        }
+        clean_env["AURORA_LAUNCHER_AUTO_START"] = "1"
+        # 본체 자기-launcher 마커 제거 (새 launcher 가 본체로 잘못 인식 방지)
+        clean_env.pop("AURORA_FROM_LAUNCHER", None)
+
+        flags = 0
+        if _platform.system() == "Windows":
+            DETACHED_PROCESS = 0x00000008  # noqa: N806
+            CREATE_NEW_PROCESS_GROUP = 0x00000200  # noqa: N806
+            CREATE_BREAKAWAY_FROM_JOB = 0x01000000  # noqa: N806
+            flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
+
+        logger.info("[/relaunch] step 3/5 — launcher Popen 시작 (flags=0x%x)", flags)
+        try:
+            popen_proc = _subprocess.Popen(  # noqa: S603 — launcher path env 검증됨
+                [launcher_path],
+                env=clean_env,
+                creationflags=flags,
+                close_fds=True,
+                cwd=_os.path.dirname(launcher_path),
+            )
+            logger.info(
+                "[/relaunch] step 4/5 — Popen 성공 (pid=%d)", popen_proc.pid,
+            )
+        except OSError as e:
+            logger.exception("[/relaunch] FAIL — launcher Popen OSError: %s", e)
+            return ControlResponse(success=False, message=f"launcher 실행 실패: {e}")
+
+        # 응답 반환 후 본체 자기 종료 — 다중 fallback (v0.1.56).
+        # v0.1.50: webview destroy 제거 (thread hang)
+        # v0.1.52: trace log 추가
+        # v0.1.56: os._exit(0) 차단 가능성 → Windows ExitProcess fallback +
+        # sys.exit fallback. PyInstaller frozen 환경에서 os._exit 가 hook 으로
+        # 차단되는 케이스 보호 (사용자 보고 v0.1.50/52 환경 본체 안 죽음).
+        import threading as _threading
+        import time as _time
+
+        def _shutdown_thread() -> None:
+            try:
+                logger.info("[/relaunch shutdown] sleep 0.5s 시작")
+                _time.sleep(0.5)
+                logger.info("[/relaunch shutdown] 1차 시도: os._exit(0)")
+            except Exception as e:  # noqa: BLE001 — 종료 흐름이라 예외 무시
+                logger.warning("[/relaunch shutdown] log/sleep 예외 (무시): %s", e)
+            # 1차: os._exit (가장 일반적, system call)
+            try:
+                _os._exit(0)  # noqa: S603 — system call 즉시 종료
+            except SystemExit:
+                pass
+            # 2차: Windows ExitProcess (frozen 환경에서 os._exit 차단 시)
+            try:
+                logger.warning("[/relaunch shutdown] os._exit 도달 후도 살아있음 — ExitProcess 시도")
+                import ctypes  # noqa: PLC0415
+                ctypes.windll.kernel32.ExitProcess(0)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[/relaunch shutdown] ExitProcess 예외: %s", e)
+            # 3차: sys.exit (마지막 fallback)
+            import sys as _sys  # noqa: PLC0415
+            _sys.exit(0)
+
+        # daemon=False — main thread 종료에 의존 X (강제 종료 보장)
+        _threading.Thread(target=_shutdown_thread, daemon=False).start()
+        logger.info("[/relaunch] step 5/5 — shutdown thread 시작 + 응답 반환")
+        return ControlResponse(success=True, message="launcher 재실행 + 본체 0.5초 후 종료")
 
     # ───── 로그 (단순 폴링) ─────────────────────────
 

@@ -36,6 +36,7 @@
         </div>
         <div class="release-alert-actions">
             <button id="release-alert-open" class="release-alert-btn">자세히 보기</button>
+            <button id="release-alert-restart" class="release-alert-btn release-alert-btn-primary">재시작하기</button>
         </div>
     </div>
 
@@ -121,10 +122,48 @@
                  View 01: 대시보드
                  ============================================================ -->
             <section data-view-content="dashboard" class="view-section view-active">
-                <div class="view-header">
-                    <span class="view-num">01</span>
-                    <h1 class="view-title">대시보드</h1>
-                    <p class="view-sub">봇 상태 · 포지션 · 자본금 한눈에</p>
+                <div class="dashboard-header-row">
+                    <div class="view-header">
+                        <span class="view-num">01</span>
+                        <h1 class="view-title">대시보드</h1>
+                        <p class="view-sub">봇 상태 · 포지션 · 자본금 한눈에</p>
+                    </div>
+
+                    <!-- v0.1.54 → v0.1.55: Market Data 우상단 위치로 이동 (사용자 결정) -->
+                    <div id="market-data-section" class="market-data-section" style="display:none">
+                        <div class="md-section-title">
+                            Market Data
+                            <span class="md-subtitle">선물 메타 추세 (5분)</span>
+                        </div>
+                        <div class="market-data-grid">
+                            <div class="md-card" data-coin="BTC">
+                                <div class="md-card-header">
+                                    <span class="md-coin-name">BTC</span>
+                                    <span class="md-coin-price mono">—</span>
+                                    <span class="md-trend-badge">—</span>
+                                </div>
+                                <div class="md-row"><span class="md-label">24h</span><span class="md-24h mono">—</span></div>
+                                <div class="md-row"><span class="md-label">OI</span><span class="md-oi mono">—</span></div>
+                                <div class="md-row"><span class="md-label">CVD Spot</span><span class="md-cvd-spot mono">—</span></div>
+                                <div class="md-row"><span class="md-label">CVD Futures</span><span class="md-cvd-futures mono">—</span></div>
+                                <div class="md-row"><span class="md-label">Funding</span><span class="md-funding mono">—</span></div>
+                                <div class="md-updated">갱신: <span class="md-updated-ts">—</span></div>
+                            </div>
+                            <div class="md-card" data-coin="ETH">
+                                <div class="md-card-header">
+                                    <span class="md-coin-name">ETH</span>
+                                    <span class="md-coin-price mono">—</span>
+                                    <span class="md-trend-badge">—</span>
+                                </div>
+                                <div class="md-row"><span class="md-label">24h</span><span class="md-24h mono">—</span></div>
+                                <div class="md-row"><span class="md-label">OI</span><span class="md-oi mono">—</span></div>
+                                <div class="md-row"><span class="md-label">CVD Spot</span><span class="md-cvd-spot mono">—</span></div>
+                                <div class="md-row"><span class="md-label">CVD Futures</span><span class="md-cvd-futures mono">—</span></div>
+                                <div class="md-row"><span class="md-label">Funding</span><span class="md-funding mono">—</span></div>
+                                <div class="md-updated">갱신: <span class="md-updated-ts">—</span></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="section">
@@ -158,7 +197,7 @@
 
                     <div class="section-title">지표 트리거 상태</div>
                     <div class="indicator-status-grid" id="indicator-status">
-                        <!-- 6 카테고리 — 상태 4값: 대기 / 활성-롱 / 활성-숏 / 비활성. hint = hover tooltip -->
+                        <!-- 7 카테고리 (v0.1.49 가격 매매 추가) — 상태 4값: 대기 / 활성-롱 / 활성-숏 / 비활성. hint = hover tooltip -->
                         <div class="indicator-pill" data-cat="EMA" title="가동 조건: 가격이 EMA 라인 ±0.3% 터치 + 거래량 동반">
                             <span class="ind-name">EMA</span><span class="ind-state">대기</span>
                         </div>
@@ -176,6 +215,9 @@
                         </div>
                         <div class="indicator-pill" data-cat="Harmonic" title="가동 조건: 5종 패턴 D 도달 (Bat/Butterfly/Gartley/Crab/Deep Crab)">
                             <span class="ind-name">Harmonic</span><span class="ind-state">대기</span>
+                        </div>
+                        <div class="indicator-pill" data-cat="가격 매매" title="가동 조건: BTC 1K 단위 zone (N.200~N.400 / N.600~N.800) 터치 + MA 추세 (PDF 나뇨띠)">
+                            <span class="ind-name">가격 매매</span><span class="ind-state">대기</span>
                         </div>
                     </div>
 

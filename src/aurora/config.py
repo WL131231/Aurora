@@ -8,12 +8,49 @@ Android (Chaquopy): pydantic-core wheel 부재 → dataclass + os.getenv 로더.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Literal
 
 # Android 환경 판별 — aurora_bridge 가 모듈 로드 전 AURORA_PLATFORM=android 주입
 # Why: `import android` bare import 는 Chaquopy 에서 ImportError 발생.
 _IS_ANDROID = os.getenv("AURORA_PLATFORM") == "android"
+
+
+def _env_file_candidates() -> tuple[str, ...]:
+    """``.env`` 검색 위치 우선순위 (v0.1.57 다중 path).
+
+    Why: dev 환경 / frozen 환경 / 사용자 홈 모두 cover. pydantic-settings 가
+    리스트 받으면 순차 검색 — 첫 발견 파일 사용 (dev > exe 옆 > 사용자 홈).
+
+    검색 순서 (사용자 보고 v0.1.55 frozen 환경 .env 인식 X 사례):
+        1. ``./.env`` — cwd (dev 환경 또는 launcher 옆)
+        2. ``<sys.executable_dir>/.env`` — frozen .exe 옆
+        3. ``~/.aurora/.env`` — 사용자 홈 (LocalAppData 와 별개)
+        4. ``%LOCALAPPDATA%/Aurora/.env`` — Windows 표준 hidden 위치
+    """
+    paths: list[str] = [".env"]
+
+    # frozen 환경 — Aurora.exe 옆
+    try:
+        if getattr(sys, "frozen", False):
+            exe_dir = Path(sys.executable).resolve().parent
+            paths.append(str(exe_dir / ".env"))
+    except OSError:
+        pass
+
+    # 사용자 홈 ~/.aurora/.env (가장 사용자 친화)
+    try:
+        paths.append(str(Path.home() / ".aurora" / ".env"))
+    except (OSError, RuntimeError):
+        pass
+
+    # Windows LocalAppData
+    local_app = os.environ.get("LOCALAPPDATA")
+    if local_app:
+        paths.append(str(Path(local_app) / "Aurora" / ".env"))
+
+    return tuple(paths)
 
 
 if _IS_ANDROID:
@@ -66,6 +103,11 @@ if _IS_ANDROID:
         binance_api_key: str = dataclasses.field(default_factory=lambda: _s("BINANCE_API_KEY"))
         binance_api_secret: str = dataclasses.field(
             default_factory=lambda: _s("BINANCE_API_SECRET")
+        )
+
+        # ===== 시장 메타 데이터 (Coinalyze, v0.1.53) =====
+        coinalyze_api_key: str = dataclasses.field(
+            default_factory=lambda: _s("COINALYZE_API_KEY")
         )
 
         # ===== 텔레그램 =====
@@ -121,7 +163,8 @@ else:
         """프로젝트 전역 설정."""
 
         model_config = SettingsConfigDict(
-            env_file=".env",
+            # v0.1.57: 다중 path 검색 (dev / frozen / 홈 / LocalAppData)
+            env_file=_env_file_candidates(),
             env_file_encoding="utf-8",
             case_sensitive=False,
             extra="ignore",
@@ -153,6 +196,12 @@ else:
 
         binance_api_key: str = ""
         binance_api_secret: str = ""
+
+        # ===== 시장 메타 데이터 (선물 추세 인지, v0.1.53) =====
+        # Coinalyze API key — 선물 OI / CVD / Funding 5분 주기 polling.
+        # 무료 tier (40 calls/min) 충분. 미설정 시 라이브 봇 추세 인지 비활성 (default).
+        # 발급: https://coinalyze.net/account/api/
+        coinalyze_api_key: str = ""
 
         # ===== 텔레그램 =====
         telegram_bot_token: str = ""

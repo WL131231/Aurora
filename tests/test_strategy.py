@@ -9,7 +9,10 @@ from aurora.core.indicators import HarmonicMatch
 from aurora.core.strategy import (
     Direction,
     EntrySignal,
+    Regime,
+    RegimeConfig,
     StrategyConfig,
+    classify_regime,
     detect_2468_signal,
     detect_bollinger_touch,
     detect_ema_touch,
@@ -126,6 +129,41 @@ def test_ema_touch_applies_both_periods_on_1d() -> None:
     assert "ema_touch_480" in sources
 
 
+def test_ema_touch_attaches_structural_sl_meta_v0_1_45() -> None:
+    """v0.1.45: EMA touch 신호에 structural SL meta 박힘.
+
+    LONG (지지): sl_price = ema × (1 - buffer) — EMA 아래로 buffer 이탈 시 손절.
+    SHORT (저항): sl_price = ema × (1 + buffer) — EMA 위로 buffer 이탈 시 손절.
+    Why: BB / Ichimoku 패턴 정합. 호가 noise 위 안전 + EMA 지지/저항 깨질 때만 손절.
+    """
+    # LONG (close ≥ ema, 지지 시그널)
+    closes_l = [100.0] * 250 + [100.05]  # close 100.05 가 EMA 100 위쪽 가까움
+    df_by_tf_l = {"1H": _make_df(closes_l)}
+    config = StrategyConfig()
+    signals_l = detect_ema_touch(df_by_tf_l, config)
+    long_sigs = [s for s in signals_l if s.direction == Direction.LONG]
+    assert len(long_sigs) >= 1
+    sig_l = long_sigs[0]
+    assert sig_l.meta is not None
+    assert "sl_price" in sig_l.meta
+    assert "ema_value" in sig_l.meta
+    assert abs(sig_l.meta["buffer_pct"] - 0.005) < 1e-9
+    # LONG SL = EMA × (1 - 0.005)
+    expected_sl_l = sig_l.meta["ema_value"] * (1.0 - 0.005)
+    assert abs(sig_l.meta["sl_price"] - expected_sl_l) < 1e-6
+
+    # SHORT (close < ema, 저항 시그널)
+    closes_s = [100.0] * 250 + [99.95]  # close 99.95 가 EMA 100 아래 가까움
+    df_by_tf_s = {"1H": _make_df(closes_s)}
+    signals_s = detect_ema_touch(df_by_tf_s, config)
+    short_sigs = [s for s in signals_s if s.direction == Direction.SHORT]
+    assert len(short_sigs) >= 1
+    sig_s = short_sigs[0]
+    # SHORT SL = EMA × (1 + 0.005)
+    expected_sl_s = sig_s.meta["ema_value"] * (1.0 + 0.005)
+    assert abs(sig_s.meta["sl_price"] - expected_sl_s) < 1e-6
+
+
 # ============================================================
 # detect_rsi_divergence (단순 smoke + 빈 DF 처리)
 # ============================================================
@@ -182,7 +220,7 @@ def test_bb_squeeze_holds() -> None:
     closes = [100.0] * 30 + [99.5]
     df = _bb_df(closes)
     config = StrategyConfig()  # squeeze_threshold=0.015 기본
-    assert detect_bollinger_touch(df, config) == []
+    assert detect_bollinger_touch({'1H': df}, config) == []
 
 
 # ─── Tier 2: Reversal (찢어짐 회귀) ───
@@ -196,7 +234,7 @@ def test_bb_reversal_short_after_upper_break() -> None:
     closes.append(float(np.mean(closes[:-1])))    # 현재 봉: 안쪽 회귀
     df = _bb_df(closes)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     assert any(
         s.direction == Direction.SHORT
         and s.source == "bollinger_reversal_upper"
@@ -213,13 +251,37 @@ def test_bb_reversal_long_after_lower_break() -> None:
     closes.append(float(np.mean(closes[:-1])))
     df = _bb_df(closes)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     assert any(
         s.direction == Direction.LONG
         and s.source == "bollinger_reversal_lower"
         and s.strength == 1.5
         for s in signals
     )
+
+
+def test_bb_reversal_attaches_meta_v0_1_42() -> None:
+    """v0.1.42: BB reversal 신호에 meta (bb_upper/lower/middle/buffer) 박힘.
+
+    Why: BotInstance 가 진입 시점 BB 값을 build_risk_plan 에 전달해 SL 을 BB
+    라인 + buffer 로 박기 위함. meta 없으면 SL override 작동 안 함.
+    """
+    rng = np.random.RandomState(42)
+    closes = list(rng.randn(40) * 1.0 + 100)
+    closes.append(float(np.mean(closes)) + 8.0)   # 직전 봉: upper 위 buffer 이탈
+    closes.append(float(np.mean(closes[:-1])))    # 현재 봉: 안쪽 회귀
+    df = _bb_df(closes)
+    config = StrategyConfig()
+    signals = detect_bollinger_touch({'1H': df}, config)
+    short_sig = next(
+        s for s in signals if s.source == "bollinger_reversal_upper"
+    )
+    assert short_sig.meta is not None
+    assert "bb_upper" in short_sig.meta
+    assert "bb_lower" in short_sig.meta
+    assert "bb_middle" in short_sig.meta
+    assert abs(short_sig.meta["buffer_pct"] - 0.003) < 1e-9
+    assert short_sig.meta["bb_upper"] > short_sig.meta["bb_middle"] > short_sig.meta["bb_lower"]
 
 
 # ─── Tier 3: 찢어짐 보류 (현재 봉 종가가 BB 밖) ───
@@ -233,18 +295,20 @@ def test_bb_holds_on_close_outside() -> None:
     closes.append(float(np.mean(closes)) + 8.0)
     df = _bb_df(closes)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     assert signals == []
 
 
 # ─── Tier 4: Proximity 터치 (high/low 기반) ───
 
 
-def test_bb_touch_short_when_high_in_upper_zone() -> None:
-    """high 가 upper zone 진입 + 종가 안쪽 → SHORT (강도 1.0).
+def test_bb_proximity_touch_no_signal_v0_1_42() -> None:
+    """v0.1.42: Proximity 진입 폐기 검증 — high 가 upper zone 안쪽이어도 신호 X.
 
-    v0.1.28: wick reversal tier 도입 후 high 가 upper outside 면 그쪽이 우선 잡힘.
-    proximity touch 검증 위해 high 를 명시 계산된 zone 중앙 (upper 안쪽) 으로 설정.
+    Why: proximity 진입은 ``last_high`` 누적 max 기반이라 봉 안 wick 한 번
+    닿으면 봉 닫힐 때까지 신호 stateful ON → 봇이 1초 폴링이라 청산 후 즉시
+    재진입 → 사고팔고 무한 사이클 (사용자 보고). v0.1.42 부터 폐기.
+    Reversal + Wick reversal (buffer 이탈 후 회귀) 만 신호.
     """
     import pandas as pd
 
@@ -253,30 +317,21 @@ def test_bb_touch_short_when_high_in_upper_zone() -> None:
     closes = list(rng.randn(40) * 1.0 + 100)
     last_close = float(np.mean(closes[-20:]))
     closes.append(last_close)
-    # BB upper 계산 → high 를 zone 안 (zone_start ~ upper) 중앙에 고정
     bb_calc = bollinger_bands(pd.Series(closes), period=20, std=2.0)
     upper_val = float(bb_calc["upper"].iloc[-1])
-    zone_start = upper_val * (1.0 - 0.005)
-    spike_high = (zone_start + upper_val) / 2.0  # zone 중앙 (upper 아래 inside)
+    # high 를 upper 안쪽 (proximity zone 진입) 으로 — 그래도 신호 X 여야 함
+    spike_high = upper_val * 0.999  # upper 0.1% 안쪽
     highs = list(closes[:-1]) + [spike_high]
     lows = list(closes)
     df = _bb_df(closes, highs=highs, lows=lows)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
-    assert any(
-        s.direction == Direction.SHORT
-        and s.source == "bollinger_upper"
-        and s.strength == 1.0
-        for s in signals
-    )
+    signals = detect_bollinger_touch({'1H': df}, config)
+    # Proximity (bollinger_upper / bollinger_lower) source 신호 X
+    assert not any(s.source in ("bollinger_upper", "bollinger_lower") for s in signals)
 
 
-def test_bb_touch_long_when_low_in_lower_zone() -> None:
-    """low 가 lower zone 진입 + 종가 안쪽 → LONG (강도 1.0).
-
-    v0.1.28: wick reversal tier 도입 후 low 가 lower outside 면 그쪽이 우선 잡힘.
-    proximity touch 검증 위해 low 를 명시 계산된 zone 중앙 (lower 안쪽) 으로 설정.
-    """
+def test_bb_proximity_touch_long_no_signal_v0_1_42() -> None:
+    """v0.1.42: Proximity 폐기 (long 측) — low 가 lower zone 안쪽이어도 신호 X."""
     import pandas as pd
 
     from aurora.core.indicators import bollinger_bands
@@ -286,19 +341,13 @@ def test_bb_touch_long_when_low_in_lower_zone() -> None:
     closes.append(last_close)
     bb_calc = bollinger_bands(pd.Series(closes), period=20, std=2.0)
     lower_val = float(bb_calc["lower"].iloc[-1])
-    zone_end = lower_val * (1.0 + 0.005)
-    spike_low = (lower_val + zone_end) / 2.0  # zone 중앙 (lower 위 inside)
+    spike_low = lower_val * 1.001  # lower 0.1% 위
     highs = list(closes)
     lows = list(closes[:-1]) + [spike_low]
     df = _bb_df(closes, highs=highs, lows=lows)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
-    assert any(
-        s.direction == Direction.LONG
-        and s.source == "bollinger_lower"
-        and s.strength == 1.0
-        for s in signals
-    )
+    signals = detect_bollinger_touch({'1H': df}, config)
+    assert not any(s.source in ("bollinger_upper", "bollinger_lower") for s in signals)
 
 
 # ─── Tier 3: Wick reversal (v0.1.28 신규) ───
@@ -321,7 +370,7 @@ def test_bb_wick_reversal_short_high_outside_close_inside() -> None:
     lows = list(closes)
     df = _bb_df(closes, highs=highs, lows=lows)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     assert any(
         s.direction == Direction.SHORT
         and s.source == "bollinger_wick_reversal_upper"
@@ -341,7 +390,7 @@ def test_bb_wick_reversal_long_low_outside_close_inside() -> None:
     lows = list(closes[:-1]) + [last_close - 10.0]
     df = _bb_df(closes, highs=highs, lows=lows)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     assert any(
         s.direction == Direction.LONG
         and s.source == "bollinger_wick_reversal_lower"
@@ -361,7 +410,7 @@ def test_bb_no_signal_when_high_low_far_from_band() -> None:
     closes.extend([mean_val, mean_val])  # 직전·현재 봉 모두 mean (안쪽 확정)
     df = _bb_df(closes)  # high=low=close (모두 안쪽)
     config = StrategyConfig()
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     assert signals == []
 
 
@@ -377,7 +426,7 @@ def test_bb_touch_missing_columns() -> None:
     """high/low 컬럼 없으면 빈 결과."""
     df = pd.DataFrame({"close": [100.0] * 30})
     config = StrategyConfig()
-    assert detect_bollinger_touch(df, config) == []
+    assert detect_bollinger_touch({'1H': df}, config) == []
 
 
 # ============================================================
@@ -475,6 +524,45 @@ def test_ma_cross_dead_emits_short() -> None:
     deads = [s for s in signals if s.source == "ma_cross_dead" and s.timeframe == "2H"]
     assert len(deads) == 1
     assert deads[0].direction == Direction.SHORT
+
+
+def test_ma_cross_attaches_structural_sl_meta_v0_1_45() -> None:
+    """v0.1.45: MA cross 신호에 structural SL meta 박힘.
+
+    LONG (golden): sl_price = slowMA × (1 - buffer) — 가격이 slow MA 아래로 가면
+    cross 무효 → 손절. SHORT (dead): sl_price = slowMA × (1 + buffer).
+    """
+    # GOLDEN — V자 패턴 (BB 회귀와 동일 closes 사용)
+    closes_g = [100.0, 100.0, 100.0, 100.0, 100.0,
+                90.0, 80.0, 70.0, 60.0, 50.0,
+                50.0, 50.0, 50.0, 50.0,
+                150.0]
+    df_by_tf_g = {"4H": _trend_close_df(closes_g)}
+    config = StrategyConfig(ma_cross_fast=3, ma_cross_slow=5,
+                            ma_cross_breakout_buffer_pct=0.003)
+    signals_g = detect_ma_cross(df_by_tf_g, config)
+    goldens = [s for s in signals_g if s.source == "ma_cross_golden"]
+    assert len(goldens) == 1
+    sig_g = goldens[0]
+    assert sig_g.meta is not None
+    assert "sl_price" in sig_g.meta
+    assert "slow_ma_value" in sig_g.meta
+    assert abs(sig_g.meta["buffer_pct"] - 0.003) < 1e-9
+    expected_g = sig_g.meta["slow_ma_value"] * (1.0 - 0.003)
+    assert abs(sig_g.meta["sl_price"] - expected_g) < 1e-6
+
+    # DEAD — A자 패턴
+    closes_d = [100.0, 100.0, 100.0, 100.0, 100.0,
+                110.0, 120.0, 130.0, 140.0, 150.0,
+                150.0, 150.0, 150.0, 150.0,
+                50.0]
+    df_by_tf_d = {"2H": _trend_close_df(closes_d)}
+    signals_d = detect_ma_cross(df_by_tf_d, config)
+    deads = [s for s in signals_d if s.source == "ma_cross_dead"]
+    assert len(deads) == 1
+    sig_d = deads[0]
+    expected_d = sig_d.meta["slow_ma_value"] * (1.0 + 0.003)
+    assert abs(sig_d.meta["sl_price"] - expected_d) < 1e-6
 
 
 def test_ma_cross_no_signal_on_constant() -> None:
@@ -592,6 +680,39 @@ def test_ichimoku_signal_short_on_cloud_lower_touch() -> None:
     assert len(shorts) == 1
     assert shorts[0].source == "ichimoku_cloud_lower"
     assert shorts[0].timeframe == "1H"
+
+
+def test_ichimoku_signal_attaches_structural_sl_meta_v0_1_44() -> None:
+    """v0.1.44: Ichimoku 신호에 structural SL meta (sl_price/cloud_upper/lower/buffer) 박힘.
+
+    Why: build_risk_plan 이 ``meta.sl_price`` 우선 override → SL = cloud ± 0.6%.
+    호가 noise (~0.08%) 위로 안전 + 봉 안 wick 흡수 + 진입 근거 (구름 지지/저항)
+    깨질 때만 손절. BB Structural SL 패턴 정합 (v0.1.42).
+    """
+    # LONG (구름 상단 지지)
+    closes = [100.0] * 30 + [101.0]
+    df = _ohlc_with_last(closes, last_high=101.5, last_low=99.5)
+    config = _ichimoku_cfg()
+    signals = detect_ichimoku_signal({"1H": df}, config)
+    long_sig = next(s for s in signals if s.source == "ichimoku_cloud_upper")
+    assert long_sig.meta is not None
+    assert "sl_price" in long_sig.meta
+    assert "cloud_upper" in long_sig.meta
+    assert "cloud_lower" in long_sig.meta
+    assert abs(long_sig.meta["buffer_pct"] - 0.006) < 1e-9
+    # LONG SL = cloud_upper × (1 - 0.006) — 구름 안으로 들어가면 손절
+    expected_sl = long_sig.meta["cloud_upper"] * (1.0 - 0.006)
+    assert abs(long_sig.meta["sl_price"] - expected_sl) < 1e-6
+
+    # SHORT (구름 하단 저항)
+    closes_s = [100.0] * 30 + [99.0]
+    df_s = _ohlc_with_last(closes_s, last_high=100.5, last_low=98.5)
+    signals_s = detect_ichimoku_signal({"1H": df_s}, config)
+    short_sig = next(s for s in signals_s if s.source == "ichimoku_cloud_lower")
+    assert short_sig.meta is not None
+    # SHORT SL = cloud_lower × (1 + 0.006) — 구름 위로 가면 손절
+    expected_sl_s = short_sig.meta["cloud_lower"] * (1.0 + 0.006)
+    assert abs(short_sig.meta["sl_price"] - expected_sl_s) < 1e-6
 
 
 def test_ichimoku_signal_no_signal_inside_cloud() -> None:
@@ -970,7 +1091,7 @@ def test_bollinger_signal_fills_bar_timestamp() -> None:
     )
     df.loc[df.index[-1], "high"] = 103.0
     config = StrategyConfig(bollinger_period=10, bollinger_squeeze_threshold=0.001)
-    signals = detect_bollinger_touch(df, config)
+    signals = detect_bollinger_touch({'1H': df}, config)
     for sig in signals:
         assert sig.bar_timestamp == df.index[-1]
 
@@ -984,6 +1105,28 @@ def test_harmonic_signal_fills_pattern_id() -> None:
     pid = signals[0].pattern_id
     assert pid is not None
     assert pid.startswith("bat@1H@d_bar=")
+
+
+def test_harmonic_signal_attaches_structural_sl_meta_v0_1_45() -> None:
+    """v0.1.45: Harmonic 신호에 패턴 자체 SL/TP 가 meta 에 박힘.
+
+    Why: 패턴별 SL (XABCD X 방향 연장, PDF 룰) 이 match.sl_price 에 산출돼있는데
+    이전엔 build_risk_plan 에 전달 안 됐음 → ROI 기반 SL 만 사용. v0.1.45
+    부터 meta.sl_price 박아 build_risk_plan 이 structural_sl_price 로 사용.
+    """
+    df = _bullish_bat_df()
+    config = _harmonic_cfg()
+    signals = detect_harmonic_signal({"1H": df}, config)
+    assert len(signals) == 1
+    sig = signals[0]
+    assert sig.meta is not None
+    assert "sl_price" in sig.meta
+    assert "tp1_price" in sig.meta
+    assert "tp2_price" in sig.meta
+    assert sig.meta["pattern_name"] == "bat"
+    # bullish (LONG) Bat — SL 은 X 방향 연장 (D 점 아래)
+    assert sig.meta["sl_price"] > 0
+    assert sig.meta["tp1_price"] > sig.meta["sl_price"]
 
 
 def test_harmonic_signal_pattern_id_stable_across_calls() -> None:
@@ -1194,6 +1337,63 @@ def test_2468_long_on_downtrend_support_zone() -> None:
     assert longs[0].source == "zone_2468_long"
 
 
+def test_2468_attaches_structural_sl_meta_v0_1_47() -> None:
+    """v0.1.47: 2468 신호에 자체 SL (zone 끝 + 1K USDT, PDF 룰) meta 박힘.
+
+    Why: 이전엔 note 문자열에만 박혀 build_risk_plan 에 전달 안 됨 → ROI 기반
+    좁은 SL 사용 (PDF 의도 대비 ~5배 좁음). v0.1.47 부터 meta 박아 활용.
+    BB / Ichimoku / EMA / MA / Harmonic 패턴 정합.
+    """
+    # SHORT — 상방 추세 + N.200~N.400 zone
+    trend = list(np.linspace(91500, 90500, 15)) + list(np.linspace(90500, 91300, 15))
+    df_s = _trend_then_zone_df(
+        trend[:-1], last_high=91400.0, last_low=91250.0, last_close=91300.0,
+    )
+    config = _2468_cfg()
+    signals_s = detect_2468_signal({"15m": df_s}, config, symbol="BTC/USDT")
+    short_sig = next(s for s in signals_s if s.source == "zone_2468_short")
+    assert short_sig.meta is not None
+    assert "sl_price" in short_sig.meta
+    # SL = zone_hi (91400) + buffer (1000) = 92400
+    expected_sl_s = 91400.0 + config.zone_sl_buffer
+    assert abs(short_sig.meta["sl_price"] - expected_sl_s) < 1e-6
+    assert abs(short_sig.meta["zone_hi"] - 91400.0) < 1e-6
+
+    # LONG — 하방 추세 + N.600~N.800 zone
+    trend_d = list(np.linspace(89500, 90500, 15)) + list(np.linspace(90500, 89700, 15))
+    df_l = _trend_then_zone_df(
+        trend_d[:-1], last_high=89800.0, last_low=89650.0, last_close=89700.0,
+    )
+    signals_l = detect_2468_signal({"15m": df_l}, config, symbol="BTC/USDT")
+    long_sig = next(s for s in signals_l if s.source == "zone_2468_long")
+    assert long_sig.meta is not None
+    # SL = zone_lo (89600) - buffer (1000) = 88600
+    expected_sl_l = 89600.0 - config.zone_sl_buffer
+    assert abs(long_sig.meta["sl_price"] - expected_sl_l) < 1e-6
+
+
+def test_2468_signal_emits_under_persistent_uptrend_v0_1_49() -> None:
+    """v0.1.49: cross 한참 전 발생 + 추세 지속 상태에서도 2468 신호 발동.
+
+    Why: 이전 _detect_ma_trend 는 ma_cross().dropna().iloc[-1] 패턴 — cross 발생
+    봉 외에는 None → 강한 추세 지속 시 (예: BTC EMA200 위 +3.42%) 200봉 안 cross
+    없으면 trend=None → 2468 SKIP. 사용자 보고 v0.1.48.
+
+    fix: fast > slow 단순 비교 — cross 발생 시점 무관 현재 추세 인지.
+    """
+    # 200봉 강한 상방 (cross 한 번 발생 후 그 후 cross X) + 마지막 봉 zone 닿음
+    closes = list(np.linspace(85_000, 91_300, 200))
+    df = _trend_then_zone_df(
+        closes[:-1], last_high=91_400.0, last_low=91_250.0, last_close=91_300.0,
+    )
+    config = _2468_cfg()
+    signals = detect_2468_signal({"15m": df}, config, symbol="BTC/USDT")
+    shorts = [s for s in signals if s.source == "zone_2468_short"]
+    assert len(shorts) == 1, "강한 상방 + zone 터치 → SHORT 신호 발동해야 함"
+    assert shorts[0].meta is not None
+    assert "sl_price" in shorts[0].meta
+
+
 def test_2468_no_signal_when_outside_zone() -> None:
     """추세는 있지만 가격이 zone 밖 → 무신호."""
     trend = list(np.linspace(91500, 90500, 15)) + list(np.linspace(90500, 91300, 15))
@@ -1265,3 +1465,155 @@ def test_2468_evaluate_selectable_btc_only() -> None:
     config = StrategyConfig(ma_cross_fast=3, ma_cross_slow=5)
     signals = evaluate_selectable({"15m": df}, config, symbol="ETH/USDT")
     assert all(not s.source.startswith("zone_2468") for s in signals)
+
+
+# ============================================================
+# D-5 classify_regime — 4H 시장 국면 분류 (Issue #110)
+# ============================================================
+
+
+def _make_4h_df(closes: list[float], spread: float = 0.5) -> pd.DataFrame:
+    """4H OHLC DataFrame 헬퍼 — high/low = close ± spread (절대값, ATR TR 정합)."""
+    arr = np.array(closes, dtype=float)
+    return pd.DataFrame({
+        "open": arr,
+        "high": arr + spread,
+        "low": arr - spread,
+        "close": arr,
+    })
+
+
+def test_regime_trend_up_strong_uptrend() -> None:
+    """선형 상승 추세 (close 100→130, 250 봉) → EMA50 > EMA200 격차 ≥ 0.5% → TREND_UP."""
+    closes = list(np.linspace(100.0, 130.0, 250))
+    df = _make_4h_df(closes, spread=0.5)
+    assert classify_regime(df) == Regime.TREND_UP
+
+
+def test_regime_trend_down_strong_downtrend() -> None:
+    """선형 하락 추세 (close 130→100, 250 봉) → EMA50 < EMA200 격차 ≥ 0.5% → TREND_DOWN."""
+    closes = list(np.linspace(130.0, 100.0, 250))
+    df = _make_4h_df(closes, spread=0.5)
+    assert classify_regime(df) == Regime.TREND_DOWN
+
+
+def test_regime_range_flat_market() -> None:
+    """평탄 시장 (close 100±0.05 작은 노이즈, 250 봉) → EMA50/200 격차 < 0.5% → RANGE."""
+    rng = np.random.default_rng(seed=42)
+    closes = list(100.0 + rng.uniform(-0.05, 0.05, 250))
+    df = _make_4h_df(closes, spread=0.1)
+    assert classify_regime(df) == Regime.RANGE
+
+
+def test_regime_volatile_takes_priority() -> None:
+    """ATR 평균 ≥ 2.0 (TREND 동시 발동) → VOLATILE 우선 (정책 spec 우선순위 정합).
+
+    30 봉 선형 상승 (TR≈1) + 5 봉 큰 변동성 (TR≈20) → atr_now / atr_avg ≥ 2.0.
+    상승 추세 + 변동성 동시 발동 시 VOLATILE 우선 채택 (TREND_UP X).
+    """
+    base = list(np.linspace(100.0, 103.0, 30))
+    spike = [105.0, 110.0, 115.0, 120.0, 125.0]
+    closes = base + spike
+    arr = np.array(closes, dtype=float)
+    # 마지막 5 봉만 spread 20 (TR ≈ 20), 그 외 spread 0.5 (TR ≈ 1)
+    high = arr.copy()
+    low = arr.copy()
+    high[:30] = arr[:30] + 0.5
+    low[:30] = arr[:30] - 0.5
+    high[30:] = arr[30:] + 10.0
+    low[30:] = arr[30:] - 10.0
+    df = pd.DataFrame({"open": arr, "high": high, "low": low, "close": arr})
+    assert classify_regime(df) == Regime.VOLATILE
+
+
+def test_regime_fallback_range_on_short_df() -> None:
+    """sample 부족 (len < VOLATILITY_LOOKBACK=20) → RANGE fallback."""
+    closes = [100.0] * 10
+    df = _make_4h_df(closes, spread=0.5)
+    assert classify_regime(df) == Regime.RANGE
+
+
+def test_regime_fallback_range_on_zero_atr() -> None:
+    """완전 정적 가격 (high=low=close 모든 봉) → atr_avg=0 ZeroDiv 가드 정합 → RANGE.
+
+    Why: 변동성 ratio 산출 시 ``atr_avg > 0`` 가드로 ZeroDivisionError 회피.
+    EMA50/200 모두 같은 값 → gap=0 → TREND 미발동 → RANGE 자연 fallback.
+    """
+    closes = [100.0] * 30
+    df = pd.DataFrame({
+        "open": closes, "high": closes, "low": closes, "close": closes,
+    })
+    assert classify_regime(df) == Regime.RANGE
+
+
+# ============================================================
+# D-5 보충 F3 — RegimeConfig 임계 매개변수화 (Issue #110 후속)
+# ============================================================
+
+
+def test_classify_regime_custom_threshold() -> None:
+    """D5-7 — `RegimeConfig(trend_threshold=0.01)` 주입 시 디폴트 0.005 로는 TREND_UP
+    분류되는 중간 강도 상승 추세가 RANGE 로 분류됨 (임계 ↑ 효과 검증, F3).
+
+    Closes 100→103 (250 봉, EMA50/200 격차 ≈ 0.79%) → 디폴트 0.005 임계로 TREND_UP,
+    custom 0.01 (1%) 임계로는 RANGE fallback (gap < threshold).
+    """
+    closes = list(np.linspace(100.0, 103.0, 250))
+    df = _make_4h_df(closes, spread=0.1)
+    # 디폴트 (trend_threshold=0.005) → TREND_UP 정합 (회귀 가드)
+    assert classify_regime(df) == Regime.TREND_UP
+    # custom (trend_threshold=0.01) → RANGE (격차 < 1%)
+    cfg = RegimeConfig(trend_threshold=0.01)
+    assert classify_regime(df, regime_config=cfg) == Regime.RANGE
+
+
+def test_classify_regime_custom_volatility_multiplier() -> None:
+    """D5-8 — `RegimeConfig(volatility_multiplier=5.0)` 주입 시 디폴트 2.0 으로는
+    VOLATILE 분류되는 df 가 다른 regime 으로 분류됨 (변동성 임계 ↑ 효과, F3).
+
+    test_regime_volatile_takes_priority 의 spike df (atr_now/atr_avg ≈ 2.x ~ 3.x)
+    → 디폴트 (multiplier=2.0) 로 VOLATILE, custom (multiplier=5.0) 로는
+    VOLATILE 미발동 → TREND_UP fallback (선형 상승 추세 유지).
+    """
+    base = list(np.linspace(100.0, 103.0, 30))
+    spike = [105.0, 110.0, 115.0, 120.0, 125.0]
+    closes = base + spike
+    arr = np.array(closes, dtype=float)
+    high = arr.copy()
+    low = arr.copy()
+    high[:30] = arr[:30] + 0.5
+    low[:30] = arr[:30] - 0.5
+    high[30:] = arr[30:] + 10.0
+    low[30:] = arr[30:] - 10.0
+    df = pd.DataFrame({"open": arr, "high": high, "low": low, "close": arr})
+    # 디폴트 (multiplier=2.0) → VOLATILE 정합 (회귀 가드)
+    assert classify_regime(df) == Regime.VOLATILE
+    # custom (multiplier=5.0) → VOLATILE 미발동 → TREND_UP (상승 추세 유지)
+    cfg = RegimeConfig(volatility_multiplier=5.0)
+    assert classify_regime(df, regime_config=cfg) == Regime.TREND_UP
+
+
+def test_classify_regime_default_module_constants() -> None:
+    """D5-9 — `regime_config=None` (디폴트) 호출 시 `RegimeConfig()` 인스턴스와
+    동일 결과 보장 — 모듈 상수 디폴트 source 정합 (배포 호환성, 회귀 X).
+
+    Group D5-1~D5-6 패턴 4 종 (TREND_UP / TREND_DOWN / RANGE / VOLATILE) 모두에서
+    None 호출 vs RegimeConfig() 명시 호출 결과 동일 verify.
+    """
+    cfg_default = RegimeConfig()
+
+    # TREND_UP — 강한 상승 추세
+    df_up = _make_4h_df(list(np.linspace(100.0, 130.0, 250)), spread=0.5)
+    assert classify_regime(df_up) == classify_regime(df_up, regime_config=cfg_default)
+    assert classify_regime(df_up) == Regime.TREND_UP
+
+    # TREND_DOWN — 강한 하락 추세
+    df_down = _make_4h_df(list(np.linspace(130.0, 100.0, 250)), spread=0.5)
+    assert classify_regime(df_down) == classify_regime(df_down, regime_config=cfg_default)
+    assert classify_regime(df_down) == Regime.TREND_DOWN
+
+    # RANGE — 평탄 시장
+    rng = np.random.default_rng(seed=42)
+    df_range = _make_4h_df(list(100.0 + rng.uniform(-0.05, 0.05, 250)), spread=0.1)
+    assert classify_regime(df_range) == classify_regime(df_range, regime_config=cfg_default)
+    assert classify_regime(df_range) == Regime.RANGE

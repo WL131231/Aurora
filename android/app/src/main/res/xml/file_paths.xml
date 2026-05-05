@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider 공유 경로 — APK 설치 Intent 에서 content:// URI 생성에 사용 -->
+<paths>
+    <files-path name="aurora_updates" path="update/" />
+</paths>

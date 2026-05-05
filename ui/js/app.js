@@ -875,17 +875,47 @@ document.getElementById("release-alert-open")?.addEventListener("click", () => {
     if (url) window.open(url, "_blank", "noopener");
 });
 
-// "재시작하기" — POST /relaunch (v0.1.43): launcher 다시 spawn + 본체 자기 종료.
-// launcher 가 auto-start 모드로 시작 → START 자동 클릭 → 새 본체 실행.
-// 사용자 입장: 본체 화면 사라짐 → launcher 화면 잠깐 → 새 본체 화면 등장.
+// "재시작하기" — 플랫폼 분기:
+//   Android (window.Android 있음): APK 다운로드 완료 여부 확인 후 설치 Intent 기동
+//   Desktop: POST /relaunch — launcher 다시 spawn + 본체 자기 종료
 //
-// v0.1.46 fix (사용자 보고: 무한 로딩):
-//   1. 응답 success=False (launcher path env 없음) 이면 alert + button reset
-//   2. fetch timeout 2초 — 본체 응답 안 오면 강제 abort
-//   3. finally 1.5초 후 button 강제 reset — 본체 안 죽었을 때 사용자 갇히지 않음
+// v0.1.46 fix (데스크탑): 무한 로딩 방지 — success=False 즉시 alert, 2초 후 button reset
 document.getElementById("release-alert-restart")?.addEventListener("click", async () => {
     const btn = document.getElementById("release-alert-restart");
     if (!btn) return;
+
+    // ── Android 플로우 ──────────────────────────────────────────
+    if (window.Android) {
+        if (!confirm("새 버전 APK 를 설치합니다.\n설치 후 앱이 재시작됩니다.")) return;
+        btn.disabled = true;
+        btn.textContent = "설치 준비 중...";
+        try {
+            const r = await fetch("/update/apk-status");
+            const data = await r.json();
+            if (data.has_update && data.apk_path) {
+                btn.textContent = "설치 중...";
+                window.Android.installApk(data.apk_path);
+                // 시스템 설치 다이얼로그 뜨면 앱이 background → button reset
+                setTimeout(() => {
+                    if (btn.isConnected) {
+                        btn.disabled = false;
+                        btn.textContent = "재시작하기";
+                    }
+                }, 3000);
+            } else {
+                alert("APK 아직 다운로드 중입니다.\n잠시 후 다시 시도해 주세요.");
+                btn.disabled = false;
+                btn.textContent = "재시작하기";
+            }
+        } catch (e) {
+            alert("APK 상태 확인 실패: " + e.message);
+            btn.disabled = false;
+            btn.textContent = "재시작하기";
+        }
+        return;
+    }
+
+    // ── Desktop 플로우 ─────────────────────────────────────────
     if (!confirm("Aurora 를 재시작합니다.\n현재 봇이 실행 중이면 자동으로 중지됩니다.")) return;
     btn.disabled = true;
     btn.textContent = "재시작 중...";
@@ -896,18 +926,16 @@ document.getElementById("release-alert-restart")?.addEventListener("click", asyn
         const tid = setTimeout(() => ctrl.abort(), 2000);
         const r = await fetch("/relaunch", { method: "POST", signal: ctrl.signal });
         clearTimeout(tid);
-        // 응답 받음 — success 확인. False 면 사용자 알림 (launcher path env 없는 케이스)
         try {
             const data = await r.json();
             if (data && data.success === false) {
                 responseError = data.message || "재시작 실패";
             }
-        } catch (_) { /* JSON 파싱 실패 무시 (정상 진행 가정) */ }
+        } catch (_) { /* JSON 파싱 실패 무시 */ }
     } catch (_) {
         // 정상 — 서버 종료 직전 connection drop / timeout 가능
     }
 
-    // launcher path env 없으면 사용자 알림 + 즉시 button reset
     if (responseError) {
         alert(`재시작 불가 — ${responseError}\n\nlauncher 통해 봇을 켜야 재시작 버튼 사용 가능합니다.`);
         btn.disabled = false;
@@ -915,10 +943,8 @@ document.getElementById("release-alert-restart")?.addEventListener("click", asyn
         return;
     }
 
-    // 정상 흐름 — 본체가 0.8초 후 종료 → UI 화면 사라짐. launcher 가 auto-start 로 등장.
-    // 안전장치: 2초 후에도 본체가 살아있으면 (종료 실패) button reset → 사용자 갇히지 않음
     setTimeout(() => {
-        if (btn.isConnected) {  // UI 살아있다 = 본체 안 죽음
+        if (btn.isConnected) {
             btn.disabled = false;
             btn.textContent = "재시작하기";
         }

@@ -64,6 +64,8 @@ class MainActivity : AppCompatActivity() {
                 webView.visibility = View.VISIBLE
             }
         }
+        // JS → Kotlin 브리지 — "Android" 객체로 WebView JS 에서 접근 가능
+        webView.addJavascriptInterface(UpdateBridge(), "Android")
         webView.visibility = View.INVISIBLE
 
         // uvicorn 준비될 때까지 1초 간격 폴링 (최대 90초) 후 WebView 로드
@@ -106,5 +108,31 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         scope.cancel()
+    }
+
+    /** JS → Kotlin APK 설치 브리지 — app.js 의 window.Android.installApk() 수신. */
+    inner class UpdateBridge {
+        @android.webkit.JavascriptInterface
+        fun installApk(apkPath: String) {
+            runOnUiThread {
+                val apkFile = java.io.File(apkPath)
+                if (!apkFile.exists()) return@runOnUiThread
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    this@MainActivity,
+                    "${packageName}.fileprovider",
+                    apkFile,
+                )
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                try {
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
     }
 }

@@ -618,6 +618,67 @@ def create_app() -> FastAPI:
         await bot.start()
         return ControlResponse(success=True, message="봇 재시작됨")
 
+    @app.post("/relaunch", response_model=ControlResponse)
+    async def relaunch_via_launcher() -> ControlResponse:
+        """본체 자체 재시작 — launcher 다시 spawn + 본체 종료 (v0.1.43).
+
+        UI 업데이트 팝업의 "재시작하기" 버튼이 호출. launcher 가 본체 spawn 시
+        박은 ``AURORA_LAUNCHER_PATH`` env 사용해 launcher 다시 실행 +
+        ``AURORA_LAUNCHER_AUTO_START=1`` env 박아 launcher 가 시작 즉시 자동
+        START. 본체는 응답 반환 후 1초 뒤 자기 종료.
+
+        Why: 새 .exe 다운 후 사용자가 한 번 클릭으로 본체 재시작 흐름. 직접 본체
+        실행 모드 (launcher 없이) 면 launcher path env 없음 → 실패 응답.
+        """
+        import asyncio as _asyncio
+        import os as _os
+        import platform as _platform
+        import subprocess as _subprocess
+
+        launcher_path = _os.environ.get("AURORA_LAUNCHER_PATH")
+        if not launcher_path or not _os.path.exists(launcher_path):
+            return ControlResponse(
+                success=False,
+                message="launcher 경로 없음 — 본체 직접 실행 모드 (launcher 통해 시작 필요)",
+            )
+
+        # PyInstaller 잔재 env 제거 + auto-start flag
+        clean_env = {
+            k: v for k, v in _os.environ.items()
+            if not (k.startswith("_MEI") or k.startswith("_PYI"))
+        }
+        clean_env["AURORA_LAUNCHER_AUTO_START"] = "1"
+        # 본체 자기-launcher 마커 제거 (새 launcher 가 본체로 잘못 인식 방지)
+        clean_env.pop("AURORA_FROM_LAUNCHER", None)
+
+        flags = 0
+        if _platform.system() == "Windows":
+            DETACHED_PROCESS = 0x00000008  # noqa: N806
+            CREATE_NEW_PROCESS_GROUP = 0x00000200  # noqa: N806
+            CREATE_BREAKAWAY_FROM_JOB = 0x01000000  # noqa: N806
+            flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
+
+        try:
+            _subprocess.Popen(  # noqa: S603 — launcher path env 검증됨
+                [launcher_path],
+                env=clean_env,
+                creationflags=flags,
+                close_fds=True,
+                cwd=_os.path.dirname(launcher_path),
+            )
+        except OSError as e:
+            return ControlResponse(success=False, message=f"launcher 실행 실패: {e}")
+
+        # 응답 반환 후 1초 뒤 본체 자기 종료 — 클라이언트가 응답 받을 시간 + launcher
+        # 가 spawn 완료 시간. os._exit 로 강제 (uvicorn graceful shutdown 은 lifespan
+        # cleanup 도중 lock 등 race 가능 — race 무시하고 즉시 종료).
+        async def _shutdown() -> None:
+            await _asyncio.sleep(1.0)
+            _os._exit(0)  # noqa: S603 — 의도적 강제 종료
+
+        _asyncio.create_task(_shutdown())
+        return ControlResponse(success=True, message="launcher 재실행 + 본체 1초 후 종료")
+
     # ───── 로그 (단순 폴링) ─────────────────────────
 
     @app.get("/logs")

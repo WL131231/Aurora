@@ -730,6 +730,25 @@ document.getElementById("release-alert-open")?.addEventListener("click", () => {
     if (url) window.open(url, "_blank", "noopener");
 });
 
+// "재시작하기" — POST /relaunch (v0.1.43): launcher 다시 spawn + 본체 자기 종료.
+// launcher 가 auto-start 모드로 시작 → START 자동 클릭 → 새 본체 실행.
+// 사용자 입장: 본체 화면 사라짐 → launcher 화면 잠깐 → 새 본체 화면 등장.
+document.getElementById("release-alert-restart")?.addEventListener("click", async () => {
+    const btn = document.getElementById("release-alert-restart");
+    if (!btn) return;
+    if (!confirm("Aurora 를 재시작합니다.\n현재 봇이 실행 중이면 자동으로 중지됩니다.")) return;
+    btn.disabled = true;
+    btn.textContent = "재시작 중...";
+    try {
+        // 응답을 못 받을 가능성 — 본체가 1초 후 죽음. fetch 자체는 즉시 응답 받지만
+        // 그 후 connection close 됨. 정상 흐름에서 catch 도착 가능.
+        await fetch("/relaunch", { method: "POST" });
+    } catch (_) {
+        // 정상 — 서버 종료 직전 connection drop 가능
+    }
+    // 본체가 1초 후 종료 — UI 화면 사라짐. launcher 가 auto-start 로 켜짐.
+});
+
 // ============================================================
 // 6b. PnL 공유 카드 (v0.1.21) — 모달 + html2canvas PNG 다운로드
 // ============================================================

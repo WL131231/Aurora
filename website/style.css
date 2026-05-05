@@ -15,10 +15,10 @@
     --aurora-purple: #60519b;
     --text-base: #bfc0d1;
 
-    /* 로고 그라디언트만 예외 (사용자 유지) */
-    --logo-purple: #a855f7;
-    --logo-indigo: #6366f1;
-    --logo-cyan: #22d3ee;
+    /* 로고 그라디언트 — 팔레트 통일 */
+    --logo-purple: #60519b;
+    --logo-indigo: #7a68b5;
+    --logo-cyan: #bfc0d1;
 
     /* Painterly fractalNoise 텍스처 */
     --paint-texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.16 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
@@ -89,7 +89,7 @@ body {
     height: 45vh;
     top: 25vh;
     left: 35vw;
-    background: radial-gradient(circle, rgba(236, 72, 153, 0.55), transparent 65%);
+    background: radial-gradient(circle, rgba(96, 81, 155, 0.55), transparent 65%);
     animation: drift 20s ease-in-out infinite alternate-reverse;
 }
 
@@ -235,7 +235,7 @@ body {
     left: 0;
     width: 60vw;
     height: 35vh;
-    background: radial-gradient(ellipse, rgba(217, 70, 239, 0.4), transparent 70%);
+    background: radial-gradient(ellipse, rgba(96, 81, 155, 0.4), transparent 70%);
     animation: cloud-drift 30s ease-in-out infinite alternate;
 }
 
@@ -261,7 +261,7 @@ body {
     left: 10vw;
     background: linear-gradient(90deg,
         transparent 0%,
-        rgba(217, 70, 239, 0.35) 30%,
+        rgba(96, 81, 155, 0.35) 30%,
         rgba(96, 81, 155, 0.4) 50%,
         rgba(96, 81, 155, 0.3) 70%,
         transparent 100%
@@ -281,7 +281,7 @@ body {
     background: linear-gradient(90deg,
         transparent 0%,
         rgba(96, 81, 155, 0.3) 30%,
-        rgba(20, 184, 166, 0.4) 50%,
+        rgba(96, 81, 155, 0.4) 50%,
         rgba(96, 81, 155, 0.3) 70%,
         transparent 100%
     );
@@ -385,8 +385,8 @@ body {
     background: linear-gradient(
         135deg,
         #ffffff 0%,
-        #d8b4fe 40%,
-        #a855f7 100%
+        #bfc0d1 40%,
+        #60519b 100%
     );
     -webkit-background-clip: text;
     background-clip: text;
@@ -493,7 +493,7 @@ body {
 .photo-fallback .fb-icon {
     font-size: 4rem;
     opacity: 0.5;
-    background: linear-gradient(135deg, #a855f7, #22d3ee);
+    background: linear-gradient(135deg, #60519b, #bfc0d1);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -622,8 +622,7 @@ body {
    Hero Download CTA — 메인 다운로드 버튼 (사용자 진입 1순위)
    ============================================================ */
 .hero-download-btn {
-    /* Aurora 그라디언트 — purple → indigo → cyan (로고와 일관) */
-    background: linear-gradient(135deg, #a855f7 0%, #6366f1 50%, #22d3ee 100%);
+    background: linear-gradient(135deg, #60519b 0%, #7a68b5 50%, #bfc0d1 100%);
     color: #1e202c;
     font-family: "Space Grotesk", system-ui, sans-serif;
     text-transform: uppercase;

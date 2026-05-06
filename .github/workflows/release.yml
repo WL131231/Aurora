@@ -146,6 +146,33 @@ jobs:
               echo "Aurora-macOS.zip size (single binary): $(du -h Aurora-macOS.zip | cut -f1)"
           fi
 
+      # v0.1.69: macOS DMG 빌드 — 사용자 manual 다운로드 표준 UX (Applications 드래그).
+      # zip 은 launcher 자가 update 흐름 유지 (단순 풀음). DMG 는 외부 사용자 진입 시
+      # AppTranslocation 회피 + Finder 표준 흐름. ChoYoon Claude #133 P2 사용자 huihu 제안 1.
+      - name: Build macOS DMG (사용자 manual 다운로드용)
+        if: matrix.os == 'macos-latest' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          cd dist
+          if [ -d "Aurora.app" ]; then
+              hdiutil create -volname "Aurora" \
+                -srcfolder Aurora.app \
+                -ov -format UDZO \
+                Aurora-macOS.dmg
+              echo "Aurora-macOS.dmg size: $(du -h Aurora-macOS.dmg | cut -f1)"
+          fi
+
+      - name: Attach DMG to release
+        if: matrix.os == 'macos-latest' && startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Aurora-macOS.dmg
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload artifact (workflow 결과)
         uses: actions/upload-artifact@v4
         with:
@@ -371,6 +398,31 @@ jobs:
           else
               zip -y Aurora-launcher-macOS.zip Aurora-launcher
           fi
+
+      # v0.1.69: macOS launcher DMG — 사용자 manual 다운로드 표준 UX.
+      - name: Build macOS launcher DMG (사용자 manual 다운로드용)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          cd dist
+          if [ -d "Aurora-launcher.app" ]; then
+              hdiutil create -volname "Aurora-Launcher" \
+                -srcfolder Aurora-launcher.app \
+                -ov -format UDZO \
+                Aurora-launcher-macOS.dmg
+              echo "Aurora-launcher-macOS.dmg size: $(du -h Aurora-launcher-macOS.dmg | cut -f1)"
+          fi
+
+      - name: Attach launcher DMG to release
+        if: matrix.os == 'macos-latest'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Aurora-launcher-macOS.dmg
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Attach launcher to release
         uses: softprops/action-gh-release@v2

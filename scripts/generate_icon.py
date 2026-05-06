@@ -21,6 +21,8 @@ from PIL import Image
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ASSETS_DIR = PROJECT_ROOT / "assets"
 ICO_PATH = ASSETS_DIR / "aurora.ico"
+ICNS_PATH = ASSETS_DIR / "aurora.icns"   # v0.1.69: macOS 본체 아이콘
+PNG_PATH = ASSETS_DIR / "aurora.png"     # v0.1.69: Linux 본체 아이콘
 
 # 그라디언트 색 (웹사이트 logoGrad 와 동일)
 COLOR_START = (168, 85, 247)   # #a855f7 purple
@@ -83,11 +85,28 @@ def render_diamond(size: int = 256) -> Image.Image:
 
 
 def main() -> None:
+    """v0.1.69: ICO + ICNS + PNG 동시 생성 (Windows + macOS + Linux 정합).
+
+    ChoYoon Claude #133 P2 본질 (사용자 huihu 제안 2 — 본체 아이콘 박음).
+    """
     ASSETS_DIR.mkdir(exist_ok=True)
-    base = render_diamond(256)
-    sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
-    base.save(ICO_PATH, format="ICO", sizes=sizes)
-    print(f"생성 완료: {ICO_PATH} ({len(sizes)} 사이즈 멀티 ICO)")
+    base = render_diamond(1024)  # ICNS 의 1024x1024 까지 커버
+
+    # Windows .ico — 멀티 사이즈
+    ico_sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+    base.save(ICO_PATH, format="ICO", sizes=ico_sizes)
+    print(f"생성 완료: {ICO_PATH} ({len(ico_sizes)} 사이즈 멀티 ICO)")
+
+    # macOS .icns — Pillow native
+    try:
+        base.save(ICNS_PATH, format="ICNS")
+        print(f"생성 완료: {ICNS_PATH}")
+    except (OSError, ValueError) as e:
+        print(f"[warn] ICNS 생성 skip: {e}")
+
+    # Linux .png
+    base.resize((256, 256)).save(PNG_PATH, format="PNG")
+    print(f"생성 완료: {PNG_PATH}")
 
 
 if __name__ == "__main__":

@@ -70,7 +70,7 @@ def _load_keystore_keys() -> None:
     """
     try:
         from com.aurora.trading import KeystoreHelper  # type: ignore[import-not-found]
-        from com.chaquo.python import PyApplication    # type: ignore[import-not-found]
+        from com.chaquo.python import PyApplication  # type: ignore[import-not-found]
         ctx = PyApplication.getInstance()
         for exchange, key_var, secret_var in [
             ("bybit",   "BYBIT_API_KEY",    "BYBIT_API_SECRET"),

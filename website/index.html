@@ -223,11 +223,8 @@
                     <div class="indicator-sub">범위 거래 회귀 매매 — 멀티 TF</div>
                     <ul class="indicator-points">
                         <li>4-tier 진입 룰 (Squeeze · Reversal · 찢어짐 · Proximity)</li>
-                        <li>밴드 좁아진 구간(squeeze) 자동 보류</li>
-                        <li>찢어짐 후 회귀 시 강도 1.5 강화 신호</li>
-                        <li>양방향 진입+청산: 상단 → 숏 / 하단 → 롱</li>
-                        <li>HTF 가중치: 5m=1 / 15m=1 / 1H=2</li>
-                        <li>BB 밴드 라인 기반 동적 SL (ROI 무관)</li>
+                        <li>HTF 가중치</li>
+                        <li>BB 밴드 라인 기반 동적 SL</li>
                     </ul>
                 </div>
             </article>
@@ -252,10 +249,7 @@
                     <div class="indicator-sub">모멘텀 반전 신호</div>
                     <ul class="indicator-points">
                         <li>4 종류 검출: Regular / Hidden × Bullish / Bearish</li>
-                        <li>TradingView Pine Script 표준 (피벗 기반)</li>
-                        <li>RSI 수치 자체는 입력값 — 다이버전스만 진입 신호</li>
-                        <li>강세 다이버전스 → 롱 / 약세 → 숏</li>
-                        <li>Hidden Divergence → 추세 지속 추가 진입</li>
+                        <li>Hidden Divergence</li>
                     </ul>
                 </div>
             </article>
@@ -279,12 +273,10 @@
                     <h3 class="indicator-name">Exponential Moving Average</h3>
                     <div class="indicator-sub">멀티 TF 지지/저항 터치</div>
                     <ul class="indicator-points">
-                        <li>표준 추세 라인 · Aurora 노하우 기반 커스텀 파라미터</li>
-                        <li>8 타임프레임 동시 분석 (15m → 1W)</li>
-                        <li>가격이 EMA ±0.3% 이내 터치 시 신호</li>
-                        <li>위에서 지지 → 롱 / 아래서 저항 → 숏</li>
-                        <li>HTF 자동 가중치: 1W (25점) → 15m (1점)</li>
-                        <li>EMA 라인 기반 동적 SL (ROI 무관)</li>
+                        <li>Aurora 노하우 기반 커스텀 파라미터</li>
+                        <li>다중 타임 프레임 동시 분석</li>
+                        <li>HTF 자동 가중치</li>
+                        <li>EMA 라인 기반 동적 SL</li>
                     </ul>
                 </div>
             </article>
@@ -308,12 +300,9 @@
                     <h3 class="indicator-name">Moving Average Cross</h3>
                     <div class="indicator-sub">골든 · 데드 크로스 추세 신호</div>
                     <ul class="indicator-points">
-                        <li>SMA 50 / SMA 200 — 표준 골크 / 데크 셋업</li>
-                        <li>fast vs slow 비교 — 모든 봉에서 추세 평가 (cross 봉 한정 X)</li>
-                        <li>fast &gt; slow → 롱 (상승 추세 진행 중)</li>
-                        <li>fast &lt; slow → 숏 (하락 추세 진행 중)</li>
-                        <li>HTF 가중치 자동 (1H=2 / 2H=3 / 4H=5)</li>
-                        <li>MA 라인 기반 동적 SL (ROI 무관)</li>
+                        <li>모든 봉에서 추세 평가</li>
+                        <li>HTF 가중치 자동</li>
+                        <li>MA 라인 기반 동적 SL</li>
                     </ul>
                 </div>
             </article>
@@ -338,10 +327,8 @@
                     <div class="indicator-sub">피보나치 정밀 패턴</div>
                     <ul class="indicator-points">
                         <li>5종 패턴 검출: Bat / Butterfly / Gartley / Crab / Deep Crab</li>
-                        <li>ZigZag 피벗 + 피보나치 비율 검증 (톨러런스 ±10%)</li>
-                        <li>D=PRZ 도달 시 진입 / TP1=0.382 AD / TP2=0.618 AD</li>
-                        <li>패턴별 자체 SL (Bat=1.13XA · Gartley=1.0XA · Crab=2.0XA)</li>
-                        <li>레버리지 SL 캡 예외 — 패턴 손익비 보장 (Aurora 유일 분기)</li>
+                        <li>ZigZag 피벗 + 피보나치 비율 검증</li>
+                        <li>패턴 손익비 보장</li>
                     </ul>
                 </div>
             </article>
@@ -366,10 +353,8 @@
                     <div class="indicator-sub">일목균형표 다중 시간 분석</div>
                     <ul class="indicator-points">
                         <li>Span A · Span B · Tenkan · Kijun 4 라인 동시 인지</li>
-                        <li>구름대 두께 정량화 = 지지/저항 강도 (두꺼움 → 강함)</li>
-                        <li>Span 터치 시 진입, 이탈 시 청산</li>
-                        <li>HTF 가중치 자동 (1H=2 / 2H=3 / 4H=5)</li>
-                        <li>구름 라인 기반 동적 SL (ROI 무관)</li>
+                        <li>HTF 가중치 자동</li>
+                        <li>구름 라인 기반 동적 SL</li>
                     </ul>
                 </div>
             </article>
@@ -390,14 +375,9 @@
                     </div>
                 </div>
                 <div class="indicator-desc">
-                    <h3 class="indicator-name">가격 매매 (Zone 2·4·6·8)</h3>
-                    <div class="indicator-sub">1K 단위 심리 지지/저항 — BTC 타점</div>
+                    <h3 class="indicator-name">가격 매매</h3>
+                    <div class="indicator-sub">BTC 타점</div>
                     <ul class="indicator-points">
-                        <li>1K 단위 (예: 90K → 91K) 가 시장 심리 상징적 지지/저항</li>
-                        <li>200~400 zone = 1차 저항 / 600~800 zone = 1차 지지</li>
-                        <li>상방 추세 + N.200~N.400 터치 → 숏 (역추세 진입)</li>
-                        <li>하방 추세 + N.600~N.800 터치 → 롱 (역추세 진입)</li>
-                        <li>SL = zone 너머 1K 이상 이탈 시 (zone 라인 기반 동적 SL)</li>
                         <li>BTC 전용 — TF 무관 (가격 기반)</li>
                     </ul>
                 </div>

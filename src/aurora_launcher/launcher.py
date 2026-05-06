@@ -44,7 +44,13 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 GITHUB_API_LATEST = "https://api.github.com/repos/WL131231/Aurora/releases/latest"
-HTTP_TIMEOUT_SEC = 5
+# v0.1.59: 5 → 15초 보강 (방화벽 / 외부 네트워크 환경에서 GitHub API 응답 5초 넘음 보고).
+HTTP_TIMEOUT_SEC = 15
+
+# v0.1.59: GitHub API 공식 정책 — 모든 요청 User-Agent 필수, 미설정 시 403 거부 가능.
+# 이전엔 urllib 기본 ("Python-urllib/X.Y") 박혀 일부 환경에서 거부 → "GitHub Releases
+# 조회 실패" 에러. ChoYoon Claude #133 코드 점검 verify.
+LAUNCHER_USER_AGENT = f"Aurora-Launcher/{__version__}"
 
 # 본체 .exe 이름 — release.yml 의 Aurora-windows.exe 와 정합
 AURORA_EXE_NAME = "Aurora.exe"
@@ -191,16 +197,34 @@ def _parse_version(raw: str) -> tuple[int, ...]:
 
 
 def fetch_latest_release() -> dict | None:
-    """GitHub Releases /latest 호출 — 네트워크 실패 시 None."""
+    """GitHub Releases /latest 호출 — 네트워크 실패 시 None.
+
+    v0.1.59: User-Agent 헤더 필수 (GitHub API 정책) + HTTPError 명시 catch +
+    INFO/WARNING 로그 (이전엔 debug silently skip → 사용자 진단 불가).
+    """
     try:
         req = urllib.request.Request(
             GITHUB_API_LATEST,
-            headers={"Accept": "application/vnd.github+json"},
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": LAUNCHER_USER_AGENT,
+            },
         )
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SEC) as resp:  # noqa: S310
             return json.load(resp)
-    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as e:
-        logger.debug("update check 실패 (조용히 skip): %s", e)
+    except urllib.error.HTTPError as e:
+        # 403 (rate limit / User-Agent reject) / 404 등 — 명시 로그
+        logger.warning(
+            "update check HTTP %d: %s — GitHub API 거부 (User-Agent 또는 rate limit)",
+            e.code, e.reason,
+        )
+        return None
+    except urllib.error.URLError as e:
+        # DNS / 방화벽 / 연결 차단 — 명시 로그
+        logger.warning("update check 네트워크 실패: %s", e.reason)
+        return None
+    except (json.JSONDecodeError, TimeoutError) as e:
+        logger.warning("update check 응답 파싱/타임아웃 실패: %s", e)
         return None
 
 
@@ -223,18 +247,31 @@ def find_launcher_url(release: dict) -> str | None:
 
 
 def download_to(url: str, target: Path) -> bool:
-    """url → target 경로 다운로드. 실패 시 부분 파일 정리."""
+    """url → target 경로 다운로드. 실패 시 부분 파일 정리.
+
+    v0.1.59: urlretrieve 대신 명시 Request + urlopen — User-Agent 헤더 박음.
+    이전 urlretrieve 는 GitHub release CDN 에서 일부 환경 거부 가능성.
+    """
     try:
-        urllib.request.urlretrieve(url, str(target))  # noqa: S310
+        req = urllib.request.Request(
+            url, headers={"User-Agent": LAUNCHER_USER_AGENT},
+        )
+        with (
+            urllib.request.urlopen(req) as resp,  # noqa: S310 — User-Agent 박힘
+            target.open("wb") as f,
+        ):
+            shutil.copyfileobj(resp, f)
         return True
+    except urllib.error.HTTPError as e:
+        logger.warning("download HTTP %d: %s (%s)", e.code, e.reason, url)
     except (urllib.error.URLError, OSError, TimeoutError) as e:
         logger.warning("download 실패: %s", e)
-        if target.exists():
-            try:
-                target.unlink()
-            except OSError:
-                pass
-        return False
+    if target.exists():
+        try:
+            target.unlink()
+        except OSError:
+            pass
+    return False
 
 
 def get_local_aurora_version() -> str | None:

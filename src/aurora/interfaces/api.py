@@ -830,7 +830,10 @@ def create_app() -> FastAPI:
         logger.info("[/relaunch] step 5/5 — watchdog + self-shutdown 시작")
         return ControlResponse(
             success=True,
-            message="launcher 재실행 + launcher 가 본체 강제 종료 (v0.1.61 robust fix)",
+            message=(
+                "launcher 재실행 — launcher 가 옛 본체 자동 정리 (v0.1.64). "
+                "사용자 시각: launcher GUI 로 돌아감 + START 클릭 시 자동 swap"
+            ),
         )
 
     # ───── 로그 (단순 폴링) ─────────────────────────

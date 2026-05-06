@@ -660,8 +660,11 @@ def create_app() -> FastAPI:
         cfg = config.dict()  # pydantic v1/v2 호환
         config_store.save(cfg)
         bot = bot_instance.get_instance()
-        if bot.running:
-            bot.apply_live_config(cfg)
+        # v0.1.59: bot.running 가드 제거 — 정지 상태에서도 즉시 _tpsl_config / _strategy_config
+        # 반영. Why: 이전엔 정지 상태에서 단일 TP 클릭 → backend 저장만 되고 BotInstance 의
+        # _tpsl_config 는 default 유지 → 시작 후 분할 청산 진행. apply_live_config 는
+        # idempotent + dedup_key 박혀있어 정지 상태 호출도 안전.
+        bot.apply_live_config(cfg)
         return config
 
     # ───── 제어 (Start/Stop) ────────────────────────

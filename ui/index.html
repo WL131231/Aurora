@@ -410,6 +410,40 @@
                         실거래 키는 Phase 3 OS keyring 도입 후 사용.
                     </p>
 
+                    <!-- ===== Android Keystore API 키 (v0.1.59) — JS 가 window.AndroidKeystore 확인 후 표시 ===== -->
+                    <div id="android-keystore-section" style="display:none">
+                        <div class="section-title">API 키 보안 저장 <span class="text-xs text-zinc-400">(Android)</span></div>
+                        <p class="text-xs text-zinc-500 mb-3">Android Keystore (TEE/HSM) 에 AES-GCM 암호화 저장 — .env 평문 불필요</p>
+                        <div class="keystore-status-row">
+                            <span class="ks-badge ks-badge-empty" id="ks-badge-bybit">Bybit ✕</span>
+                            <span class="ks-badge ks-badge-empty" id="ks-badge-okx">OKX ✕</span>
+                            <span class="ks-badge ks-badge-empty" id="ks-badge-binance">Binance ✕</span>
+                        </div>
+                        <div class="radio-group" style="margin-bottom:0.75rem">
+                            <input type="radio" name="ks-exchange" id="ks-ex-bybit" value="bybit" checked />
+                            <label for="ks-ex-bybit">Bybit</label>
+                            <input type="radio" name="ks-exchange" id="ks-ex-okx" value="okx" />
+                            <label for="ks-ex-okx">OKX</label>
+                            <input type="radio" name="ks-exchange" id="ks-ex-binance" value="binance" />
+                            <label for="ks-ex-binance">Binance</label>
+                        </div>
+                        <div class="grid grid-cols-1 gap-3">
+                            <div class="input-row">
+                                <label class="input-label">API Key</label>
+                                <input type="text" class="input-field" id="ks-api-key" placeholder="API Key 입력" autocomplete="off" />
+                            </div>
+                            <div class="input-row">
+                                <label class="input-label">API Secret</label>
+                                <input type="password" class="input-field" id="ks-api-secret" placeholder="API Secret 입력" autocomplete="off" />
+                            </div>
+                        </div>
+                        <div class="flex gap-3 items-center mt-3 flex-wrap">
+                            <button class="btn btn-primary" id="ks-btn-save">▼ 저장</button>
+                            <button class="btn" id="ks-btn-clear">✕ 삭제</button>
+                            <span id="ks-msg" class="text-xs text-zinc-500"></span>
+                        </div>
+                    </div>
+
                     <div class="section-title">거래 페어</div>
                     <div class="pair-grid">
                         <div class="pair-card selected" data-pair="BTC/USDT">

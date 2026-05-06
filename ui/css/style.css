@@ -1808,6 +1808,29 @@ input[type="range"].slider-input:disabled {
     min-width: 2.5rem;
     text-align: right;
 }
+/* Android Keystore 저장 상태 뱃지 (v0.1.59) */
+.keystore-status-row {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+}
+.ks-badge {
+    font-size: 0.6875rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 9999px;
+    font-weight: 500;
+}
+.ks-badge-ok {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+.ks-badge-empty {
+    background: rgba(161, 161, 170, 0.1);
+    color: #71717a;
+    border: 1px solid rgba(161, 161, 170, 0.2);
+}
 
 /* ============================================================
    PnL 공유 카드 (v0.1.21) — 거래내역 행 클릭 → 모달 + html2canvas PNG

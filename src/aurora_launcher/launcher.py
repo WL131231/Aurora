@@ -122,29 +122,58 @@ def _launcher_dir() -> Path:
 
 
 def _aurora_data_dir() -> Path:
-    """본체 데이터 격리 폴더 — ``%LOCALAPPDATA%\\Aurora\\`` (v0.1.22).
-
-    이전 (v0.1.17 ~ v0.1.21): ``<launcher_dir>/_aurora/``
-    현재 (v0.1.22~):          ``%LOCALAPPDATA%\\Aurora\\``
-
-    Why: launcher.exe 옆에 ``_aurora/`` 폴더가 보이지 않도록 OS 표준 hidden 위치
-    (Windows LocalAppData) 로 이동. launcher.exe 만 사용자 눈에 보임.
+    """본체 데이터 격리 폴더 — OS 표준 hidden 위치.
 
     플랫폼:
-        - Windows: ``%LOCALAPPDATA%\\Aurora`` (= ``C:\\Users\\<user>\\AppData\\Local\\Aurora``)
-        - Windows 가 아니거나 ``LOCALAPPDATA`` env 미설정: launcher 옆 ``_aurora/``
-          (dev 환경 + 비-Windows fallback)
+        - Windows: ``%LOCALAPPDATA%\\Aurora``
+        - macOS:   ``~/Library/Application Support/Aurora`` (v0.1.67)
+        - Linux 또는 LOCALAPPDATA 미설정: launcher 옆 ``_aurora/`` fallback (dev)
+
+    Why: launcher 옆 폴더가 보이지 않도록. v0.1.67 — macOS 표준 위치 분기 박음
+    (이전엔 .app 번들 안 옆 fallback → AppTranslocation 임시 위치 등 위험).
+    ChoYoon Claude #133 7번째 cycle fix A.
     """
-    if platform.system() == "Windows":
+    sys_name = platform.system()
+    if sys_name == "Windows":
         local_app = os.environ.get("LOCALAPPDATA")
         if local_app:
             return Path(local_app) / AURORA_LOCALAPPDATA_NAME
+    elif sys_name == "Darwin":
+        return Path.home() / "Library" / "Application Support" / AURORA_LOCALAPPDATA_NAME
     return _launcher_dir() / AURORA_DATA_DIR
 
 
+def _body_artifact_name() -> str:
+    """v0.1.67: 플랫폼별 GitHub release asset 이름 — release.yml 정합.
+
+    ChoYoon Claude #133 8번째 cycle fix D — macOS launcher 가 Windows .exe 다운로드
+    하던 결함 (find_aurora_exe_url Windows hardcoded → Exec format error).
+    """
+    sys_name = platform.system()
+    if sys_name == "Windows":
+        return "Aurora-windows.exe"
+    if sys_name == "Darwin":
+        return "Aurora-macOS.zip"  # release.yml L51 정합
+    raise RuntimeError(f"unsupported platform: {sys_name}")
+
+
+def _body_local_target() -> Path:
+    """v0.1.67: 플랫폼별 로컬 본체 path."""
+    sys_name = platform.system()
+    data_dir = _aurora_data_dir()
+    if sys_name == "Windows":
+        return data_dir / "Aurora.exe"
+    if sys_name == "Darwin":
+        return data_dir / "Aurora.app"  # zip 풀어서 박힘
+    raise RuntimeError(f"unsupported platform: {sys_name}")
+
+
 def _aurora_exe_path() -> Path:
-    """본체 Aurora.exe 절대 경로 — 격리 폴더 안."""
-    return _aurora_data_dir() / AURORA_EXE_NAME
+    """본체 절대 경로 — 격리 폴더 안. 플랫폼별 (.exe / .app).
+
+    v0.1.67: 단순 wrapper — 호출자 호환성 위해 유지. 신규 코드는 _body_local_target() 직접.
+    """
+    return _body_local_target()
 
 
 def _migrate_legacy_layout() -> None:
@@ -270,9 +299,15 @@ def fetch_latest_release() -> dict | None:
 
 
 def find_aurora_exe_url(release: dict) -> str | None:
-    """release assets 에서 Aurora-windows.exe URL 반환."""
+    """release assets 에서 본체 URL 반환 — 플랫폼별 asset 이름 (v0.1.67).
+
+    Windows = Aurora-windows.exe / macOS = Aurora-macOS.zip.
+    ChoYoon Claude #133 fix D — 이전엔 Windows hardcoded 라 macOS launcher 가
+    Windows binary 다운로드 → Exec format error → "본체 .exe 미존재" misleading.
+    """
+    target_name = _body_artifact_name()
     for asset in release.get("assets", []):
-        if asset.get("name") == "Aurora-windows.exe":
+        if asset.get("name") == target_name:
             url = asset.get("browser_download_url")
             return str(url) if url else None
     return None
@@ -458,30 +493,47 @@ def start_background_launcher_check() -> None:
 
 
 def apply_swap(downloaded_new: Path) -> bool:
-    """다운로드된 .new → 본체 .exe 와 swap.
+    """다운로드된 .new → 본체와 swap. 플랫폼별 흐름 (v0.1.67).
 
-    본체 실행 X 상태라 lock 없음 → 안전 swap (race condition 없음).
+    Windows: ``Aurora.exe.new`` → ``Aurora.exe`` 단순 rename.
+    macOS:   ``Aurora-macOS.zip`` 풀어서 ``Aurora.app`` 박음 (zip 본질).
 
-    Args:
-        downloaded_new: 임시 다운로드 경로 (예: ``Aurora.exe.new``).
+    본체 실행 X 상태라 lock 없음 → 안전 swap.
 
-    Returns:
-        ``True`` swap 성공, ``False`` 실패.
+    ChoYoon Claude #133 fix E — macOS asset 은 zip 형식이라 rename 만으론 부족.
     """
-    exe = _aurora_exe_path()
-    old_path = exe.with_suffix(exe.suffix + ".old")
+    target = _body_local_target()
+    sys_name = platform.system()
+
+    # macOS — zip 풀음 흐름
+    if sys_name == "Darwin" and downloaded_new.suffix == ".zip":
+        import zipfile
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            # 기존 .app 제거 (zip 풀음 전 깔끔 swap)
+            if target.exists():
+                shutil.rmtree(target)
+            with zipfile.ZipFile(downloaded_new) as zf:
+                zf.extractall(target.parent)
+            downloaded_new.unlink()
+            # 실행 권한 보강 (zip 풀음 시 박힐 수도 있지만 안전)
+            for root, _, files in os.walk(target):
+                for f in files:
+                    Path(root, f).chmod(0o755)
+            return True
+        except (OSError, zipfile.BadZipFile) as e:
+            logger.warning("macOS zip swap 실패: %s", e)
+            return False
+
+    # Windows / 기타 — rename 흐름 (기존)
+    old_path = target.with_suffix(target.suffix + ".old")
     try:
-        # _aurora/ 폴더 자동 생성 (v0.1.17 격리 흐름 첫 다운로드 케이스)
-        exe.parent.mkdir(parents=True, exist_ok=True)
-        # 기존 .old 정리
+        target.parent.mkdir(parents=True, exist_ok=True)
         if old_path.exists():
             old_path.unlink()
-        # 본체 있으면 .old 로 백업
-        if exe.exists():
-            exe.rename(old_path)
-        # .new → 본체
-        downloaded_new.rename(exe)
-        # 백업 정리 (성공 후 즉시)
+        if target.exists():
+            target.rename(old_path)
+        downloaded_new.rename(target)
         if old_path.exists():
             try:
                 old_path.unlink()
@@ -558,14 +610,20 @@ def _kill_existing_aurora_on_port(port: int = 8765) -> None:
 
 
 def launch_aurora() -> bool:
-    """본체 Aurora.exe 실행 — env 마커 전달로 본체 자기-swap 중복 방지.
+    """본체 실행 — env 마커 전달로 본체 자기-swap 중복 방지. 플랫폼별 흐름 (v0.1.67).
+
+    Windows: ``Aurora.exe`` 직접 Popen (DETACHED_PROCESS).
+    macOS:   ``open Aurora.app`` 명령 (Finder 등록된 앱처럼 실행).
+
+    ChoYoon Claude #133 fix F — macOS .app 번들은 직접 Popen 시 .app/Contents/MacOS/
+    내부 binary 박힘 의무 + Info.plist 처리 누락 → `open` 명령 박음 정합.
 
     Returns:
-        ``True`` 실행 시작 성공, ``False`` 본체 .exe 미존재.
+        ``True`` 실행 시작 성공, ``False`` 본체 미존재.
     """
-    exe = _aurora_exe_path()
-    if not exe.exists():
-        logger.error("본체 .exe 미존재: %s", exe)
+    target = _body_local_target()
+    if not target.exists():
+        logger.error("본체 미존재: %s", target)
         return False
 
     # v0.1.64: 옛 본체 (port 점유) 자동 정리 — 사용자 시각 "재시작 = launcher GUI"
@@ -575,32 +633,41 @@ def launch_aurora() -> bool:
 
     env = os.environ.copy()
     env[LAUNCHER_ENV_MARKER] = "1"
-    # v0.1.43: launcher .exe 경로 박음 — 본체 /relaunch 가 launcher 다시 spawn 가능.
-    # frozen 환경 (sys.executable = launcher.exe) 만 의미. dev 환경은 skip (직접 본체
-    # 실행 모드로 안전 fallback).
+    # v0.1.43: launcher 경로 박음 — 본체 /relaunch 가 launcher 다시 spawn 가능.
+    # frozen 환경 (sys.executable = launcher.exe) 만 의미. dev 환경은 skip.
     if _is_frozen():
         env[LAUNCHER_PATH_ENV] = sys.executable
     # auto-start env 는 launcher 가 본체 spawn 시 절대 박지 않음 — 새 본체가 자기
     # 다시 재시작 명령 무한 루프 위험 차단.
     env.pop(LAUNCHER_AUTO_START_ENV, None)
 
-    # detached + fds 분리 — launcher 종료 후에도 본체 살림
-    DETACHED_PROCESS = 0x00000008  # noqa: N806
-    CREATE_NEW_PROCESS_GROUP = 0x00000200  # noqa: N806
-    flags = (
-        DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-        if platform.system() == "Windows"
-        else 0
-    )
-
+    sys_name = platform.system()
     try:
+        if sys_name == "Darwin":
+            # macOS: `open` 명령 — .app 번들 표준 실행 흐름. Info.plist 처리 + Finder
+            # 표준 lifecycle 정합. cwd 박음 X (open 이 .app/Contents/MacOS/ 자동).
+            subprocess.Popen(  # noqa: S603, S607 — open 명령 + .app path
+                ["open", str(target)],
+                env=env,
+                close_fds=True,
+            )
+            return True
+
+        # Windows / 기타 — 직접 Popen (DETACHED_PROCESS)
+        DETACHED_PROCESS = 0x00000008  # noqa: N806
+        CREATE_NEW_PROCESS_GROUP = 0x00000200  # noqa: N806
+        flags = (
+            DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            if sys_name == "Windows"
+            else 0
+        )
         subprocess.Popen(  # noqa: S603 — 본체 실행, 신뢰 가능
-            [str(exe)],
+            [str(target)],
             env=env,
             creationflags=flags,
             close_fds=True,
-            # v0.1.17: cwd = launcher 옆 (본체는 _aurora/ 안). .env / config_store 등을
-            # launcher 옆에서 찾게 → 사용자가 .env 를 launcher.exe 옆에 두면 인식 OK.
+            # v0.1.17: cwd = launcher 옆. 본체가 .env / config_store 등을 launcher
+            # 옆에서 찾게 → 사용자가 .env 를 launcher 옆에 두면 인식 OK.
             cwd=str(_launcher_dir()),
         )
         return True

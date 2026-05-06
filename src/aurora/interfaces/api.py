@@ -739,6 +739,10 @@ def create_app() -> FastAPI:
             if not (k.startswith("_MEI") or k.startswith("_PYI"))
         }
         clean_env["AURORA_LAUNCHER_AUTO_START"] = "1"
+        # v0.1.61: 새 launcher 가 시작 즉시 본체 (자기) PID 강제 종료.
+        # Why: 본체 자기 죽이기 (v0.1.42~v0.1.58 8회 시도) 모두 일부 환경에서
+        # 실패. launcher 는 별개 process group → taskkill /F /T 무조건 동작.
+        clean_env["AURORA_KILL_PARENT_PID"] = str(_os.getpid())
         # 본체 자기-launcher 마커 제거 (새 launcher 가 본체로 잘못 인식 방지)
         clean_env.pop("AURORA_FROM_LAUNCHER", None)
 
@@ -826,7 +830,7 @@ def create_app() -> FastAPI:
         logger.info("[/relaunch] step 5/5 — watchdog + self-shutdown 시작")
         return ControlResponse(
             success=True,
-            message="launcher 재실행 + 본체 2초 후 강제 종료 (watchdog)",
+            message="launcher 재실행 + launcher 가 본체 강제 종료 (v0.1.61 robust fix)",
         )
 
     # ───── 로그 (단순 폴링) ─────────────────────────

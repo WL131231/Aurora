@@ -72,6 +72,13 @@ LAUNCHER_AUTO_START_ENV = "AURORA_LAUNCHER_AUTO_START"
 """launcher 가 시작 시 자동으로 START 클릭 (auto-launch 본체). 본체 /relaunch
 엔드포인트가 launcher spawn 시 박음. v0.1.43 신규."""
 
+LAUNCHER_KILL_PARENT_PID_ENV = "AURORA_KILL_PARENT_PID"
+"""v0.1.61 신규 — launcher 가 시작 즉시 taskkill /F 할 본체 PID.
+본체 /relaunch 엔드포인트가 새 launcher Popen 시 자기 PID 박음. launcher 는
+별개 process group 이라 부모-자식 묶임 X → 본체 안 죽는 케이스 무조건 해결.
+v0.1.42~v0.1.58 (8회) 본체 자기 죽이기 (os._exit / ExitProcess / cmd taskkill)
+모두 일부 환경에서 실패 → 외부 launcher 가 죽이는 게 가장 robust."""
+
 
 # ============================================================
 # 헬퍼
@@ -617,9 +624,55 @@ def _ui_index_path() -> Path:
     return Path(__file__).resolve().parent / "ui" / "index.html"
 
 
+def _kill_parent_if_requested() -> None:
+    """v0.1.61: 본체 /relaunch → launcher Popen 시 박은 부모 PID 강제 종료.
+
+    Why: v0.1.42~v0.1.58 본체 자기 죽이기 (os._exit / ExitProcess / cmd
+    watchdog) 모두 일부 사용자 환경에서 실패 (PyInstaller frozen + uvicorn +
+    threading + webview 복합 hold). launcher 는 별개 process group 이라 부모
+    묶임 X → taskkill /F /T 무조건 동작.
+
+    환경변수 ``AURORA_KILL_PARENT_PID`` 있으면 그 PID 강제 종료. 없으면 noop
+    (일반 launcher 시작 흐름).
+    """
+    kill_pid_str = os.environ.get(LAUNCHER_KILL_PARENT_PID_ENV)
+    if not kill_pid_str:
+        return
+    try:
+        kill_pid = int(kill_pid_str)
+    except ValueError:
+        logger.warning("KILL_PARENT_PID env 잘못됨: %s", kill_pid_str)
+        return
+    logger.info("부모 본체 강제 종료 시도: PID=%d", kill_pid)
+    try:
+        # /F = 강제, /T = 자식 트리도. Windows 만 (launcher = Windows only).
+        result = subprocess.run(  # noqa: S603, S607
+            ["taskkill", "/F", "/T", "/PID", str(kill_pid)],
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode == 0:
+            logger.info("부모 본체 종료 OK: PID=%d", kill_pid)
+        else:
+            logger.warning(
+                "부모 본체 종료 returncode=%d stderr=%s",
+                result.returncode, result.stderr.decode("utf-8", errors="replace"),
+            )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        logger.warning("부모 본체 종료 실패: %s", e)
+    # env 정리 — 다음 launcher self-update swap 시 본 env 잔재 X
+    os.environ.pop(LAUNCHER_KILL_PARENT_PID_ENV, None)
+
+
 def main() -> None:
     """launcher 진입점 — pywebview 윈도우 시작."""
     import webview  # type: ignore[import-not-found]
+
+    # v0.1.61: 본체 /relaunch 흐름 — 부모 본체 PID 받아 강제 종료 (자기-launcher 호출).
+    # 다른 단계 (apply_pending_launcher_update / migrate / update check) 보다 우선 —
+    # 부모 살아있으면 새 본체 spawn 시 포트 충돌 등 위험.
+    _kill_parent_if_requested()
 
     # v0.1.19: 직전 다운된 launcher.new 가 있으면 swap → 새 launcher 재시작.
     # 본 함수는 swap 성공 시 sys.exit(0) — 도달 X.

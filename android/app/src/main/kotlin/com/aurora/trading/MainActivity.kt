@@ -64,8 +64,9 @@ class MainActivity : AppCompatActivity() {
                 webView.visibility = View.VISIBLE
             }
         }
-        // JS → Kotlin 브리지 — "Android" 객체로 WebView JS 에서 접근 가능
+        // JS → Kotlin 브리지
         webView.addJavascriptInterface(UpdateBridge(), "Android")
+        webView.addJavascriptInterface(KeystoreBridge(), "AndroidKeystore")
         webView.visibility = View.INVISIBLE
 
         // uvicorn 준비될 때까지 1초 간격 폴링 (최대 90초) 후 WebView 로드
@@ -108,6 +109,23 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         scope.cancel()
+    }
+
+    /** JS → Kotlin Keystore 브리지 — API 키 암호화 저장/조회. */
+    inner class KeystoreBridge {
+        @android.webkit.JavascriptInterface
+        fun saveApiKeys(exchange: String, apiKey: String, apiSecret: String) {
+            KeystoreHelper.save(this@MainActivity, exchange, apiKey, apiSecret)
+        }
+
+        @android.webkit.JavascriptInterface
+        fun hasApiKeys(exchange: String): Boolean =
+            KeystoreHelper.has(this@MainActivity, exchange)
+
+        @android.webkit.JavascriptInterface
+        fun clearApiKeys(exchange: String) {
+            KeystoreHelper.clear(this@MainActivity, exchange)
+        }
     }
 
     /** JS → Kotlin APK 설치 브리지 — app.js 의 window.Android.installApk() 수신. */

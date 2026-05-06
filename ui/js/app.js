@@ -1198,6 +1198,11 @@ document.getElementById("btn-register-alias")?.addEventListener("click", async (
         };
         await Api.updateConfig(merged);
 
+        // Android: API 키를 Keystore(TEE/HSM) 에 암호화 저장 — 평문 .env 불필요
+        if (window.AndroidKeystore) {
+            try { window.AndroidKeystore.saveApiKeys("bybit", apiKey, apiSecret); } catch (_) {}
+        }
+
         // 상단 alias input 에 nickname 자동 채움
         const aliasInput = document.getElementById("bybit-alias");
         if (aliasInput) aliasInput.value = nickname;

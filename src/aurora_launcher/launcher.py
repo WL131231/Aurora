@@ -474,6 +474,65 @@ def apply_swap(downloaded_new: Path) -> bool:
 # ============================================================
 
 
+def _kill_existing_aurora_on_port(port: int = 8765) -> None:
+    """v0.1.64: 옛 본체가 API 포트 점유 중이면 taskkill.
+
+    Why: 사용자 제안 — 재시작 = launcher GUI 로 돌아가는 흐름. 본체 자기 죽이기
+    의무 X (v0.1.42~v0.1.61 모두 일부 환경 fail). launcher 가 새 본체 spawn 직전
+    port 점유 검사 → 점유 PID kill → 새 본체 spawn. 무조건 동작.
+
+    Windows netstat -ano 로 PID 찾기. listening state 만 본체로 간주.
+    """
+    if platform.system() != "Windows":
+        return
+    try:
+        result = subprocess.run(  # noqa: S603, S607
+            ["netstat", "-ano"],
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode != 0:
+            return
+        port_marker = f":{port} "
+        # cp949 / utf-8 fallback (Windows netstat 환경 의존)
+        text = result.stdout.decode("cp949", errors="replace")
+        my_pid = os.getpid()
+        for line in text.splitlines():
+            if port_marker not in line or "LISTENING" not in line:
+                continue
+            parts = line.split()
+            if not parts:
+                continue
+            try:
+                pid = int(parts[-1])
+            except ValueError:
+                continue
+            if pid == my_pid:
+                continue
+            logger.info("옛 본체 발견 (port %d 점유): PID=%d → taskkill /F", port, pid)
+            try:
+                kill_result = subprocess.run(  # noqa: S603, S607
+                    ["taskkill", "/F", "/T", "/PID", str(pid)],
+                    capture_output=True,
+                    timeout=5,
+                    check=False,
+                )
+                if kill_result.returncode == 0:
+                    logger.info("옛 본체 kill OK: PID=%d", pid)
+                    # listening 점유 해제 시간 잠깐 대기 (TIME_WAIT 등)
+                    time.sleep(0.5)
+                else:
+                    logger.warning(
+                        "옛 본체 kill returncode=%d", kill_result.returncode,
+                    )
+            except (OSError, subprocess.TimeoutExpired) as e:
+                logger.warning("옛 본체 kill 실패: %s", e)
+            return  # 1 PID 만 처리 (보통 1 listener)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        logger.warning("port %d 점유 검사 실패: %s", port, e)
+
+
 def launch_aurora() -> bool:
     """본체 Aurora.exe 실행 — env 마커 전달로 본체 자기-swap 중복 방지.
 
@@ -484,6 +543,11 @@ def launch_aurora() -> bool:
     if not exe.exists():
         logger.error("본체 .exe 미존재: %s", exe)
         return False
+
+    # v0.1.64: 옛 본체 (port 점유) 자동 정리 — 사용자 시각 "재시작 = launcher GUI"
+    # 흐름. 본체 자기 죽이기 의무 X. 본체 /relaunch 가 launcher 새로 spawn 시
+    # KILL_PARENT_PID 도 박지만, 그게 fail 해도 본 단계가 안전망.
+    _kill_existing_aurora_on_port()
 
     env = os.environ.copy()
     env[LAUNCHER_ENV_MARKER] = "1"

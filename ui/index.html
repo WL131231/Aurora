@@ -34,6 +34,13 @@
         <div class="release-alert-current">
             현재 <span id="release-alert-current">—</span>
         </div>
+        <!-- APK 다운로드 진행바 (Android v0.1.58) — refreshReleaseAlert 에서 제어 -->
+        <div id="release-alert-dl" class="release-alert-dl" style="display:none">
+            <div class="release-alert-dl-track">
+                <div id="release-alert-dl-bar" class="release-alert-dl-bar" style="width:0%"></div>
+            </div>
+            <span id="release-alert-dl-text">0%</span>
+        </div>
         <div class="release-alert-actions">
             <button id="release-alert-open" class="release-alert-btn">자세히 보기</button>
             <button id="release-alert-restart" class="release-alert-btn release-alert-btn-primary">재시작하기</button>

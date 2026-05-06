@@ -458,6 +458,11 @@ function _renderTradesFiltered() {
         if (reason === "manual") return 'Manual';
         return 'Trade';
     };
+    // v0.1.65: 수수료 표시 — 0 이면 "—" / 양수면 빨강 (-) 톤 (사용자 비용)
+    const fmtFee = (fee) => {
+        if (fee == null || fee <= 0) return '<span class="trade-fee-empty">—</span>';
+        return `<span class="trade-fee">-${Number(fee).toFixed(4)}</span>`;
+    };
     tbody.innerHTML = trades.map((t, idx) => `
         <tr class="trade-row" data-trade-idx="${idx}">
             <td>${fmtSymbol(t.symbol)}</td>
@@ -467,6 +472,7 @@ function _renderTradesFiltered() {
             <td class="mono">${fmtQty(t.qty, t.direction)}</td>
             <td>${fmtTradeType(t.reason)}</td>
             <td class="mono">${fmtPnl(t.pnl_usd)}</td>
+            <td class="mono">${fmtFee(t.fee_usd)}</td>
             <td class="mono">${fmtTime(t.closed_at_ts)}</td>
         </tr>
     `).join("");

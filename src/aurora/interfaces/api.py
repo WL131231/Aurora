@@ -169,6 +169,7 @@ class TradeDTO(BaseModel):
     closed_at_ts: int
     reason: str
     triggered_by: list[str] = []
+    fee_usd: float = 0.0  # v0.1.65: 수수료 (USDT) — 봇 자기 = taker 시뮬, 외부 = 0 또는 거래소 응답
 
 
 class ReleaseDTO(BaseModel):
@@ -247,6 +248,34 @@ class UiUpdateResponse(BaseModel):
     success: bool
     message: str
     version: str | None = None  # tag_name (성공 시)
+
+
+# ============================================================
+# v0.1.65: 거래내역 dedup helper — 봇 record 와 거래소 record 매칭
+# ============================================================
+
+
+def _find_bot_match(
+    bot_records: list[TradeDTO],
+    ex_c: Any,
+) -> TradeDTO | None:
+    """거래소 ClosedPosition 과 매칭되는 봇 record 탐색.
+
+    매칭 기준: 같은 symbol + direction + closed_at_ts ±5초 + qty 1% 이내.
+
+    Why: 봇이 박은 reduce_only 청산이 거래소 history 에도 들어감 → bot_records +
+    ex_records 합 시 같은 청산 두 번 표시 + 봇 거래가 "외부" 잘못 라벨링.
+    매칭된 봇 record 의 reason/triggered_by 메타 가져와서 ex record 에 합침.
+    """
+    for b in bot_records:
+        if b.symbol != ex_c.symbol or b.direction != ex_c.direction:
+            continue
+        if abs(b.closed_at_ts - ex_c.closed_at_ts) > 5000:  # 5초 윈도우
+            continue
+        if abs(b.qty - ex_c.qty) > max(b.qty, ex_c.qty, 1e-9) * 0.01:  # 1% 허용
+            continue
+        return b
+    return None
 
 
 # ============================================================
@@ -485,6 +514,7 @@ def create_app() -> FastAPI:
                     closed_at_ts=t.closed_at_ts,
                     reason=t.reason,
                     triggered_by=list(t.triggered_by),
+                    fee_usd=t.fee_usd,
                 ))
 
         ex_records: list[TradeDTO] = []
@@ -495,22 +525,59 @@ def create_app() -> FastAPI:
                     since_ms=since_ms, limit=limit,
                 )
                 for c in closed:
-                    ex_records.append(TradeDTO(
-                        symbol=c.symbol,
-                        direction=c.direction,
-                        leverage=c.leverage,
-                        qty=c.qty,
-                        entry_price=c.entry_price,
-                        exit_price=c.exit_price,
-                        pnl_usd=c.pnl_usd,
-                        roi_pct=c.roi_pct,
-                        opened_at_ts=c.opened_at_ts,
-                        closed_at_ts=c.closed_at_ts,
-                        reason="external",
-                        triggered_by=[],
-                    ))
+                    # v0.1.65: 봇 record 와 매칭 → reason / triggered_by / fee 정정.
+                    # Why: 봇이 박은 reduce_only 청산이 거래소 history 에도 들어감 →
+                    # bot_records + ex_records 합 시 같은 청산 두 번 표시 + 봇 거래가
+                    # "외부" 로 잘못 라벨링. 매칭되면 ex 측 정확 P&L + 봇 메타 (reason /
+                    # triggered_by / fee) 합본으로 단일 record. 매칭 X 면 진짜 외부 거래.
+                    bot_match = _find_bot_match(bot_records, c)
+                    if bot_match is not None:
+                        ex_records.append(TradeDTO(
+                            symbol=c.symbol,
+                            direction=c.direction,
+                            leverage=c.leverage,
+                            qty=c.qty,
+                            entry_price=c.entry_price,
+                            exit_price=c.exit_price,
+                            pnl_usd=c.pnl_usd,
+                            roi_pct=c.roi_pct,
+                            opened_at_ts=c.opened_at_ts,
+                            closed_at_ts=c.closed_at_ts,
+                            reason=bot_match.reason,
+                            triggered_by=list(bot_match.triggered_by),
+                            fee_usd=c.fee_usd if c.fee_usd > 0 else bot_match.fee_usd,
+                        ))
+                    else:
+                        ex_records.append(TradeDTO(
+                            symbol=c.symbol,
+                            direction=c.direction,
+                            leverage=c.leverage,
+                            qty=c.qty,
+                            entry_price=c.entry_price,
+                            exit_price=c.exit_price,
+                            pnl_usd=c.pnl_usd,
+                            roi_pct=c.roi_pct,
+                            opened_at_ts=c.opened_at_ts,
+                            closed_at_ts=c.closed_at_ts,
+                            reason="external",
+                            triggered_by=[],
+                            fee_usd=c.fee_usd,
+                        ))
             except Exception as e:  # noqa: BLE001 — UI 안전 (봇 buffer 만 보여줌)
                 logger.warning("/trades fetch_closed_positions 실패: %s", e)
+
+        # v0.1.65: dedup — bot_records 중 ex_records 와 매칭된 거 제외.
+        # ex 측이 거래소 정확 P&L 박혀있고 봇 메타 합본됨 → bot record 는 중복 제거.
+        ex_matched_keys = {
+            (r.symbol, r.direction, r.closed_at_ts // 5000, round(r.qty, 8))
+            for r in ex_records
+            if r.reason != "external"  # 매칭된 ex 만 (봇 메타 박힌 거)
+        }
+        bot_records = [
+            b for b in bot_records
+            if (b.symbol, b.direction, b.closed_at_ts // 5000, round(b.qty, 8))
+            not in ex_matched_keys
+        ]
 
         # 합치고 closed_at_ts 신→구 정렬, limit 자르기.
         merged = bot_records + ex_records

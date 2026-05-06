@@ -148,24 +148,20 @@ def _body_artifact_name() -> str:
 
     ChoYoon Claude #133 8번째 cycle fix D — macOS launcher 가 Windows .exe 다운로드
     하던 결함 (find_aurora_exe_url Windows hardcoded → Exec format error).
+
+    Linux = release.yml 빌드 X (사용자 영향 0) — CI/dev fallback 으로 Windows asset.
     """
-    sys_name = platform.system()
-    if sys_name == "Windows":
-        return "Aurora-windows.exe"
-    if sys_name == "Darwin":
+    if platform.system() == "Darwin":
         return "Aurora-macOS.zip"  # release.yml L51 정합
-    raise RuntimeError(f"unsupported platform: {sys_name}")
+    return "Aurora-windows.exe"  # Windows + Linux fallback
 
 
 def _body_local_target() -> Path:
-    """v0.1.67: 플랫폼별 로컬 본체 path."""
-    sys_name = platform.system()
+    """v0.1.67: 플랫폼별 로컬 본체 path. Linux = Windows fallback (CI/dev 만)."""
     data_dir = _aurora_data_dir()
-    if sys_name == "Windows":
-        return data_dir / "Aurora.exe"
-    if sys_name == "Darwin":
+    if platform.system() == "Darwin":
         return data_dir / "Aurora.app"  # zip 풀어서 박힘
-    raise RuntimeError(f"unsupported platform: {sys_name}")
+    return data_dir / "Aurora.exe"  # Windows + Linux fallback
 
 
 def _aurora_exe_path() -> Path:

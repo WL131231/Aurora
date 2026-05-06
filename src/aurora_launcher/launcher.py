@@ -79,6 +79,10 @@ LAUNCHER_KILL_PARENT_PID_ENV = "AURORA_KILL_PARENT_PID"
 v0.1.42~v0.1.58 (8회) 본체 자기 죽이기 (os._exit / ExitProcess / cmd taskkill)
 모두 일부 환경에서 실패 → 외부 launcher 가 죽이는 게 가장 robust."""
 
+# v0.1.63: GitHub API fetch 마지막 에러 — UI / log 진단용. ChoYoon Claude #133 fix 3.
+# fetch_latest_release 가 실패 시 본 변수에 박음. LauncherApi.check_update 가 UI 에 노출.
+_last_fetch_error: str | None = None
+
 
 # ============================================================
 # 헬퍼
@@ -208,7 +212,9 @@ def fetch_latest_release() -> dict | None:
 
     v0.1.59: User-Agent 헤더 필수 (GitHub API 정책) + HTTPError 명시 catch +
     INFO/WARNING 로그 (이전엔 debug silently skip → 사용자 진단 불가).
+    v0.1.63: 실패 시 ``_last_fetch_error`` 전역 변수에 박음 — UI 노출 + 진단.
     """
+    global _last_fetch_error  # noqa: PLW0603 — 진단 채널
     try:
         req = urllib.request.Request(
             GITHUB_API_LATEST,
@@ -218,20 +224,27 @@ def fetch_latest_release() -> dict | None:
             },
         )
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SEC) as resp:  # noqa: S310
-            return json.load(resp)
+            data = json.load(resp)
+        _last_fetch_error = None  # 성공 시 reset
+        return data
     except urllib.error.HTTPError as e:
         # 403 (rate limit / User-Agent reject) / 404 등 — 명시 로그
+        msg = f"HTTP {e.code} {e.reason}"
         logger.warning(
-            "update check HTTP %d: %s — GitHub API 거부 (User-Agent 또는 rate limit)",
-            e.code, e.reason,
+            "update check %s — GitHub API 거부 (User-Agent / rate limit / proxy)", msg,
         )
+        _last_fetch_error = msg
         return None
     except urllib.error.URLError as e:
-        # DNS / 방화벽 / 연결 차단 — 명시 로그
+        # DNS / 방화벽 / SSL / 연결 차단 — 명시 로그
+        msg = f"URLError: {e.reason}"
         logger.warning("update check 네트워크 실패: %s", e.reason)
+        _last_fetch_error = msg
         return None
     except (json.JSONDecodeError, TimeoutError) as e:
-        logger.warning("update check 응답 파싱/타임아웃 실패: %s", e)
+        msg = f"{type(e).__name__}: {e}"
+        logger.warning("update check 응답 파싱/타임아웃 실패: %s", msg)
+        _last_fetch_error = msg
         return None
 
 
@@ -544,8 +557,13 @@ class LauncherApi:
         """
         release = fetch_latest_release()
         if release is None:
-            return {"latest": None, "has_update": False, "url": None,
-                    "error": "GitHub Releases 조회 실패 (네트워크 또는 rate limit)"}
+            # v0.1.63: 일반 메시지 + 마지막 fetch 에러 (HTTP 코드 / URLError reason 등)
+            # 자세히 노출 → 사용자 진단 가능. ChoYoon Claude #133 fix 3.
+            detail = f" [{_last_fetch_error}]" if _last_fetch_error else ""
+            return {
+                "latest": None, "has_update": False, "url": None,
+                "error": f"GitHub Releases 조회 실패{detail}",
+            }
         latest_tag = release.get("tag_name", "")
         url = find_aurora_exe_url(release)
         local_v = get_local_aurora_version()
@@ -624,6 +642,69 @@ def _ui_index_path() -> Path:
     return Path(__file__).resolve().parent / "ui" / "index.html"
 
 
+def _setup_file_logging() -> Path | None:
+    """v0.1.63: launcher 진단용 file logging — `%LOCALAPPDATA%\\Aurora\\launcher.log`.
+
+    ChoYoon Claude #133 환기 — frozen `--windowed` 빌드는 콘솔 X → stderr 사라짐
+    → ``logger.warning`` 출력 위치 X → 사용자 측 root cause 진단 불가.
+    file handler 박아두면 manual 다운로드 후 사용자 측 로그 파일에 자동 기록 →
+    다음 cycle 정확한 진단 가능.
+
+    Returns:
+        log 파일 절대 경로 (성공 시) / None (디렉토리 권한 등 실패 시).
+    """
+    import logging.handlers
+
+    try:
+        log_dir = _aurora_data_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "launcher.log"
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=1_000_000,  # 1 MB
+            backupCount=3,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        ))
+        # root logger 에 박음 — launcher 내부 logger.* 모두 포함.
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)
+        # 이미 file handler 박혔으면 중복 X (자가-update swap 시 main 재진입)
+        for existing in list(root_logger.handlers):
+            if isinstance(existing, logging.handlers.RotatingFileHandler):
+                root_logger.removeHandler(existing)
+        root_logger.addHandler(file_handler)
+        return log_file
+    except OSError:
+        return None
+
+
+def _log_environment_info() -> None:
+    """v0.1.63: 시스템 정보 로깅 — proxy / Python / platform / frozen 등.
+
+    사용자 측 root cause (proxy / SSL / certifi) 진단 단서. ChoYoon Claude
+    #133 fix 4.
+    """
+    import platform as _plat
+
+    logger.info("=" * 60)
+    logger.info("Aurora-Launcher v%s 시작", __version__)
+    logger.info("Python %s", sys.version.replace("\n", " "))
+    logger.info("Platform: %s", _plat.platform())
+    logger.info("sys.frozen=%s _MEIPASS=%s",
+                getattr(sys, "frozen", False),
+                getattr(sys, "_MEIPASS", None))
+    logger.info("LOCALAPPDATA=%s", os.environ.get("LOCALAPPDATA"))
+    logger.info(
+        "HTTPS_PROXY=%s HTTP_PROXY=%s",
+        os.environ.get("HTTPS_PROXY") or "(unset)",
+        os.environ.get("HTTP_PROXY") or "(unset)",
+    )
+    logger.info("=" * 60)
+
+
 def _kill_parent_if_requested() -> None:
     """v0.1.61: 본체 /relaunch → launcher Popen 시 박은 부모 PID 강제 종료.
 
@@ -668,6 +749,16 @@ def _kill_parent_if_requested() -> None:
 def main() -> None:
     """launcher 진입점 — pywebview 윈도우 시작."""
     import webview  # type: ignore[import-not-found]
+
+    # v0.1.63: file logging 박기 가장 우선 — 모든 후속 단계 로그 보존.
+    # ChoYoon Claude #133 fix 1 (가장 시급). frozen --windowed 환경 stderr 사라짐
+    # 진단 차단 메타 issue 해소 — 사용자 측 manual 다운로드 후 launcher.log 박힘.
+    log_file = _setup_file_logging()
+    _log_environment_info()
+    if log_file is not None:
+        logger.info("file logging 활성: %s", log_file)
+    else:
+        logger.warning("file logging 활성 실패 (디렉토리 권한 등)")
 
     # v0.1.61: 본체 /relaunch 흐름 — 부모 본체 PID 받아 강제 종료 (자기-launcher 호출).
     # 다른 단계 (apply_pending_launcher_update / migrate / update check) 보다 우선 —

@@ -58,6 +58,10 @@ def main() -> int:
         "--paths", str(PROJECT_ROOT / "src"),
         # ui/ 번들 (HTML/CSS/JS) — _MEIPASS/ui 아래에 풀림
         "--add-data", f"{ui_dir}{DATA_SEP}ui",
+        # v0.1.63: certifi CA bundle 명시 collect — frozen 환경 SSL 핸드셰이크 보장.
+        # Why: ChoYoon Claude #133 환기 — frozen --windowed --onefile 일부 환경에서
+        # ssl 모듈 CA path 깨짐 → urllib HTTPS 핸드셰이크 fail → "조회 실패" 일반화.
+        "--collect-data", "certifi",
         "--clean",
         "--noconfirm",
         "--onefile",

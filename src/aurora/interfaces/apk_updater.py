@@ -4,7 +4,7 @@
     1. aurora_bridge.start() 가 _load_env() 직후 apk_updater.start() 호출
     2. 백그라운드 스레드 — 시작 시 1회 + 30분 주기로 GitHub Releases 체크
     3. 새 버전 APK 발견 → AURORA_DATA_DIR/update/Aurora-android.apk 다운로드
-    4. api.py 의 GET /update/apk-status 가 상태 노출
+    4. api.py 의 GET /update/apk-status 가 상태 노출 (진행률 포함)
     5. UI "재시작하기" 클릭 → window.Android.installApk(path) 호출 (app.js)
     6. MainActivity.UpdateBridge 가 FileProvider Intent 로 시스템 설치 다이얼로그 기동
 
@@ -31,10 +31,19 @@ logger = logging.getLogger(__name__)
 APK_ASSET_NAME = "Aurora-android.apk"
 CHECK_INTERVAL_SEC = 30 * 60  # 30분 주기 (사용자 결정)
 
+# status 값:
+#   "idle"        — 아직 체크 안 함 (앱 시작 직후)
+#   "checking"    — GitHub Releases 폴링 중
+#   "downloading" — APK 다운로드 진행 중
+#   "done"        — 다운로드 완료, 설치 대기
+#   "error"       — 네트워크 / IO 오류
 _state: dict = {
     "has_update": False,
-    "apk_path": None,    # str | None — 다운 완료된 APK 절대 경로
-    "latest_tag": None,  # str | None — 다운된 버전 태그 (예: "v0.1.58")
+    "apk_path": None,       # str | None — 다운 완료된 APK 절대 경로
+    "latest_tag": None,     # str | None — 다운된 버전 태그 (예: "v0.1.58")
+    "status": "idle",       # idle | checking | downloading | done | error
+    "download_pct": 0,      # 0-100, downloading 중에만 의미 있음
+    "error_msg": None,      # str | None — error 시 원인
 }
 
 
@@ -49,23 +58,42 @@ def _apk_dir() -> Path:
     return Path(data_dir) / "update" if data_dir else Path("/tmp/aurora_update")  # noqa: S108
 
 
+def _progress_hook(block_count: int, block_size: int, total_size: int) -> None:
+    """urlretrieve reporthook — 다운로드 진행률 _state 갱신.
+
+    Args:
+        block_count: 지금까지 수신한 블록 수.
+        block_size:  블록당 바이트.
+        total_size:  Content-Length (-1 이면 알 수 없음).
+    """
+    if total_size > 0:
+        pct = min(int(block_count * block_size * 100 / total_size), 99)
+        _state["download_pct"] = pct
+
+
 def _check_and_download() -> None:
     """GitHub 최신 릴리스 체크 + APK 다운로드.
 
-    새 버전 없음 또는 네트워크 실패 시 조용히 skip.
+    새 버전 없음 또는 네트워크 실패 시 status=error 로 기록 후 반환.
     """
+    _state.update(status="checking", error_msg=None)
+
     release = release_check.fetch_latest()
     if release is None:
+        _state.update(status="idle")
         return
     tag = release.get("tag_name", "")
     if not tag:
+        _state.update(status="idle")
         return
 
     # 버전 비교 — 현재 번들 버전보다 낮거나 같으면 skip
     try:
         if release_check._parse_version(tag) <= release_check._parse_version(__version__):
+            _state.update(status="idle")
             return
     except (ValueError, TypeError):
+        _state.update(status="idle")
         return
 
     # 릴리스 assets 에서 APK URL 탐색
@@ -76,6 +104,7 @@ def _check_and_download() -> None:
             break
     if not apk_url:
         logger.debug("릴리스 %s 에 %s 없음 — skip", tag, APK_ASSET_NAME)
+        _state.update(status="idle")
         return
 
     # 이미 같은 태그로 다운 완료된 파일이면 state 만 갱신하고 skip
@@ -85,7 +114,10 @@ def _check_and_download() -> None:
     if apk_path.exists() and tag_file.exists():
         try:
             if tag_file.read_text(encoding="utf-8").strip() == tag:
-                _state.update(has_update=True, apk_path=str(apk_path), latest_tag=tag)
+                _state.update(
+                    has_update=True, apk_path=str(apk_path),
+                    latest_tag=tag, status="done", download_pct=100,
+                )
                 logger.info("APK %s 이미 다운 완료 — 재다운 skip", tag)
                 return
         except OSError:
@@ -94,15 +126,21 @@ def _check_and_download() -> None:
     # 다운로드 (임시 .tmp 파일 → 완료 후 rename, 중단 시 .tmp 정리)
     apk_dir.mkdir(parents=True, exist_ok=True)
     tmp_path = apk_path.with_suffix(".tmp")
+    _state.update(status="downloading", download_pct=0, latest_tag=tag)
     logger.info("APK %s 다운로드 시작...", tag)
     try:
-        urllib.request.urlretrieve(apk_url, str(tmp_path))  # noqa: S310
+        urllib.request.urlretrieve(apk_url, str(tmp_path), reporthook=_progress_hook)  # noqa: S310
         tmp_path.rename(apk_path)
         tag_file.write_text(tag, encoding="utf-8")
-        _state.update(has_update=True, apk_path=str(apk_path), latest_tag=tag)
+        _state.update(
+            has_update=True, apk_path=str(apk_path),
+            latest_tag=tag, status="done", download_pct=100,
+        )
         logger.info("APK %s 다운로드 완료: %s", tag, apk_path)
     except (urllib.error.URLError, OSError, TimeoutError) as e:
-        logger.warning("APK 다운로드 실패: %s", e)
+        msg = str(e)
+        logger.warning("APK 다운로드 실패: %s", msg)
+        _state.update(status="error", error_msg=msg, download_pct=0)
         if tmp_path.exists():
             try:
                 tmp_path.unlink()

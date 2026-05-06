@@ -736,6 +736,33 @@ async function refreshReleaseAlert() {
     alert.dataset.tag = info.tag;
     alert.dataset.url = info.html_url || "";
     alert.style.display = "flex";
+
+    // Android: APK 다운로드 진행 표시 — apk-status 폴링으로 진행률 갱신
+    if (window.Android) {
+        try {
+            const apkR = await fetch("/update/apk-status");
+            const apk = await apkR.json();
+            const dlRow = document.getElementById("release-alert-dl");
+            const dlBar = document.getElementById("release-alert-dl-bar");
+            const dlText = document.getElementById("release-alert-dl-text");
+            const restartBtn = document.getElementById("release-alert-restart");
+            if (dlRow) {
+                if (apk.status === "downloading") {
+                    const pct = apk.download_pct ?? 0;
+                    dlRow.style.display = "flex";
+                    if (dlBar) dlBar.style.width = pct + "%";
+                    if (dlText) dlText.textContent = pct + "%";
+                    if (restartBtn) { restartBtn.disabled = true; restartBtn.textContent = `다운로드 ${pct}%`; }
+                } else {
+                    dlRow.style.display = "none";
+                    if (restartBtn) {
+                        restartBtn.disabled = false;
+                        restartBtn.textContent = apk.status === "done" ? "설치하기" : "재시작하기";
+                    }
+                }
+            }
+        } catch (_) { /* 네트워크 오류 — 진행바 숨김 유지 */ }
+    }
 }
 
 // ============================================================
@@ -903,9 +930,23 @@ document.getElementById("release-alert-restart")?.addEventListener("click", asyn
                     }
                 }, 3000);
             } else {
-                alert("APK 아직 다운로드 중입니다.\n잠시 후 다시 시도해 주세요.");
-                btn.disabled = false;
-                btn.textContent = "재시작하기";
+                // status 기반 피드백 — 진행률 표시 (v0.1.58)
+                const status = data.status || "idle";
+                const pct = data.download_pct ?? 0;
+                if (status === "downloading") {
+                    btn.textContent = `다운로드 ${pct}%`;
+                    setTimeout(() => {
+                        if (btn.isConnected) { btn.disabled = false; btn.textContent = "설치하기"; }
+                    }, 2000);
+                } else if (status === "error") {
+                    alert(`다운로드 실패: ${data.error_msg || "알 수 없는 오류"}`);
+                    btn.disabled = false;
+                    btn.textContent = "재시작하기";
+                } else {
+                    alert("APK 아직 다운로드 중입니다.\n잠시 후 다시 시도해 주세요.");
+                    btn.disabled = false;
+                    btn.textContent = "재시작하기";
+                }
             }
         } catch (e) {
             alert("APK 상태 확인 실패: " + e.message);

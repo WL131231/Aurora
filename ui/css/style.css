@@ -1782,6 +1782,32 @@ input[type="range"].slider-input:disabled {
     opacity: 0.6;
     cursor: wait;
 }
+/* APK 다운로드 진행바 (Android v0.1.58) */
+.release-alert-dl {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+}
+.release-alert-dl-track {
+    flex: 1;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.release-alert-dl-bar {
+    height: 100%;
+    background: #60519b;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+#release-alert-dl-text {
+    font-size: 0.625rem;
+    color: var(--text-2);
+    min-width: 2.5rem;
+    text-align: right;
+}
 
 /* ============================================================
    PnL 공유 카드 (v0.1.21) — 거래내역 행 클릭 → 모달 + html2canvas PNG

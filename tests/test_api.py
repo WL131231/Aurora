@@ -402,3 +402,70 @@ def test_cors_headers_present() -> None:
     assert r.status_code in (200, 204)
     # CORSMiddleware 가 origin echo
     assert "access-control-allow-origin" in {k.lower() for k in r.headers}
+
+
+# ============================================================
+# Android APK 업데이트 상태 (Phase C-2, v0.1.58)
+# ============================================================
+
+
+def test_apk_status_returns_200() -> None:
+    """/update/apk-status — 항상 200 반환 (데스크탑/CI 포함)."""
+    r = _client().get("/update/apk-status")
+    assert r.status_code == 200
+
+
+def test_apk_status_shape_idle() -> None:
+    """기본 상태(idle) — 필수 키 전부 존재, has_update=False."""
+    from aurora.interfaces import apk_updater
+    apk_updater._state.update(
+        has_update=False, apk_path=None, latest_tag=None,
+        status="idle", download_pct=0, error_msg=None,
+    )
+    r = _client().get("/update/apk-status")
+    body = r.json()
+    assert body["has_update"] is False
+    assert body["apk_path"] is None
+    assert body["latest_tag"] is None
+    assert body["status"] == "idle"
+    assert body["download_pct"] == 0
+    assert body["error_msg"] is None
+
+
+def test_apk_status_reflects_downloading_state() -> None:
+    """다운로드 중 상태 — status / download_pct 정확히 반영."""
+    from aurora.interfaces import apk_updater
+    apk_updater._state.update(
+        has_update=False, apk_path=None, latest_tag="v999.0.0",
+        status="downloading", download_pct=57, error_msg=None,
+    )
+    body = _client().get("/update/apk-status").json()
+    assert body["status"] == "downloading"
+    assert body["download_pct"] == 57
+    assert body["latest_tag"] == "v999.0.0"
+
+
+def test_apk_status_reflects_done_state() -> None:
+    """다운로드 완료 — has_update=True, apk_path / latest_tag 노출."""
+    from aurora.interfaces import apk_updater
+    apk_updater._state.update(
+        has_update=True, apk_path="/data/update/Aurora-android.apk",
+        latest_tag="v999.0.0", status="done", download_pct=100, error_msg=None,
+    )
+    body = _client().get("/update/apk-status").json()
+    assert body["has_update"] is True
+    assert body["apk_path"] == "/data/update/Aurora-android.apk"
+    assert body["status"] == "done"
+    assert body["download_pct"] == 100
+
+
+def test_apk_status_reflects_error_state() -> None:
+    """오류 상태 — status=error, error_msg 노출."""
+    from aurora.interfaces import apk_updater
+    apk_updater._state.update(
+        has_update=False, apk_path=None, latest_tag=None,
+        status="error", download_pct=0, error_msg="connection refused",
+    )
+    body = _client().get("/update/apk-status").json()
+    assert body["status"] == "error"
+    assert body["error_msg"] == "connection refused"

@@ -59,6 +59,14 @@ class ClosedTrade:
     pnl_usd: float                       # USDT pnl
     roi_pct: float                       # ROI % (마진 기준)
     triggered_by: list[str] = field(default_factory=list)  # 진입 트리거 (예: ["EMA"])
+    # v0.1.65: 수수료 (USDT). taker 시장가 진입 + 청산 양쪽. partial close 면 그 partial 측 수수료만.
+    fee_usd: float = 0.0
+
+
+# v0.1.65: Bybit Demo / 일반 perps 시장가 taker 수수료율.
+# 봇이 시장가 reduce_only 만 사용 → taker 수수료 시뮬레이션. 거래소 정확 응답
+# fetch 까진 Phase 3 (별도 PR). 사용자 거래내역 표시 본질엔 충분 (±0.001% 오차).
+TAKER_FEE_RATE: float = 0.00055
 
 
 class Executor:
@@ -382,6 +390,9 @@ class Executor:
         # ROI = pnl / margin × 100. margin = (entry × qty) / leverage
         margin = (plan.entry_price * close_qty) / max(plan.leverage, 1)
         roi_pct = (pnl_usd / margin * 100.0) if margin > 0 else 0.0
+        # v0.1.65: 시장가 taker 수수료 시뮬레이션 — 진입 + 청산 양쪽.
+        # partial close 면 그 partial qty 만큼만. 거래소 정확 fetch 는 Phase 3.
+        fee_usd = (plan.entry_price + exit_price) * close_qty * TAKER_FEE_RATE
 
         closed = ClosedTrade(
             symbol=self._symbol,
@@ -396,6 +407,7 @@ class Executor:
             pnl_usd=pnl_usd,
             roi_pct=roi_pct,
             triggered_by=list(self._triggered_by),
+            fee_usd=fee_usd,
         )
 
         self._remaining_qty -= close_qty

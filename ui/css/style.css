@@ -1243,6 +1243,14 @@ input[type="range"].slider-input:disabled {
     background: rgba(251, 191, 36, 0.10);
 }
 
+/* v0.1.65: 수수료 컬럼 — 음수 톤 (사용자 비용 환기) */
+.trade-fee {
+    color: #fb7185;
+}
+.trade-fee-empty {
+    color: var(--text-3);
+}
+
 /* "BTCUSDT Perp" 의 Perp 작은 chip */
 .trade-perp {
     display: inline-block;

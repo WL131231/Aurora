@@ -65,6 +65,10 @@ class ClosedPosition:
     closed_at_ts: int             # ms (포지션 청산 시각 — updatedTime)
     pnl_usd: float                # realized PnL
     roi_pct: float                # (pnl / margin) × 100, margin = (entry × qty) / leverage
+    # v0.1.65: 수수료 (USDT). 거래소 응답에 fee 정확치 박혀있으면 추출, 없으면 0.
+    # 봇 자기 record (ClosedTrade) 는 시장가 taker 시뮬레이션. 외부 record 는
+    # ccxt 어댑터가 채울 책임 (Phase 3 — 일단 default 0).
+    fee_usd: float = 0.0
 
 
 @dataclass(slots=True)

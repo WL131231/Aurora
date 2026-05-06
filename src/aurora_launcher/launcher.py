@@ -27,6 +27,7 @@ import logging
 import os
 import platform
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
@@ -38,6 +39,24 @@ from pathlib import Path
 from aurora_launcher import __version__
 
 logger = logging.getLogger(__name__)
+
+# ============================================================
+# v0.1.66: SSL context — frozen --onefile 환경에서 certifi cacert.pem 명시
+# ============================================================
+# Why: ChoYoon Claude #133 환기 — 사용자 (huihu) launcher.log 본문
+# `[SSL: CERTIFICATE_VERIFY_FAILED] unable to get local issuer certificate`.
+# PyInstaller frozen 환경에서 ssl 모듈이 Windows system CA store path 깨짐 →
+# urllib HTTPS 핸드셰이크 fail.
+# v0.1.63 fix 2 (`--collect-data certifi`) 는 `cacert.pem` 을 bundle 에 박지만
+# 코드 측 `certifi.where()` 명시 사용 X → ssl 모듈이 인지 X. 본 PR fix 본질.
+try:
+    import certifi
+    _SSL_CONTEXT: ssl.SSLContext = ssl.create_default_context(cafile=certifi.where())
+    _SSL_CTX_SOURCE: str = f"certifi {certifi.where()}"
+except ImportError:
+    # certifi 미설치 (dev 일부 환경) — system default fallback.
+    _SSL_CONTEXT = ssl.create_default_context()
+    _SSL_CTX_SOURCE = "system default"
 
 # ============================================================
 # 설정 상수
@@ -223,7 +242,9 @@ def fetch_latest_release() -> dict | None:
                 "User-Agent": LAUNCHER_USER_AGENT,
             },
         )
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SEC) as resp:  # noqa: S310
+        with urllib.request.urlopen(  # noqa: S310 — User-Agent + SSL context 박힘
+            req, timeout=HTTP_TIMEOUT_SEC, context=_SSL_CONTEXT,
+        ) as resp:
             data = json.load(resp)
         _last_fetch_error = None  # 성공 시 reset
         return data
@@ -270,14 +291,17 @@ def download_to(url: str, target: Path) -> bool:
     """url → target 경로 다운로드. 실패 시 부분 파일 정리.
 
     v0.1.59: urlretrieve 대신 명시 Request + urlopen — User-Agent 헤더 박음.
-    이전 urlretrieve 는 GitHub release CDN 에서 일부 환경 거부 가능성.
+    v0.1.66: SSL context (certifi cacert) + timeout 명시 — frozen 환경 SSL 핸드셰이크
+    + 무한 hang 방지. ChoYoon Claude #133 fix B.
     """
     try:
         req = urllib.request.Request(
             url, headers={"User-Agent": LAUNCHER_USER_AGENT},
         )
         with (
-            urllib.request.urlopen(req) as resp,  # noqa: S310 — User-Agent 박힘
+            urllib.request.urlopen(  # noqa: S310 — User-Agent + SSL + timeout 박힘
+                req, timeout=HTTP_TIMEOUT_SEC, context=_SSL_CONTEXT,
+            ) as resp,
             target.open("wb") as f,
         ):
             shutil.copyfileobj(resp, f)
@@ -766,6 +790,10 @@ def _log_environment_info() -> None:
         os.environ.get("HTTPS_PROXY") or "(unset)",
         os.environ.get("HTTP_PROXY") or "(unset)",
     )
+    # v0.1.66: SSL context 출처 — ChoYoon Claude #133 fix C.
+    # 다음 cycle launcher.log 에서 "certifi C:\...\_MEI...\certifi\cacert.pem" 박힘
+    # → frozen 환경 SSL 핸드셰이크 본질 정합 verify 가능.
+    logger.info("SSL context: %s", _SSL_CTX_SOURCE)
     logger.info("=" * 60)
 
 

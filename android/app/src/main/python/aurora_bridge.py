@@ -45,11 +45,11 @@ def _load_env() -> None:
 
     AURORA_DATA_DIR 을 먼저 주입해 config.py 의 project_root 가
     filesDir 를 가리키도록 한다 (pydantic 없는 Android 분기).
+    Keystore 암호화 키가 있으면 .env 평문보다 우선 주입.
     """
     try:
         from com.chaquo.python import PyApplication  # type: ignore[import-not-found]
         files_dir = str(PyApplication.getInstance().getFilesDir())
-        # config.py Android 분기가 project_root 기준으로 사용
         os.environ.setdefault("AURORA_DATA_DIR", files_dir)
         env_path = os.path.join(files_dir, ".env")
         if os.path.exists(env_path):
@@ -57,3 +57,31 @@ def _load_env() -> None:
             load_dotenv(env_path, override=True)
     except Exception:
         pass  # .env 없으면 기본값 (demo 모드) 로 진행
+
+    # Keystore 에서 API 키 로드 — .env 평문보다 우선 (override=True)
+    _load_keystore_keys()
+
+
+def _load_keystore_keys() -> None:
+    """EncryptedSharedPreferences 에서 거래소 API 키 로드 → 환경변수 주입.
+
+    Why: .env 평문 저장 대신 Android Keystore(TEE/HSM) 암호화 키로 보호.
+         JS 가 window.AndroidKeystore.saveApiKeys() 호출 시 저장.
+    """
+    try:
+        from com.aurora.trading import KeystoreHelper  # type: ignore[import-not-found]
+        from com.chaquo.python import PyApplication  # type: ignore[import-not-found]
+        ctx = PyApplication.getInstance()
+        for exchange, key_var, secret_var in [
+            ("bybit",   "BYBIT_API_KEY",    "BYBIT_API_SECRET"),
+            ("okx",     "OKX_API_KEY",      "OKX_API_SECRET"),
+            ("binance", "BINANCE_API_KEY",  "BINANCE_API_SECRET"),
+        ]:
+            if KeystoreHelper.INSTANCE.has(ctx, exchange):
+                key = str(KeystoreHelper.INSTANCE.loadKey(ctx, exchange))
+                secret = str(KeystoreHelper.INSTANCE.loadSecret(ctx, exchange))
+                if key:
+                    os.environ[key_var] = key
+                    os.environ[secret_var] = secret
+    except Exception:
+        pass  # Keystore 없으면 .env / demo 모드 유지

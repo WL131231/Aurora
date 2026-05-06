@@ -1263,6 +1263,70 @@ document.getElementById("btn-register-alias")?.addEventListener("click", async (
 });
 
 // ============================================================
+// 7a-2. Android Keystore UI (v0.1.59) — API 키 입력 + 저장 상태 배지
+// ============================================================
+//
+// window.AndroidKeystore 있으면 (= Android WebView) 섹션 표시.
+// 데스크탑에서는 섹션이 hidden 유지 — 조건 분기 없음.
+
+function _ksRefreshBadges() {
+    for (const ex of ["bybit", "okx", "binance"]) {
+        const badge = document.getElementById(`ks-badge-${ex}`);
+        if (!badge) continue;
+        const has = window.AndroidKeystore.hasApiKeys(ex);
+        badge.textContent = ex.charAt(0).toUpperCase() + ex.slice(1) + (has ? " ✓" : " ✕");
+        badge.className = "ks-badge " + (has ? "ks-badge-ok" : "ks-badge-empty");
+    }
+}
+
+if (window.AndroidKeystore) {
+    const section = document.getElementById("android-keystore-section");
+    if (section) section.style.display = "";
+
+    _ksRefreshBadges();
+
+    document.getElementById("ks-btn-save")?.addEventListener("click", () => {
+        const exchange = document.querySelector('input[name="ks-exchange"]:checked')?.value;
+        const apiKey = document.getElementById("ks-api-key")?.value.trim();
+        const apiSecret = document.getElementById("ks-api-secret")?.value.trim();
+        const msg = document.getElementById("ks-msg");
+        if (!apiKey || !apiSecret) {
+            msg.textContent = "API Key 와 Secret 모두 입력 필요";
+            msg.style.color = "#fb7185";
+            setTimeout(() => { msg.textContent = ""; }, 3000);
+            return;
+        }
+        try {
+            window.AndroidKeystore.saveApiKeys(exchange, apiKey, apiSecret);
+            document.getElementById("ks-api-key").value = "";
+            document.getElementById("ks-api-secret").value = "";
+            _ksRefreshBadges();
+            msg.textContent = `✓ ${exchange} 저장 완료`;
+            msg.style.color = "#22d3ee";
+        } catch (e) {
+            msg.textContent = `저장 실패: ${e.message}`;
+            msg.style.color = "#fb7185";
+        }
+        setTimeout(() => { msg.textContent = ""; }, 3000);
+    });
+
+    document.getElementById("ks-btn-clear")?.addEventListener("click", () => {
+        const exchange = document.querySelector('input[name="ks-exchange"]:checked')?.value;
+        const msg = document.getElementById("ks-msg");
+        try {
+            window.AndroidKeystore.clearApiKeys(exchange);
+            _ksRefreshBadges();
+            msg.textContent = `✓ ${exchange} 삭제 완료`;
+            msg.style.color = "#a1a1aa";
+        } catch (e) {
+            msg.textContent = `삭제 실패: ${e.message}`;
+            msg.style.color = "#fb7185";
+        }
+        setTimeout(() => { msg.textContent = ""; }, 3000);
+    });
+}
+
+// ============================================================
 // 7b. Live config apply (v0.1.28) — UI 변경 즉시 백엔드 + 봇 메모리 반영
 // ============================================================
 //

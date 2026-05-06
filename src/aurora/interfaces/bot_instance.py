@@ -93,6 +93,11 @@ _DEFAULT_TIMEFRAMES = ["5m", "15m", "1H", "4H"]  # v0.1.51: BB 5m/15m/1H 활용
 # default 레버리지 — TODO: GUI config 연결 시 settings.leverage 같은 필드 추가 (별도 PR)
 _DEFAULT_LEVERAGE = 10
 
+# v0.1.59: dust 잔여 임계값 (USD notional). 분할 익절 후 0.001 BTC (~$80) 같은 잔여를
+# 외부 포지션으로 오인지하지 않고 봇이 reduce_only 로 자동 정리. 사용자가 직접 그렇게
+# 작은 포지션 박을 가능성 0 (BTC minimum order 보다 작거나 비슷한 수준).
+_DUST_NOTIONAL_USD: float = 200.0
+
 # 지표 트리거 패널 카테고리 (UI 표시 7개) — signal.source 의 prefix 매핑.
 # v0.1.14 — 사용자가 "각 지표 현재 어떻게 보고 있나" 한눈에 확인용.
 # v0.1.49 — "가격 매매" (zone_2468_*) 카테고리 추가 (사용자 결정).
@@ -707,6 +712,12 @@ class BotInstance:
             risk_pct=cfg.get("risk_pct", 0.01),
             full_seed=cfg.get("full_seed", False),
         )
+        # v0.1.59: TpSlConfig 필드 (tpsl_mode / tp_allocations / manual_*) 도 cfg 에서 로드.
+        # Why: 사용자가 봇 정지 상태에서 단일 TP 클릭 → /config 저장 → 시작 시 본 함수가
+        # cfg 읽음. 이전엔 use_*/leverage/risk_pct/full_seed 만 읽고 tpsl_* 누락 →
+        # _tpsl_config 가 default [25,25,25,25] 그대로 → 분할 청산 진행.
+        # apply_live_config 가 통합 처리 함수라 그대로 호출 — dedup_key 로 중복 INFO 방지.
+        self.apply_live_config(cfg)
         # 자동 configure 흔적 — stop → start 사이클 시 재호출 트리거
         self._auto_configured = True
 
@@ -1114,6 +1125,37 @@ class BotInstance:
         if settings.run_mode != "paper":
             external = await self._client.fetch_position(self._symbol)
             if external is not None:
+                # v0.1.59: dust 잔여 자동 정리 — 분할 익절 후 0.001 BTC 같은 잔여를
+                # 외부 포지션으로 오인지하지 말고 봇이 reduce_only 로 정리.
+                # notional < DUST_NOTIONAL_USD ($200) 면 dust 로 간주. 사용자가
+                # 직접 그렇게 작은 포지션 박을 가능성 0 (BTC 0.001 = ~$80).
+                # Why: 사용자 보고 v0.1.58 — 분할 익절 후 0.001 BTC 잔여 → 외부 포지션
+                # 인식 → 봇 정지 → 사용자 수동 정리 후 봇 stop/start 필요.
+                notional = abs(external.qty) * external.entry_price
+                if notional < _DUST_NOTIONAL_USD:
+                    logger.info(
+                        "잔여 dust 자동 정리 (외부 X): %s qty=%.6f notional=$%.2f",
+                        self._symbol, external.qty, notional,
+                    )
+                    try:
+                        dust_side = "sell" if external.side == "long" else "buy"
+                        await self._client.place_order(
+                            symbol=self._symbol,
+                            side=dust_side,
+                            qty=abs(external.qty),
+                            price=None,
+                            reduce_only=True,
+                        )
+                        logger.info("잔여 dust 정리 OK")
+                    except Exception as e:  # noqa: BLE001 — 정리 실패해도 진입 평가 진행
+                        logger.warning(
+                            "잔여 dust 정리 실패 (다음 step 재시도): %s", e,
+                        )
+                    # dust 무시 → 외부 플래그 reset + 이번 step 진입 X
+                    # (다음 step 에 fetch_position 결과 기반 정상 동작)
+                    self._external_position = False
+                    self._external_position_warned = False
+                    return
                 if not self._external_position_warned:
                     logger.warning(
                         "외부 포지션 감지: %s %s qty=%.4f entry=%.2f — Aurora 진입 skip "

@@ -13,11 +13,21 @@
     font-display: swap;
 }
 
+/* v0.1.71: AURORA 워드마크 폰트 — Ginqail (장수님 결정).
+   대문자 영문 워드마크 (AURORA / Trading Start 등) 시각 본질. */
+@font-face {
+    font-family: "Ginqail";
+    src: url("fonts/Ginqail-Font.ttf") format("truetype");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
 /* ===== 폰트 + 컬러 (v0.1.15 — 4색 팔레트 + painterly texture) ===== */
 :root {
     --font-display: "Space Grotesk", "HSBombaram", "Pretendard Variable", system-ui, sans-serif;
     --font-sans: "HSBombaram", "Pretendard Variable", "Space Grotesk", system-ui, sans-serif;
-    --font-wordmark: "Monica Allcaps Stencil", "Bodoni Moda", "Playfair Display", "Times New Roman", serif;
+    --font-wordmark: "Ginqail", "Monica Allcaps Stencil", "Bodoni Moda", "Playfair Display", "Times New Roman", serif;
 
     /* Brand 4색 (본체 / 런처 와 동일) */
     --bg: #1e202c;

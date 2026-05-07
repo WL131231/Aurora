@@ -140,7 +140,49 @@ def main() -> int:
     # 한글 출력은 콘솔 한정 (사용자 머신은 UTF-8 가정해도 안전 X).
     print(f"[platform] {plat} ({sys.version})")
     print("[exec]", " ".join(cmd))
-    return subprocess.run(cmd, check=False).returncode
+    rc = subprocess.run(cmd, check=False).returncode
+
+    # v0.1.74 (ChoYoon Claude #133 fix O): macOS .app Info.plist 후처리 —
+    # LSMinimumSystemVersion=13.0 + 버전 메타 박음. PyInstaller 측 default
+    # Info.plist 박힘 → 후처리로 minimum macOS version + 버전 박음. Finder/
+    # Launchpad 사전 호환 검증 + LC_BUILD_VERSION 정합.
+    if rc == 0 and plat == "Darwin":
+        _patch_info_plist()
+
+    return rc
+
+
+def _patch_info_plist() -> None:
+    """v0.1.74: macOS .app Info.plist 후처리 — LSMinimumSystemVersion 박음.
+
+    PyInstaller 측 .app 번들 자동 생성 후 `Aurora.app/Contents/Info.plist` 에
+    macOS 13 minimum + 버전 메타 박음. ChoYoon Claude #133 fix O.
+    """
+    import plistlib
+
+    app_path = PROJECT_ROOT / "dist" / "Aurora.app"
+    plist_path = app_path / "Contents" / "Info.plist"
+    if not plist_path.exists():
+        print(f"[warn] Info.plist not found: {plist_path} (skip patch)")
+        return
+    try:
+        with plist_path.open("rb") as f:
+            plist = plistlib.load(f)
+        plist["LSMinimumSystemVersion"] = "13.0"
+        plist["NSHighResolutionCapable"] = True
+        # 버전 메타 — pyproject.toml 또는 hardcoded (Phase 1 hardcoded). frozen
+        # 본체는 __version__ 박혀있어 별도 출처 fetching X.
+        try:
+            from aurora import __version__ as _v
+            plist["CFBundleVersion"] = _v
+            plist["CFBundleShortVersionString"] = _v
+        except ImportError:
+            pass
+        with plist_path.open("wb") as f:
+            plistlib.dump(plist, f)
+        print(f"[ok] Info.plist patched: LSMinimumSystemVersion=13.0 ({plist_path})")
+    except (OSError, plistlib.InvalidFileException) as e:
+        print(f"[warn] Info.plist patch failed: {e}")
 
 
 if __name__ == "__main__":

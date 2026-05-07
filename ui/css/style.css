@@ -18,6 +18,15 @@
     font-display: swap;
 }
 
+/* v0.1.71: AURORA 워드마크 폰트 — Ginqail (장수님 결정). */
+@font-face {
+    font-family: "Ginqail";
+    src: url("../fonts/Ginqail-Font.ttf") format("truetype");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
 /* ===== 폰트 + 컬러 (v0.1.15 팔레트 통일 + 페인팅 텍스처) =====
    사용자 요청 4색 팔레트 + SVG fractalNoise 페인팅 질감.
    로고 그라디언트 (purple→indigo→cyan) 만 예외 — 사용자 명시 유지.
@@ -25,7 +34,7 @@
 :root {
     --font-display: "Space Grotesk", "HSBombaram", "Pretendard Variable", system-ui, sans-serif;
     --font-sans: "HSBombaram", "Pretendard Variable", "Space Grotesk", system-ui, sans-serif;
-    --font-wordmark: "Monica Allcaps Stencil", "Bodoni Moda", "Playfair Display", "Times New Roman", serif;
+    --font-wordmark: "Ginqail", "Monica Allcaps Stencil", "Bodoni Moda", "Playfair Display", "Times New Roman", serif;
 
     /* === Brand 4색 (v0.1.15) === */
     --bg: #1e202c;                    /* 짙은 남색-검정 (주 배경) */

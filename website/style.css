@@ -3,10 +3,20 @@
    Tailwind 로 처리 못하는 그라디언트·애니메이션·필터 효과만 작성.
    ============================================================ */
 
+/* v0.1.70: 한글 글씨체 — HSBombaram 2.1 (한섬 봄바람체, 배포/상업 허용).
+   장수님 결정 — Pretendard 대신 봄바람체 박음. 영문은 Space Grotesk / Bodoni 그대로. */
+@font-face {
+    font-family: "HSBombaram";
+    src: url("fonts/HSBombaram2.1.ttf") format("truetype");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
 /* ===== 폰트 + 컬러 (v0.1.15 — 4색 팔레트 + painterly texture) ===== */
 :root {
-    --font-display: "Space Grotesk", "Pretendard Variable", system-ui, sans-serif;
-    --font-sans: "Pretendard Variable", "Space Grotesk", system-ui, sans-serif;
+    --font-display: "Space Grotesk", "HSBombaram", "Pretendard Variable", system-ui, sans-serif;
+    --font-sans: "HSBombaram", "Pretendard Variable", "Space Grotesk", system-ui, sans-serif;
     --font-wordmark: "Monica Allcaps Stencil", "Bodoni Moda", "Playfair Display", "Times New Roman", serif;
 
     /* Brand 4색 (본체 / 런처 와 동일) */

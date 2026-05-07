@@ -2,19 +2,29 @@
    Aurora GUI 콘솔 — 디자인 시스템
    웹사이트(`website/style.css`) 톤 차용:
      - 배경 #1e202c + 오로라 그라디언트 글로우
-     - Bodoni Moda / Space Grotesk / Pretendard 폰트
+     - Bodoni Moda / Space Grotesk / HSBombaram (v0.1.70 한글) 폰트
      - 다이아몬드 로고 그라디언트 (purple → indigo → cyan)
      - photo-frame 카드 (다크 + 라디얼 글로우 + 그라디언트 보더)
    GUI 차이: hero 거대 타이포 X, 정보 밀도 ↑, 사진 배경 X.
    ============================================================ */
+
+/* v0.1.70: 한글 글씨체 — HSBombaram 2.1 (한섬 봄바람체, 배포/상업 허용).
+   `ui/fonts/HSBombaram2.1.ttf` PyInstaller add-data 로 frozen bundle 동봉. */
+@font-face {
+    font-family: "HSBombaram";
+    src: url("../fonts/HSBombaram2.1.ttf") format("truetype");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
 
 /* ===== 폰트 + 컬러 (v0.1.15 팔레트 통일 + 페인팅 텍스처) =====
    사용자 요청 4색 팔레트 + SVG fractalNoise 페인팅 질감.
    로고 그라디언트 (purple→indigo→cyan) 만 예외 — 사용자 명시 유지.
    롱/숏 의미색 (초록/빨강) 유지 — trading 컨벤션. */
 :root {
-    --font-display: "Space Grotesk", "Pretendard Variable", system-ui, sans-serif;
-    --font-sans: "Pretendard Variable", "Space Grotesk", system-ui, sans-serif;
+    --font-display: "Space Grotesk", "HSBombaram", "Pretendard Variable", system-ui, sans-serif;
+    --font-sans: "HSBombaram", "Pretendard Variable", "Space Grotesk", system-ui, sans-serif;
     --font-wordmark: "Monica Allcaps Stencil", "Bodoni Moda", "Playfair Display", "Times New Roman", serif;
 
     /* === Brand 4색 (v0.1.15) === */

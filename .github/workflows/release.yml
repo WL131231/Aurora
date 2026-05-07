@@ -32,12 +32,16 @@ permissions:
 # Windows runner 의 cp1252 stdout 가 한글 인코딩 X → 전역 PYTHONIOENCODING=utf-8
 # (build_exe.py 의 한글 print 회피, 봇 런타임 한글 로그도 안전)
 #
-# v0.1.74 (ChoYoon Claude #133 12th cycle fix N'): MACOSX_DEPLOYMENT_TARGET=13.0
-# 박음 — PyInstaller bundle binary + source-build C extension 측 minimum target
-# 13 박음. fix N (runner macos-13) + fix O (.spec LSMinimumSystemVersion) 합본.
-# Why: NumPy 2.4.4 wheel = macOS 14.0 minimum (NEWLAPACK$ILP64) → macOS 13 측
-# dlopen fail → ImportError → 본체 즉시 exit. 사용자 huihu (M2 Mac, macOS 13)
-# 측 ImportError 본문 verify 정합.
+# v0.1.74 (ChoYoon Claude #133 12th cycle fix N+N'+O+Q): macOS 13 minimum 호환.
+#   - fix N: runner macos-13 박음 (NumPy 2.4.x wheel = 14.0 min → 13 호환 wheel 선택)
+#   - fix N': MACOSX_DEPLOYMENT_TARGET=13.0 (자체 빌드 binary minimum)
+#   - fix O: Info.plist LSMinimumSystemVersion=13.0 (build_exe.py 후처리)
+#   - fix Q: numpy<2.4 (defense in depth)
+#
+# v0.1.75 (ChoYoon #133 13th cycle case B fix R): runner macos-13 → macos-14.
+# Why: macos-13 runner 17분+ queued (assignment X) — retirement 진입 가능성 ↑.
+# macos-14 (arm64, 사용자 huihu M2 정합) + numpy<2.4 박힘으로 NumPy 2.3.x wheel
+# (macOS 11+ 호환) 자동 선택 → macOS 13/14/15 모두 호환 본질 유지.
 env:
   PYTHONIOENCODING: utf-8
   MACOSX_DEPLOYMENT_TARGET: "13.0"
@@ -55,7 +59,7 @@ jobs:
             asset_name: Aurora-windows.exe
             artifact_path: dist/Aurora.exe
             artifact_name: aurora-windows
-          - os: macos-13
+          - os: macos-14
             asset_name: Aurora-macOS.zip
             artifact_path: dist/Aurora-macOS.zip
             artifact_name: aurora-macos
@@ -136,7 +140,7 @@ jobs:
 
       # ===== macOS 검증 + zip =====
       - name: Verify + zip macOS .app bundle
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-14'
         shell: bash
         run: |
           if [ ! -d "dist/Aurora.app" ] && [ ! -f "dist/Aurora" ]; then
@@ -158,7 +162,7 @@ jobs:
       # zip 은 launcher 자가 update 흐름 유지 (단순 풀음). DMG 는 외부 사용자 진입 시
       # AppTranslocation 회피 + Finder 표준 흐름. ChoYoon Claude #133 P2 사용자 huihu 제안 1.
       - name: Build macOS DMG (사용자 manual 다운로드용)
-        if: matrix.os == 'macos-13' && startsWith(github.ref, 'refs/tags/v')
+        if: matrix.os == 'macos-14' && startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           cd dist
@@ -171,7 +175,7 @@ jobs:
           fi
 
       - name: Attach DMG to release
-        if: matrix.os == 'macos-13' && startsWith(github.ref, 'refs/tags/v')
+        if: matrix.os == 'macos-14' && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/Aurora-macOS.dmg
@@ -337,7 +341,7 @@ jobs:
           - os: windows-latest
             asset_name: Aurora-launcher.exe
             artifact_path: dist/Aurora-launcher.exe
-          - os: macos-13
+          - os: macos-14
             asset_name: Aurora-launcher-macOS.zip
             artifact_path: dist/Aurora-launcher-macOS.zip
 
@@ -392,7 +396,7 @@ jobs:
         shell: pwsh
 
       - name: Verify + zip macOS launcher
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-14'
         shell: bash
         run: |
           if [ ! -d "dist/Aurora-launcher.app" ] && [ ! -f "dist/Aurora-launcher" ]; then
@@ -409,7 +413,7 @@ jobs:
 
       # v0.1.69: macOS launcher DMG — 사용자 manual 다운로드 표준 UX.
       - name: Build macOS launcher DMG (사용자 manual 다운로드용)
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-14'
         shell: bash
         run: |
           cd dist
@@ -422,7 +426,7 @@ jobs:
           fi
 
       - name: Attach launcher DMG to release
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-14'
         uses: softprops/action-gh-release@v2
         with:
           files: dist/Aurora-launcher-macOS.dmg

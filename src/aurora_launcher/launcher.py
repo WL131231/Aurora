@@ -501,24 +501,47 @@ def apply_swap(downloaded_new: Path) -> bool:
     target = _body_local_target()
     sys_name = platform.system()
 
-    # macOS — zip 풀음 흐름
-    if sys_name == "Darwin" and downloaded_new.suffix == ".zip":
+    # macOS — zip 풀음 흐름. v0.1.73: suffix 검사 → is_zipfile 박음
+    # (download target = ``.zip.new`` 본질 fix H 정합 — suffix=".new" 라 옛 분기
+    # SKIP 됐던 결함 회피). zipfile.extractall → ditto -x -k 로 변경 (.app 번들의
+    # symlink / xattr / executable bit metadata 보존). ChoYoon #133 fix I.
+    if sys_name == "Darwin":
         import zipfile
+        if not zipfile.is_zipfile(downloaded_new):
+            logger.warning("macOS swap: zip 형식 X — %s", downloaded_new)
+            return False
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            # 기존 .app 제거 (zip 풀음 전 깔끔 swap)
+            # 기존 .app 제거 (깔끔 swap)
             if target.exists():
                 shutil.rmtree(target)
-            with zipfile.ZipFile(downloaded_new) as zf:
-                zf.extractall(target.parent)
+            # ditto -x -k = macOS 표준 zip extract. .app 번들 metadata 보존
+            # (symlinks / xattr / resource forks / executable bit). 별도 의존성 X.
+            result = subprocess.run(  # noqa: S603, S607
+                ["ditto", "-x", "-k", str(downloaded_new), str(target.parent)],
+                capture_output=True, timeout=60, check=False,
+            )
+            if result.returncode != 0:
+                err = result.stderr.decode("utf-8", errors="replace")
+                logger.error(
+                    "ditto -xk 실패 (rc=%d): %s", result.returncode, err.strip(),
+                )
+                return False
             downloaded_new.unlink()
-            # 실행 권한 보강 (zip 풀음 시 박힐 수도 있지만 안전)
-            for root, _, files in os.walk(target):
-                for f in files:
-                    Path(root, f).chmod(0o755)
+            # quarantine xattr 정리 — urllib 다운은 quarantine X 박지만 안전망
+            subprocess.run(  # noqa: S603, S607
+                ["xattr", "-cr", str(target)],
+                capture_output=True, timeout=10, check=False,
+            )
+            # .app 디렉토리 +x — Finder 진입 가능
+            try:
+                target.chmod(0o755)
+            except OSError:
+                pass
+            logger.info("macOS .app swap 완료 (ditto): %s", target)
             return True
-        except (OSError, zipfile.BadZipFile) as e:
-            logger.warning("macOS zip swap 실패: %s", e)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            logger.warning("macOS swap 실패: %s", e)
             return False
 
     # Windows / 기타 — rename 흐름 (기존)
@@ -642,11 +665,30 @@ def launch_aurora() -> bool:
         if sys_name == "Darwin":
             # macOS: `open` 명령 — .app 번들 표준 실행 흐름. Info.plist 처리 + Finder
             # 표준 lifecycle 정합. cwd 박음 X (open 이 .app/Contents/MacOS/ 자동).
-            subprocess.Popen(  # noqa: S603, S607 — open 명령 + .app path
+            # v0.1.73: stderr 캡처 + 짧은 timeout. ChoYoon #133 fix J — 본체 시작
+            # 흐름 진단 자료 박음. open 자체는 비동기 spawn → 정상 = 즉시 종료.
+            # fail 시 open 이 stderr 메시지 박음 (e.g. "이 응용 프로그램은 이 Mac
+            # 에서 지원되지 않습니다") → launcher.log 측 가시화.
+            logger.info("본체 실행 시도 (open .app): %s", target)
+            proc = subprocess.Popen(  # noqa: S603, S607 — open 명령 + .app path
                 ["open", str(target)],
                 env=env,
                 close_fds=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
+            try:
+                _, stderr = proc.communicate(timeout=2.0)
+                if proc.returncode != 0:
+                    err = stderr.decode("utf-8", errors="replace").strip()
+                    logger.error(
+                        "open 명령 fail (rc=%d): %s", proc.returncode, err,
+                    )
+                    return False
+                logger.info("open 명령 성공 (rc=0)")
+            except subprocess.TimeoutExpired:
+                # 정상 — open 이 .app 비동기 spawn 후 자체 종료 (보통 빠름)
+                logger.info("본체 시작 명령 박힘 (비동기 detach)")
             return True
 
         # Windows / 기타 — 직접 Popen (DETACHED_PROCESS)
@@ -734,18 +776,30 @@ class LauncherApi:
                 "error": None}
 
     def download_and_swap(self, url: str) -> dict:
-        """본체 .exe 다운로드 + swap. UI 가 progress 표시 위해 바로 반환.
+        """본체 다운로드 + swap. 플랫폼별 download target (v0.1.73).
+
+        Windows: ``Aurora.exe.new`` (rename swap)
+        macOS:   ``Aurora-macOS.zip.new`` (zip 형식 보존 — apply_swap 가 ditto 풀음)
+
+        Why: ChoYoon Claude #133 10th cycle fix H — 이전 흐름은 macOS 측에서
+        ``Aurora.app.new`` (단일 파일 path) 박음 → apply_swap 의 .zip 분기 SKIP
+        → Windows rename 흐름 fall-through → ``Aurora.app`` 가 zip 바이트 단일
+        파일로 박힘 (디렉토리 X, 번들 X) → macOS "지원되지 않음" 에러.
 
         Returns:
             ``{"success": bool, "message": str}``
         """
-        target = _aurora_exe_path().with_suffix(_aurora_exe_path().suffix + ".new")
-        # _aurora/ 폴더 자동 생성 (첫 다운 시 폴더 없음)
+        if platform.system() == "Darwin":
+            # macOS: download target = .zip.new — apply_swap 가 zip 풀어서 .app 박음.
+            target = _aurora_data_dir() / "Aurora-macOS.zip.new"
+        else:
+            target = _aurora_exe_path().with_suffix(_aurora_exe_path().suffix + ".new")
+        # 폴더 자동 생성 (첫 다운 시)
         target.parent.mkdir(parents=True, exist_ok=True)
         if not download_to(url, target):
             return {"success": False, "message": "다운로드 실패 (네트워크 확인)"}
         if not apply_swap(target):
-            return {"success": False, "message": "swap 실패 (본체 .exe 권한 확인)"}
+            return {"success": False, "message": "swap 실패 (본체 권한 확인)"}
         # 새 버전 기록
         try:
             release = fetch_latest_release()

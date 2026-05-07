@@ -94,7 +94,40 @@ def main() -> int:
 
     print(f"[platform] {plat} ({sys.version})")
     print("[exec]", " ".join(cmd))
-    return subprocess.run(cmd, check=False).returncode
+    rc = subprocess.run(cmd, check=False).returncode
+
+    # v0.1.74 (ChoYoon Claude #133 fix O): macOS launcher.app Info.plist 후처리.
+    if rc == 0 and plat == "Darwin":
+        _patch_launcher_info_plist()
+
+    return rc
+
+
+def _patch_launcher_info_plist() -> None:
+    """v0.1.74: macOS launcher.app Info.plist 후처리 — LSMinimumSystemVersion."""
+    import plistlib
+
+    app_path = PROJECT_ROOT / "dist" / "Aurora-launcher.app"
+    plist_path = app_path / "Contents" / "Info.plist"
+    if not plist_path.exists():
+        print(f"[warn] launcher Info.plist not found: {plist_path} (skip patch)")
+        return
+    try:
+        with plist_path.open("rb") as f:
+            plist = plistlib.load(f)
+        plist["LSMinimumSystemVersion"] = "13.0"
+        plist["NSHighResolutionCapable"] = True
+        try:
+            from aurora_launcher import __version__ as _v
+            plist["CFBundleVersion"] = _v
+            plist["CFBundleShortVersionString"] = _v
+        except ImportError:
+            pass
+        with plist_path.open("wb") as f:
+            plistlib.dump(plist, f)
+        print("[ok] launcher Info.plist patched: LSMinimumSystemVersion=13.0")
+    except (OSError, plistlib.InvalidFileException) as e:
+        print(f"[warn] launcher Info.plist patch failed: {e}")
 
 
 if __name__ == "__main__":

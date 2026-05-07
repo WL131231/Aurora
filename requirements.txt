@@ -1,7 +1,7 @@
 # Aurora 런타임 의존성
 ccxt>=4.4.0
 pandas>=2.2.0,<3.0
-numpy>=1.26.0
+numpy>=1.26.0,<2.4  # v0.1.74 fix Q — macOS 13 호환 wheel 자동 선택 (2.4.x = 14.0 minimum)
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 pywebview>=5.0

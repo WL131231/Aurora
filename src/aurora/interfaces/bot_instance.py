@@ -1256,6 +1256,31 @@ class BotInstance:
                 market_trend.direction, market_trend.score, sig_dir, boost,
             )
 
+        # v0.1.79 (D): Tako 두 SuperTrend booster — Ichi-ST + DMI-ST 정렬 본질.
+        # Coinalyze 추세 booster 와 별개 layer — 가격 자체 (close) 의 ATR 기반
+        # trailing trend 정렬 시 보조 가중치.
+        # 진입 차단 X (Coinalyze 가 이미 강제) — 단순 score multiplier 로그용.
+        try:
+            from aurora.core.indicators import (
+                dual_supertrend_alignment,
+                dual_supertrend_booster,
+            )
+            primary_df_st = df_by_tf.get(primary_tf)
+            if primary_df_st is not None and not primary_df_st.empty:
+                st_align = dual_supertrend_alignment(
+                    primary_df_st,
+                    period_fast=14, mult_fast=2.0,
+                    period_slow=14, mult_slow=3.0,
+                )
+                st_boost = dual_supertrend_booster(st_align, sig_dir)
+                if st_align != 0 and st_boost != 1.0:
+                    logger.info(
+                        "Dual SuperTrend booster: alignment=%+d / 신호 방향=%s / boost ×%.1f",
+                        st_align, sig_dir, st_boost,
+                    )
+        except Exception as e:  # noqa: BLE001 — booster 계산 실패 시 silent
+            logger.debug("dual SuperTrend booster 계산 실패: %s", e)
+
         # v0.1.42: bar-level 진입 dedup — 같은 1H 봉 + 같은 source 재진입 차단.
         # Why: BB stateful 신호 (또는 last_high 누적) 가 봉 닫힐 때까지 살아있어
         # 청산 후 즉시 재진입 → 사고팔고 무한 사이클 (사용자 보고 v0.1.41).

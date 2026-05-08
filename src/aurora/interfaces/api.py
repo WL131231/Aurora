@@ -456,19 +456,27 @@ def create_app() -> FastAPI:
         equity_usd: 거래소 어댑터의 ``get_equity()`` 호출 (USDT total).
         open_positions: 어댑터의 ``get_positions()`` 길이.
         client 미설정·거래소 호출 실패 시 각각 ``None`` / ``0`` (UI 안전 폴백).
+
+        v0.1.95: ccxt 호출 5초 timeout 박음 — 거래소 응답 hang 시 frontend
+        측 무한 대기 (DISCONNECTED 누적 + uvicorn 응답 차단) 차단. 사용자 보고
+        2026-05-08 disconnect 본질 fix.
         """
         bot = bot_instance.get_instance()
         equity: float | None = None
         open_count = 0
         if bot.client is not None:
             try:
-                balance = await bot.client.get_equity()
+                balance = await asyncio.wait_for(bot.client.get_equity(), timeout=5.0)
                 equity = balance.total_usd
+            except TimeoutError:
+                logger.warning("/status get_equity timeout (5초) — None 반환")
             except Exception as e:  # noqa: BLE001 — 거래소 호출 실패는 UI 끄지 않고 None 반환
                 logger.warning("/status get_equity 실패 (None 반환): %s", e)
             try:
-                positions = await bot.client.get_positions()
+                positions = await asyncio.wait_for(bot.client.get_positions(), timeout=5.0)
                 open_count = len(positions)
+            except TimeoutError:
+                logger.warning("/status get_positions timeout (5초) — 0 반환")
             except Exception as e:  # noqa: BLE001 — 포지션 조회 실패해도 status 자체는 응답
                 logger.warning("/status get_positions 실패 (0 반환): %s", e)
         return StatusResponse(
@@ -489,12 +497,17 @@ def create_app() -> FastAPI:
 
         client 미설정·거래소 호출 실패 시 빈 리스트.
         SL/TP 정보는 거래소가 안 줌 — Executor 가 별도 관리 (TODO).
+
+        v0.1.95: 5초 timeout 박음 — 거래소 응답 hang 차단 (사용자 보고 fix).
         """
         bot = bot_instance.get_instance()
         if bot.client is None:
             return []
         try:
-            raw = await bot.client.get_positions()
+            raw = await asyncio.wait_for(bot.client.get_positions(), timeout=5.0)
+        except TimeoutError:
+            logger.warning("/positions get_positions timeout (5초) — 빈 리스트 반환")
+            return []
         except Exception as e:  # noqa: BLE001 — UI 안전 (빈 리스트)
             logger.warning("/positions get_positions 실패 (빈 리스트 반환): %s", e)
             return []
@@ -643,10 +656,12 @@ def create_app() -> FastAPI:
 
         ex_records: list[TradeDTO] = []
         # 거래소 fetch — days>0 일 때만 (since 명시적). bot 단독이면 fetch X.
+        # v0.1.95: 8초 timeout 박음 (거래소 history 측 대용량 응답 대비 5초 → 8초).
         if source in ("exchange", "all") and days > 0 and bot.client is not None:
             try:
-                closed = await bot.client.fetch_closed_positions(
-                    since_ms=since_ms, limit=limit,
+                closed = await asyncio.wait_for(
+                    bot.client.fetch_closed_positions(since_ms=since_ms, limit=limit),
+                    timeout=8.0,
                 )
                 for c in closed:
                     # v0.1.65: 봇 record 와 매칭 → reason / triggered_by / fee 정정.
@@ -687,6 +702,8 @@ def create_app() -> FastAPI:
                             triggered_by=[],
                             fee_usd=c.fee_usd,
                         ))
+            except TimeoutError:
+                logger.warning("/trades fetch_closed_positions timeout (8초) — 봇 buffer 만 표시")
             except Exception as e:  # noqa: BLE001 — UI 안전 (봇 buffer 만 보여줌)
                 logger.warning("/trades fetch_closed_positions 실패: %s", e)
 
@@ -816,12 +833,16 @@ def create_app() -> FastAPI:
             bot_records = [t for t in bot_records if t.closed_at_ts >= since_ms]
 
         # 거래소 history (days>0 일 때만)
+        # v0.1.95: 8초 timeout 박음 (대용량 응답 대비).
         ex_records: list = []
         if days > 0 and bot.client is not None:
             try:
-                ex_records = await bot.client.fetch_closed_positions(
-                    since_ms=since_ms, limit=200,
+                ex_records = await asyncio.wait_for(
+                    bot.client.fetch_closed_positions(since_ms=since_ms, limit=200),
+                    timeout=8.0,
                 )
+            except TimeoutError:
+                logger.warning("/stats fetch_closed_positions timeout (8초) — 봇 buffer 만 통계")
             except Exception as e:  # noqa: BLE001 — UI 안전 (봇 buffer 만으로 통계)
                 logger.warning("/stats fetch_closed_positions 실패: %s", e)
 

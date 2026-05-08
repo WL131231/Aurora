@@ -7,31 +7,68 @@
 const Api = window.AuroraApi;
 
 // ============================================================
-// 0. 부팅 스플래시 — AURORA 페이드 인 → 대시보드 (끊김 없이)
+// 0. 부팅 스플래시 — AURORA 즉시 가시 → backend ready / timeout 시 fade-out
 // ============================================================
 //
-// 타이밍 (CSS splash-fade-in 2s 와 동기):
-//   0.0s        splash 페이드 인 시작 + 그라디언트 시프트 동시 시작
-//   2.0s        페이드 인 끝 (글자 완전 표시, 시프트 계속 진행)
-//   3.0s        오버레이 fade-out 클래스 추가 (0.8s 페이드 아웃)
-//   3.8s        DOM 제거 + body splash-active 해제 → 메인 GUI 인터랙션
+// v0.1.108 (ChoYoon 권장 (a) 외부 사용자 친화):
+// - inline critical CSS 측 splash 즉시 박힘 (WebView2 init 측 까만 화면 차단)
+// - status 텍스트 측 ("SYSTEM 시작 중" → "백엔드 연결 중" → "준비 완료")
+//   사용자 측 진행 상황 명확
+// - fade-out 트리거: (1) /status 응답 200 OK 박힘 OR (2) 5초 timeout
 //
-// 끊김 방지:
-//   - 페이드 인 + 그라디언트 시프트 동시 시작 (delay 없음 → 경계 없음)
-//   - opacity 만 변화 (transform/blur 제거)
+// 타이밍:
+//   0.0s        splash 즉시 보임 (inline CSS, html 박히자마자 표시)
+//   ~1.0s       /status fetch 시도 시작
+//   ready/5s    fade-out (0.6s) → DOM 제거
 
-window.addEventListener("load", () => {
-    setTimeout(() => {
-        const splash = document.getElementById("splash");
-        if (!splash) return;
-        splash.classList.add("fade-out");
-        // 페이드 아웃 끝(0.8s) 후 DOM 제거 + body 클래스 해제
+(function bootSplash() {
+    const splash = document.getElementById("boot-splash");
+    if (!splash) return;
+    const status = document.getElementById("boot-status-text");
+    let faded = false;
+
+    function fadeOut(reason) {
+        if (faded) return;
+        faded = true;
+        if (status) status.textContent = "준비 완료";
+        // 짧은 딜레이 후 fade-out (사용자 측 status 변화 인지)
         setTimeout(() => {
-            splash.remove();
-            document.body.classList.remove("splash-active");
-        }, 800);
-    }, 3000); // 2.0s (페이드 인) + 1.0s (정지)
-});
+            splash.classList.add("fade-out");
+            setTimeout(() => {
+                splash.remove();
+                document.body.classList.remove("splash-active");
+            }, 600);
+        }, 200);
+        if (reason && console && console.info) {
+            console.info("[boot-splash] fade-out:", reason);
+        }
+    }
+
+    // 1초 후 status 변경 + backend ready 확인 시작
+    setTimeout(() => {
+        if (status) status.textContent = "백엔드 연결 중";
+    }, 600);
+
+    // backend ready 확인 — 첫 /status 200 OK 시 fade-out
+    let attempts = 0;
+    const tryReady = () => {
+        if (faded) return;
+        attempts += 1;
+        fetch("http://127.0.0.1:8765/status", { cache: "no-cache" })
+            .then((r) => {
+                if (r.ok) fadeOut(`backend ready (attempt ${attempts})`);
+                else setTimeout(tryReady, 500);
+            })
+            .catch(() => {
+                setTimeout(tryReady, 500);
+            });
+    };
+    setTimeout(tryReady, 800);
+
+    // hard timeout — backend 측 5초 안 응답 X 면 fade-out (사용자 측 frontend
+    // 측 disconnect 표시 측 박힘 — boot-splash 영원 박혀있는 본질 X)
+    setTimeout(() => fadeOut("5s timeout (backend 측 응답 X — UI 측 자체 진행)"), 5000);
+})();
 
 // ============================================================
 // 1. 라우팅 (사이드바 네비 → view 토글)

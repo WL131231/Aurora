@@ -460,6 +460,10 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        # v0.1.106: log_buffer 측 event loop reference 박음 — emit 측 broadcast
+        # safely 박힘 본질. 이전 측 emit 안 측 asyncio.get_running_loop() 호출 측
+        # PyInstaller frozen 측 hang (사용자 보고 step 3.13d 박힌 후 멈춤).
+        log_buffer.set_event_loop(asyncio.get_running_loop())
         # startup — release_check 5분 주기 폴링 시작 (v0.1.25)
         release_check.start_polling()
         # v0.1.99: 60초 주기 heartbeat task — 봇 미가동 시에도 \"body 살아있음\" 로그
@@ -470,6 +474,8 @@ def create_app() -> FastAPI:
         # shutdown — 폴링 task 깨끗하게 cancel
         release_check.stop_polling()
         heartbeat_task.cancel()
+        log_buffer.set_event_loop(None)
+        log_buffer.set_broadcaster(None)
         logger.info("FastAPI lifespan shutdown")
 
     logger.info("[create_app] step 2 (%.3f초): FastAPI() 생성 시작", _t.monotonic() - t0)

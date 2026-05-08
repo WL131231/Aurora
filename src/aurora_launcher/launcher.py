@@ -614,18 +614,30 @@ def _kill_other_aurora_processes() -> None:
     재시작 cascade. mutex 측 timing race 측 100% 못 잡힘 + v0.1.99 auto-respawn
     측 cascade 키움. 시작 시 강제 정리 박아 단일 launcher + 단일 body 보장.
 
-    자기 PID 측 제외. taskkill /F 측 mutex name 무관 즉시 종료. mutex 측 자동
-    release.
+    자기 PID + 부모 PID 제외 — v0.1.102 fix:
+    - self-update spawn 시 옛 launcher = 부모, 새 launcher = 자식
+    - 새 launcher 측 옛 launcher 측 ``taskkill /F /T`` 박으면 tree-kill 측
+      자식 (= 자기 자신) 도 같이 박힘 → 사용자 보고 \"런처 누르면 안 나옴\"
+    - 부모 PID 측 skip 박아 self-tree-kill 회피. 옛 launcher 측 sys.exit(0)
+      자체로 곧 죽음 (kill 안 해도 OK).
     """
     if platform.system() != "Windows":
         return
     my_pid = os.getpid()
+    # v0.1.102: 부모 PID 측 self-update chain 측 \"새 launcher 측 옛 launcher
+    # 측 tree-kill 측 자기도 죽이는\" 본질 차단. os.getppid 측 PyInstaller
+    # frozen 환경 측 정상 박힘.
+    try:
+        my_parent_pid = os.getppid()
+    except OSError:
+        my_parent_pid = -1
     try:
         for image_name in ("Aurora.exe", "Aurora-launcher.exe"):
             # tasklist 측 PID 받아 자기 PID 제외 + taskkill
             r = subprocess.run(  # noqa: S603, S607
                 ["tasklist", "/FI", f"IMAGENAME eq {image_name}", "/FO", "CSV", "/NH"],
                 capture_output=True, timeout=5, check=False,
+                creationflags=0x08000000,  # CREATE_NO_WINDOW (cmd flash 차단)
             )
             if r.returncode != 0:
                 continue
@@ -643,6 +655,12 @@ def _kill_other_aurora_processes() -> None:
                     continue
                 if pid == my_pid:
                     continue
+                if pid == my_parent_pid:
+                    logger.info(
+                        "v0.1.102 startup nuke: %s PID=%d 측 부모 PID — skip "
+                        "(tree-kill 측 self 차단)", image_name, pid,
+                    )
+                    continue
                 logger.info(
                     "v0.1.100 startup nuke: %s PID=%d kill",
                     image_name, pid,
@@ -651,6 +669,7 @@ def _kill_other_aurora_processes() -> None:
                     subprocess.run(  # noqa: S603, S607
                         ["taskkill", "/F", "/T", "/PID", str(pid)],
                         capture_output=True, timeout=5, check=False,
+                        creationflags=0x08000000,  # CREATE_NO_WINDOW
                     )
                 except (OSError, subprocess.TimeoutExpired) as e:
                     logger.warning("kill 실패 PID=%d: %s", pid, e)
@@ -677,6 +696,7 @@ def _kill_existing_aurora_on_port(port: int = 8765) -> None:
             capture_output=True,
             timeout=5,
             check=False,
+            creationflags=0x08000000,  # CREATE_NO_WINDOW (v0.1.102)
         )
         if result.returncode != 0:
             return
@@ -703,6 +723,7 @@ def _kill_existing_aurora_on_port(port: int = 8765) -> None:
                     capture_output=True,
                     timeout=5,
                     check=False,
+                    creationflags=0x08000000,  # CREATE_NO_WINDOW (v0.1.102)
                 )
                 if kill_result.returncode == 0:
                     logger.info("옛 본체 kill OK: PID=%d", pid)
@@ -1176,6 +1197,7 @@ def _kill_parent_if_requested() -> None:
             capture_output=True,
             timeout=5,
             check=False,
+            creationflags=0x08000000,  # CREATE_NO_WINDOW (v0.1.102)
         )
         if result.returncode == 0:
             logger.info("부모 본체 종료 OK: PID=%d", kill_pid)

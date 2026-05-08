@@ -348,9 +348,18 @@ def find_aurora_exe_url(release: dict) -> str | None:
 
 
 def find_launcher_url(release: dict) -> str | None:
-    """release assets 에서 Aurora-launcher.exe URL 반환 (self-update v0.1.19)."""
+    """release assets 에서 launcher URL 반환 — 플랫폼별 asset name (v0.1.109).
+
+    Windows: ``Aurora-launcher.exe``
+    macOS:   ``Aurora-launcher-macOS.zip`` (release.yml 측 ditto -ck 박은 .app 번들)
+    """
+    sys_name = platform.system()
+    if sys_name == "Darwin":
+        target_name = "Aurora-launcher-macOS.zip"
+    else:
+        target_name = "Aurora-launcher.exe"
     for asset in release.get("assets", []):
-        if asset.get("name") == "Aurora-launcher.exe":
+        if asset.get("name") == target_name:
             url = asset.get("browser_download_url")
             return str(url) if url else None
     return None
@@ -423,7 +432,10 @@ def _launcher_new_path() -> Path:
 
     v0.1.23 이전: launcher 옆 ``Aurora-launcher.exe.new``  ← 사용자 눈에 보임
     v0.1.24~:    ``%LOCALAPPDATA%\\Aurora\\Aurora-launcher.exe.new``  ← 숨김
+    v0.1.109:    macOS 측 ``Aurora-launcher-macOS.zip.new`` 박음 (ChoYoon 권장 c).
     """
+    if platform.system() == "Darwin":
+        return _aurora_data_dir() / "Aurora-launcher-macOS.zip.new"
     return _aurora_data_dir() / "Aurora-launcher.exe.new"
 
 
@@ -436,11 +448,21 @@ def apply_pending_launcher_update() -> bool:
     v0.1.24: ``.new`` 가 LocalAppData 격리 폴더에 있을 수도, legacy (launcher 옆) 일 수도.
     호환성 위해 두 위치 모두 체크 — 어느쪽이든 발견 시 swap.
 
+    v0.1.109: macOS 분기 박음 (ChoYoon 권장 c) — .zip 측 ditto unzip + .app
+    swap + ``open -n`` spawn. 이전 측 Windows only 박혀있어 macOS 측 self-update
+    자체 X.
+
     Returns:
         True (실제로는 도달 X — sys.exit). False — 해당 없음 / 실패.
     """
-    if not _is_frozen() or platform.system() != "Windows":
+    if not _is_frozen():
         return False
+    sys_name = platform.system()
+    if sys_name == "Darwin":
+        return _apply_pending_launcher_update_macos()
+    if sys_name != "Windows":
+        return False
+
     exe = _launcher_exe_path()
     new_path = _launcher_new_path()                          # LocalAppData (v0.1.24~)
     legacy_new = exe.with_suffix(exe.suffix + ".new")        # launcher 옆 (v0.1.23 이전 호환)
@@ -487,9 +509,90 @@ def apply_pending_launcher_update() -> bool:
         return False
 
 
+def _apply_pending_launcher_update_macos() -> bool:
+    """v0.1.109: macOS 측 launcher self-update — .zip 측 .app 번들 swap.
+
+    흐름:
+        1. _launcher_new_path() = ``%LAD%/Aurora-launcher-macOS.zip.new``
+        2. ditto -x -k 측 zip 풀어 임시 디렉토리 박음
+        3. 옛 .app 측 .app.old 박음 + 새 .app 측 위치 박음
+        4. ``open -n`` 측 새 .app 분리 spawn + sys.exit(0)
+
+    sys.executable 측 frozen .app 측 ``.../Aurora-launcher.app/Contents/MacOS/Aurora-launcher``.
+    parents[2] 측 .app 번들.
+    """
+    src_zip = _launcher_new_path()
+    if not src_zip.exists():
+        return False
+    try:
+        app_bundle = Path(sys.executable).resolve().parents[2]
+    except IndexError:
+        logger.warning("macOS launcher .app 번들 위치 측 X — sys.executable=%s", sys.executable)
+        return False
+    if app_bundle.suffix != ".app":
+        logger.warning("macOS launcher 측 .app 번들 X (frozen 환경 변형): %s", app_bundle)
+        return False
+
+    tmp_dir = src_zip.parent / "_launcher_swap_tmp"
+    try:
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        # ditto -x -k = zip extract (macOS 표준, .app metadata 보존)
+        r = subprocess.run(  # noqa: S603, S607
+            ["ditto", "-x", "-k", str(src_zip), str(tmp_dir)],
+            capture_output=True, timeout=60, check=False,
+        )
+        if r.returncode != 0:
+            err = r.stderr.decode("utf-8", errors="replace").strip()
+            logger.warning("ditto unzip 실패 (rc=%d): %s", r.returncode, err)
+            return False
+        # 새 .app 찾기
+        new_app = next(tmp_dir.glob("*.app"), None)
+        if new_app is None:
+            logger.warning("zip 안 측 .app 번들 X")
+            return False
+        # 옛 .app → .old
+        old_app = app_bundle.with_suffix(".app.old")
+        if old_app.exists():
+            shutil.rmtree(old_app)
+        shutil.move(str(app_bundle), str(old_app))
+        # 새 .app 측 옛 위치 박음
+        shutil.move(str(new_app), str(app_bundle))
+        # 정리
+        try:
+            src_zip.unlink()
+            shutil.rmtree(tmp_dir)
+        except OSError:
+            pass
+        logger.info("macOS launcher self-update applied: %s 재시작", app_bundle.name)
+        # 새 .app 측 ``open -n`` 분리 spawn (Finder 표준 lifecycle)
+        subprocess.Popen(  # noqa: S603, S607 — 자기 재시작
+            ["open", "-n", str(app_bundle)],
+            close_fds=True,
+        )
+        time.sleep(0.5)
+        sys.exit(0)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        logger.warning("macOS launcher self-update 실패: %s", e)
+        # tmp 정리 (실패 시)
+        if tmp_dir.exists():
+            try:
+                shutil.rmtree(tmp_dir)
+            except OSError:
+                pass
+        return False
+
+
 def _check_and_download_launcher_update() -> None:
-    """백그라운드 thread — launcher 자기 update check + 다운로드 (다음 시작 시 apply)."""
-    if not _is_frozen() or platform.system() != "Windows":
+    """백그라운드 thread — launcher 자기 update check + 다운로드 (다음 시작 시 apply).
+
+    v0.1.109: macOS 분기 박음 — 이전 측 Windows only 박혀있어 macOS 측 launcher
+    self-update 자체 X. ChoYoon 권장 (c).
+    """
+    if not _is_frozen():
+        return
+    if platform.system() not in ("Windows", "Darwin"):
         return
     release = fetch_latest_release()
     if release is None:
@@ -984,12 +1087,28 @@ class LauncherApi:
             logger.warning("launcher hide 실패: %s", e)
 
     def _show_launcher_window(self) -> None:
-        """v0.1.80: launcher webview show — 본체 종료 후 사용자 화면 등장."""
+        """v0.1.80: launcher webview show — 본체 종료 후 사용자 화면 등장.
+
+        v0.1.109 (ChoYoon 권장 b): macOS 측 hide 측 dock icon 측 그대로 박혀 있어
+        focus 측 본체 측 잡혀있을 가능성. show 시 NSApp 측 forefront 박음 — pywebview
+        측 노출 X 라 osascript 박아 \"frontmost = true\" 박음.
+        """
         try:
             import webview  # type: ignore[import-not-found]
             if webview.windows:
                 webview.windows[0].show()
                 logger.info("launcher webview show — 본체 종료 감지 + 등장")
+                # v0.1.109: macOS 측 forefront 박음 — show 만으론 dock 박힌 채
+                # 사용자 화면 측 안 떠올라옴.
+                if platform.system() == "Darwin":
+                    try:
+                        subprocess.run(  # noqa: S603, S607
+                            ["osascript", "-e",
+                             'tell application "Aurora-launcher" to activate'],
+                            capture_output=True, timeout=3, check=False,
+                        )
+                    except (OSError, subprocess.TimeoutExpired) as e:
+                        logger.debug("osascript activate 실패 (계속 진행): %s", e)
         except Exception as e:  # noqa: BLE001
             logger.warning("launcher show 실패: %s", e)
 

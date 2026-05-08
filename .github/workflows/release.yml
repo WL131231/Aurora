@@ -138,7 +138,24 @@ jobs:
           Write-Host "Aurora.exe size: $([math]::Round($size, 1)) MB"
         shell: pwsh
 
-      # ===== macOS 검증 + zip =====
+      # ===== macOS 검증 + ad-hoc codesign + zip =====
+      # v0.1.110 (ChoYoon 권장 d): ad-hoc codesign 박음 — Gatekeeper 측 \"identified
+      # developer X\" 거부 회피 + xattr -dr 측 사용자 manual 단계 자동화.
+      # `codesign -s -` 측 ad-hoc (free, no Apple Developer cert) — Notarize X 측
+      # quarantine 측 사용자 측 처음 실행 시 \"확인 안 된 개발자\" 경고 박힘 측 동일하지만
+      # NumPy 등 dylib 측 sign 박힘 시 ImportError 측 fix 가능.
+      - name: ad-hoc codesign macOS .app (ChoYoon 권장 d)
+        if: matrix.os == 'macos-14'
+        shell: bash
+        run: |
+          if [ -d "dist/Aurora.app" ]; then
+              echo "ad-hoc codesign 박음: dist/Aurora.app"
+              codesign --force --deep --sign - dist/Aurora.app
+              codesign --verify --verbose=2 dist/Aurora.app || echo "verify warning (계속 진행)"
+          else
+              echo "Aurora.app 측 X — codesign skip"
+          fi
+
       - name: Verify + zip macOS .app bundle
         if: matrix.os == 'macos-14'
         shell: bash
@@ -394,6 +411,19 @@ jobs:
           $size = (Get-Item "dist/Aurora-launcher.exe").Length / 1MB
           Write-Host "Aurora-launcher.exe size: $([math]::Round($size, 1)) MB"
         shell: pwsh
+
+      # v0.1.110 (ChoYoon 권장 d): launcher 측도 ad-hoc codesign 박음.
+      - name: ad-hoc codesign macOS launcher
+        if: matrix.os == 'macos-14'
+        shell: bash
+        run: |
+          if [ -d "dist/Aurora-launcher.app" ]; then
+              echo "ad-hoc codesign 박음: dist/Aurora-launcher.app"
+              codesign --force --deep --sign - dist/Aurora-launcher.app
+              codesign --verify --verbose=2 dist/Aurora-launcher.app || echo "verify warning (계속 진행)"
+          else
+              echo "Aurora-launcher.app 측 X — codesign skip"
+          fi
 
       - name: Verify + zip macOS launcher
         if: matrix.os == 'macos-14'

@@ -1,11 +1,12 @@
 # Aurora 런타임 의존성
 ccxt>=4.4.0
 pandas>=2.2.0,<3.0
-numpy>=1.26.0,<2.3  # v0.1.76 fix R — numpy 2.2.x 박음 (macOS 11+ wheel)
-# Why: ChoYoon Claude #133 14th cycle 정확 root cause — numpy 2.3.5 wheel 도
-# `macosx_14_0_arm64` only (Apple Accelerate NEWLAPACK_ILP64 심볼). v0.1.74 fix Q
-# `numpy<2.4` 박음 본질 부족 (2.3.5 = <2.4 충족이지만 macOS 14.0 minimum 박힘).
-# numpy 2.2.x = `macosx_11_0_arm64` wheel → 사용자 huihu (M2 Mac, macOS 13) 정상.
+numpy>=1.26.0,<2.0  # v0.1.77 fix R″ — numpy 1.26.x 박음 (검증된 macOS 11+ wheel)
+# Why: ChoYoon Claude #133 14th 권장 fix R (`<2.3` → 2.2.x) verify 측 부족 본질
+# 발견 — numpy 2.2.6 wheel 도 `macosx_14_0_arm64` only. v0.1.76 빌드 log 환기 ✅:
+#   Downloading numpy-2.2.6-cp311-cp311-macosx_14_0_arm64.whl
+# numpy 2.x 전반 macOS 14 wheel 박힘 (Apple Accelerate NEWLAPACK_ILP64). 2.0 미만
+# (1.26.x) 박음 → 검증된 `macosx_11_0_arm64` wheel + Apple Accelerate 미사용.
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 pywebview>=5.0

@@ -268,9 +268,19 @@ async function refreshDashboard() {
     const mStatus   = document.getElementById("m-status");
     const versionLabel = document.getElementById("version-label");
 
+    // v0.1.114: per-endpoint independent — /status fail 측 다른 refresh 측 영향 X.
+    // 이전 (v0.1.113) 측 outer try 박혀있어 /status throw 시 entire chain 측 skip.
+    // 사용자 보고 (2026-05-09) "연결 OK 인데 데이터 안 뜸" 본질 fix.
+    let s = null;
     try {
-        const s = await Api.status();
+        s = await Api.status();
+    } catch (err) {
+        if (typeof console !== "undefined" && console.warn) {
+            console.warn("[refreshDashboard] /status fail (skip status update):", err);
+        }
+    }
 
+    if (s !== null) {
         connDot.style.background = "#22d3ee";
         connDot.style.boxShadow  = "0 0 8px #22d3ee";
         connLabel.textContent = "CONNECTED";
@@ -333,42 +343,17 @@ async function refreshDashboard() {
         if (lu) lu.textContent = toKstString(new Date().toISOString()) + " KST";
 
         _setButtons(btnStart, btnStop, s.running, false);
-
-        // 열린 포지션 표 — /positions 호출 + 행 렌더
-        await refreshPositions();
-
-        // 거래내역 (P&L) 표 — /trades 호출 + Bybit 스타일 행 렌더 (v0.1.20)
-        await refreshTrades();
-
-        // 결과 통계 6 카드 (v0.1.24) — /stats 호출, 거래내역 토글과 같은 days 사용
-        await refreshStats();
-
-        // 업데이트 알림 (v0.1.25) — /release/latest 폴링, has_update 시 우상단 표시
-        await refreshReleaseAlert();
-
-        // v0.1.54: Market Data (Coinalyze 추세) — 매 dashboard 폴링마다 호출.
-        // 백엔드 5분 cache 박힘 → 사용자 UI 반응성 ↑ + API 한도 영향 X.
-        await refreshMarketTrend();
-
-        // v0.1.86: 봇 시점 차트 — 봇 가동 시만 enabled. 폴링 주기 = dashboard 와 동일 (15초).
-        await refreshBotChart();
-
-        // v0.1.87: Phase 3 Dashboard Flow — 5 거래소 합본 (Binance 박힘 / 추후 4개 추가).
-        // 백엔드 60초 cache 박힘 → 사용자 UI 폴링 부담 X.
-        await refreshDashboardFlow();
-    } catch (err) {
-        // v0.1.113: refreshDashboard 측 실패 측 connection 상태 영향 X.
-        // 사용자 보고 (2026-05-09) "끊김 / 실행중 반복" 본질 = data fetch 측
-        // transient slow → DISCONNECTED 깜빡임. v0.1.113 측 connection 상태 측
-        // /health 별도 polling (3초 주기) 박아 decouple 박음. data fetch 측
-        // 실패 측 silent — UI 측 stale data 그대로 표시 (next refresh 측 정상
-        // 박힐 때까지).
-        if (typeof console !== "undefined" && console.warn) {
-            console.warn("[refreshDashboard] fail (silent — connection 별도 폴링):", err);
-        }
-        // UI 측 변화 X — connection 상태 측 _checkHealth() 측 박음.
-        return;
     }
+
+    // v0.1.114: 각 refresh 측 독립 박음 — 한 곳 fail 측 다른 곳 영향 X.
+    // 각 refresh 함수 측 자체 try/catch 박혀있어 silent fail 박힘.
+    await refreshPositions();
+    await refreshTrades();
+    await refreshStats();
+    await refreshReleaseAlert();
+    await refreshMarketTrend();
+    await refreshBotChart();
+    await refreshDashboardFlow();
 }
 
 // v0.1.113: connection 상태 측 /health 별도 polling 박음 (3초 주기).

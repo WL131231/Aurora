@@ -223,6 +223,69 @@
                                 <div class="md-updated">갱신: <span class="md-updated-ts">—</span></div>
                             </div>
                         </div>
+
+                        <!-- v0.1.114: Market Flow 측 좌측 컬럼 (Market Data 하단) 이동 (사용자 요청) -->
+                        <!-- v0.1.87: Phase 3 Dashboard Flow — 거래소 5개 합본 (60초 cache) -->
+                        <div class="section-title" style="margin-top: 1.5rem">
+                            Market Flow <span class="text-xs text-zinc-500">— 5 거래소 합본</span>
+                            <span class="dflow-coin-toggle" id="dflow-coin-toggle">
+                                <button data-coin="BTC" class="active">BTC</button>
+                                <button data-coin="ETH">ETH</button>
+                            </span>
+                        </div>
+                        <div class="dflow-summary-grid" id="dflow-summary">
+                            <div class="dflow-summary-card">
+                                <div class="dflow-summary-label">합 OI</div>
+                                <div class="dflow-summary-value mono" id="dflow-total-oi">—</div>
+                            </div>
+                            <div class="dflow-summary-card">
+                                <div class="dflow-summary-label">합 24h Volume</div>
+                                <div class="dflow-summary-value mono" id="dflow-total-vol">—</div>
+                            </div>
+                            <div class="dflow-summary-card">
+                                <div class="dflow-summary-label">평균 Funding</div>
+                                <div class="dflow-summary-value mono" id="dflow-avg-funding">—</div>
+                            </div>
+                            <div class="dflow-summary-card">
+                                <div class="dflow-summary-label">평균 L/S Global</div>
+                                <div class="dflow-summary-value mono" id="dflow-avg-ls">—</div>
+                            </div>
+                        </div>
+                        <!-- v0.1.90: Whale Notional 합 (5분, ≥ $100K 거래) -->
+                        <div class="dflow-whale-row">
+                            <div class="dflow-whale-card">
+                                <div class="dflow-whale-label">🐋 매수 (5m)</div>
+                                <div class="dflow-whale-value mono pos" id="dflow-whale-buy">—</div>
+                            </div>
+                            <div class="dflow-whale-card">
+                                <div class="dflow-whale-label">🐋 매도 (5m)</div>
+                                <div class="dflow-whale-value mono neg" id="dflow-whale-sell">—</div>
+                            </div>
+                            <div class="dflow-whale-card">
+                                <div class="dflow-whale-label">거래 수 (5m)</div>
+                                <div class="dflow-whale-value mono" id="dflow-whale-count">—</div>
+                            </div>
+                        </div>
+                        <div class="metric-card dflow-table-card" style="padding: 0">
+                            <table class="dflow-table">
+                                <thead>
+                                    <tr>
+                                        <th>거래소</th>
+                                        <th>Price</th>
+                                        <th>24h%</th>
+                                        <th>OI</th>
+                                        <th>Funding</th>
+                                        <th>L/S G</th>
+                                        <th>L/S T(P)</th>
+                                        <th>L/S T(A)</th>
+                                        <th>🐋 5m</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dflow-tbody">
+                                    <tr><td colspan="9" class="dflow-empty">로드 중…</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </aside>
 
                     <!-- 우측 컬럼: 헤더 + 본문 -->
@@ -352,68 +415,6 @@
                             <div id="bot-chart"></div>
                             <div class="chart-empty" id="chart-empty">봇 가동 시 자동으로 표시됨</div>
                         </div>
-                    </div>
-
-                    <!-- v0.1.87: Phase 3 Dashboard Flow — 거래소 5개 합본 (Binance 박힘 / Bybit·OKX·Bitget·Hyperliquid 추후) -->
-                    <div class="section-title">
-                        Market Flow <span class="text-xs text-zinc-500">— 5 거래소 합본 (60초 cache)</span>
-                        <span class="dflow-coin-toggle" id="dflow-coin-toggle">
-                            <button data-coin="BTC" class="active">BTC</button>
-                            <button data-coin="ETH">ETH</button>
-                        </span>
-                    </div>
-                    <div class="dflow-summary-grid" id="dflow-summary">
-                        <div class="dflow-summary-card">
-                            <div class="dflow-summary-label">합 OI</div>
-                            <div class="dflow-summary-value mono" id="dflow-total-oi">—</div>
-                        </div>
-                        <div class="dflow-summary-card">
-                            <div class="dflow-summary-label">합 24h Volume</div>
-                            <div class="dflow-summary-value mono" id="dflow-total-vol">—</div>
-                        </div>
-                        <div class="dflow-summary-card">
-                            <div class="dflow-summary-label">평균 Funding</div>
-                            <div class="dflow-summary-value mono" id="dflow-avg-funding">—</div>
-                        </div>
-                        <div class="dflow-summary-card">
-                            <div class="dflow-summary-label">평균 L/S Global</div>
-                            <div class="dflow-summary-value mono" id="dflow-avg-ls">—</div>
-                        </div>
-                    </div>
-                    <!-- v0.1.90: Whale Notional 합 (5분, ≥ $100K 거래) -->
-                    <div class="dflow-whale-row">
-                        <div class="dflow-whale-card">
-                            <div class="dflow-whale-label">🐋 Whale 매수 (5m)</div>
-                            <div class="dflow-whale-value mono pos" id="dflow-whale-buy">—</div>
-                        </div>
-                        <div class="dflow-whale-card">
-                            <div class="dflow-whale-label">🐋 Whale 매도 (5m)</div>
-                            <div class="dflow-whale-value mono neg" id="dflow-whale-sell">—</div>
-                        </div>
-                        <div class="dflow-whale-card">
-                            <div class="dflow-whale-label">Whale 거래 수 (5m)</div>
-                            <div class="dflow-whale-value mono" id="dflow-whale-count">—</div>
-                        </div>
-                    </div>
-                    <div class="metric-card dflow-table-card" style="padding: 0">
-                        <table class="dflow-table">
-                            <thead>
-                                <tr>
-                                    <th>거래소</th>
-                                    <th>Price</th>
-                                    <th>24h%</th>
-                                    <th>OI (USD)</th>
-                                    <th>Funding</th>
-                                    <th>L/S Global</th>
-                                    <th>L/S Top (Pos)</th>
-                                    <th>L/S Top (Acc)</th>
-                                    <th>🐋 5m</th>
-                                </tr>
-                            </thead>
-                            <tbody id="dflow-tbody">
-                                <tr><td colspan="9" class="dflow-empty">로드 중…</td></tr>
-                            </tbody>
-                        </table>
                     </div>
 
                     <div class="section-title">결과 통계</div>

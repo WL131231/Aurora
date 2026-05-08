@@ -67,6 +67,62 @@ def _acquire_single_instance_mutex() -> bool:
 
 
 # ============================================================
+# v0.1.100: 다른 Aurora.exe process 강제 정리 — mutex race 보강
+# ============================================================
+# Why: 사용자 보고 (2026-05-08) Aurora.exe (3) + Aurora-launcher.exe (2) 동시
+# 실행 cascade. mutex acquire 측 timing race 측 일부 환경 못 잡힘. 시작 시
+# taskkill /F 박아 강제 정리. mutex 측 자동 release.
+
+
+def _kill_other_body_processes() -> None:
+    """body 시작 시 다른 Aurora.exe process 강제 정리. 자기 PID 제외.
+
+    non-Windows 환경 / tasklist fail 시 silent skip — fallback 흐름 유지.
+    """
+    if sys.platform != "win32":
+        return
+    import os
+    import subprocess
+    import time
+    my_pid = os.getpid()
+    try:
+        r = subprocess.run(  # noqa: S603, S607
+            ["tasklist", "/FI", "IMAGENAME eq Aurora.exe", "/FO", "CSV", "/NH"],
+            capture_output=True, timeout=5, check=False,
+        )
+        if r.returncode != 0:
+            return
+        text = r.stdout.decode("cp949", errors="replace")
+        killed = 0
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            parts = [p.strip().strip('"') for p in line.split(",")]
+            if len(parts) < 2:
+                continue
+            try:
+                pid = int(parts[1])
+            except ValueError:
+                continue
+            if pid == my_pid:
+                continue
+            logger.info("v0.1.100 body startup nuke: Aurora.exe PID=%d kill", pid)
+            try:
+                subprocess.run(  # noqa: S603, S607
+                    ["taskkill", "/F", "/T", "/PID", str(pid)],
+                    capture_output=True, timeout=5, check=False,
+                )
+                killed += 1
+            except (OSError, subprocess.TimeoutExpired) as e:
+                logger.warning("body kill 실패 PID=%d: %s", pid, e)
+        if killed > 0:
+            # OS 측 process slot release + mutex / port release 시간
+            time.sleep(0.5)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        logger.warning("body startup nuke 실패 (계속 진행): %s", e)
+
+
+# ============================================================
 # v0.1.94: Body file logging — 진단 자료 (disconnect / crash 추적)
 # ============================================================
 # Why: 사용자 보고 (2026-05-08) "갑자기 연결끊김" — body 자체 측 file log X 라
@@ -189,22 +245,45 @@ def _start_api_server() -> None:
 
     v0.1.99: thread 측 예외 catch 박음 — uvicorn fail 시 silent 종료 차단 (로그
     남게). 정상 흐름엔 영향 X.
+    v0.1.100: 매 critical 단계 측 force flush 박음 — buffering 측 진단 자료 lost
+    차단. 사용자 보고 \"uvicorn 시작 시도\" 로그 측 안 남는 본질 fix.
     """
+
+    def _flush() -> None:
+        for h in logging.getLogger().handlers:
+            try:
+                h.flush()
+            except (OSError, ValueError):
+                pass
+
     try:
+        logger.info("api thread 시작 — create_app 호출 중")
+        _flush()
         app = create_app()
         logger.info(
-            "uvicorn 시작 시도: host=%s port=%s",
+            "uvicorn.run 호출 직전: host=%s port=%s",
             settings.api_host, settings.api_port,
         )
+        _flush()
         uvicorn.run(
             app,
             host=settings.api_host,
             port=settings.api_port,
             log_level=settings.log_level.lower(),
         )
+        logger.warning("uvicorn.run 측 정상 return — api 종료 (예상 X)")
+        _flush()
+    except OSError as e:
+        # port bind fail 측 가장 흔한 케이스 (다른 process 측 8765 점유)
+        logger.exception(
+            "uvicorn OSError (port %d 점유 / 권한 X 등): %s",
+            settings.api_port, e,
+        )
+        _flush()
+        raise
     except Exception as e:
         logger.exception("uvicorn fail (api 서버 죽음): %s", e)
-        # daemon thread 라 main 종료 안 시도. 하지만 frontend 측 영구 disconnect.
+        _flush()
         raise
 
 
@@ -252,6 +331,11 @@ def launch() -> None:
     else:
         logger.warning("body file logging 활성 실패 (모든 fallback 위치 권한 X)")
 
+    # v0.1.100: body 시작 시 다른 Aurora.exe 측 강제 정리. mutex 측 timing race
+    # 못 잡는 케이스 보강 (사용자 보고 body 3개 동시 실행 cascade fix).
+    # 자기 PID 측 제외 + taskkill /F 박음. mutex 측 자동 release.
+    _kill_other_body_processes()
+
     # v0.1.92: 중복 실행 차단 — 이미 Aurora 살아있으면 즉시 exit
     if not _acquire_single_instance_mutex():
         logger.warning(
@@ -259,6 +343,14 @@ def launch() -> None:
             _MUTEX_NAME,
         )
         sys.exit(0)
+
+    # v0.1.100: 모든 startup 로그 즉시 flush 박음 — file handler buffering 측
+    # 본체 crash 시 진단 자료 lost 차단.
+    for h in logging.getLogger().handlers:
+        try:
+            h.flush()
+        except (OSError, ValueError):
+            pass
 
     api_thread = threading.Thread(target=_start_api_server, daemon=True)
     api_thread.start()

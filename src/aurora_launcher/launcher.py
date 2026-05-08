@@ -607,6 +607,59 @@ def apply_swap(downloaded_new: Path) -> bool:
 # ============================================================
 
 
+def _kill_other_aurora_processes() -> None:
+    """v0.1.100: launcher 시작 시 다른 Aurora 측 process 강제 정리.
+
+    사용자 보고 (2026-05-08): launcher 2개 + body 3개 동시 박힘 → 모두 죽고
+    재시작 cascade. mutex 측 timing race 측 100% 못 잡힘 + v0.1.99 auto-respawn
+    측 cascade 키움. 시작 시 강제 정리 박아 단일 launcher + 단일 body 보장.
+
+    자기 PID 측 제외. taskkill /F 측 mutex name 무관 즉시 종료. mutex 측 자동
+    release.
+    """
+    if platform.system() != "Windows":
+        return
+    my_pid = os.getpid()
+    try:
+        for image_name in ("Aurora.exe", "Aurora-launcher.exe"):
+            # tasklist 측 PID 받아 자기 PID 제외 + taskkill
+            r = subprocess.run(  # noqa: S603, S607
+                ["tasklist", "/FI", f"IMAGENAME eq {image_name}", "/FO", "CSV", "/NH"],
+                capture_output=True, timeout=5, check=False,
+            )
+            if r.returncode != 0:
+                continue
+            text = r.stdout.decode("cp949", errors="replace")
+            for line in text.splitlines():
+                if not line.strip():
+                    continue
+                # CSV: "Aurora.exe","12345","Console","1","100,000 K"
+                parts = [p.strip().strip('"') for p in line.split(",")]
+                if len(parts) < 2:
+                    continue
+                try:
+                    pid = int(parts[1])
+                except ValueError:
+                    continue
+                if pid == my_pid:
+                    continue
+                logger.info(
+                    "v0.1.100 startup nuke: %s PID=%d kill",
+                    image_name, pid,
+                )
+                try:
+                    subprocess.run(  # noqa: S603, S607
+                        ["taskkill", "/F", "/T", "/PID", str(pid)],
+                        capture_output=True, timeout=5, check=False,
+                    )
+                except (OSError, subprocess.TimeoutExpired) as e:
+                    logger.warning("kill 실패 PID=%d: %s", pid, e)
+        # OS 측 process slot release 시간 (mutex / port release)
+        time.sleep(0.3)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        logger.warning("startup nuke 실패 (계속 진행): %s", e)
+
+
 def _kill_existing_aurora_on_port(port: int = 8765) -> None:
     """v0.1.64: 옛 본체가 API 포트 점유 중이면 taskkill.
 
@@ -962,31 +1015,11 @@ class LauncherApi:
                         logger.warning(
                             "새 본체 spawn 실패 — launcher show fallback",
                         )
-                    # v0.1.99: WebView2 crash 자동 respawn — 짧은 시간 (60초) 안
-                    # 정상 종료 (rc=0) = likely crash. 사용자 X 클릭 측 보통 1분+
-                    # 사용 후 종료 → 그 시점은 user intent 로 간주.
-                    # 최대 3회 respawn (무한 루프 방지). rc != 0 = 명시적 fail 측
-                    # 그대로 launcher show (자동 respawn X).
+                    # v0.1.100: v0.1.99 측 auto-respawn 제거 — 사용자 보고
+                    # "본체 ↔ launcher 무한 재시작 cascade" 본질. 본체 짧게 죽는
+                    # 진짜 원인 (uvicorn port bind fail / 다른 본체 process 충돌
+                    # 등) 을 가리고 사용자 환경 더 망가뜨림. 그냥 launcher show 박음.
                     elapsed = time.time() - self._aurora_spawn_at
-                    likely_crash = (
-                        rc == 0
-                        and elapsed < 60.0
-                        and self._aurora_crash_respawn_count < 3
-                    )
-                    if likely_crash:
-                        self._aurora_crash_respawn_count += 1
-                        logger.warning(
-                            "본체 짧게 살다가 종료 (rc=0, %.1f초) — likely WebView2 "
-                            "crash. 자동 respawn (#%d/3)",
-                            elapsed, self._aurora_crash_respawn_count,
-                        )
-                        new_proc = launch_aurora()
-                        if new_proc is not None:
-                            self._aurora_proc = new_proc
-                            self._aurora_spawn_at = time.time()
-                            continue
-                        logger.warning("respawn 실패 — launcher show fallback")
-                    # 본체 정상 종료 (사용자 X 클릭) 또는 respawn 한도 초과 / fail
                     logger.info(
                         "본체 종료 감지 (rc=%s, %.1f초 살아있음) → launcher show + "
                         "START 활성", rc, elapsed,
@@ -1161,6 +1194,10 @@ def main() -> None:
     # 다른 단계 (apply_pending_launcher_update / migrate / update check) 보다 우선 —
     # 부모 살아있으면 새 본체 spawn 시 포트 충돌 등 위험.
     _kill_parent_if_requested()
+
+    # v0.1.100: 다른 Aurora process 강제 정리 — 사용자 보고 launcher / body 다중
+    # 실행 cascade fix. mutex 측 timing race 못 잡는 케이스 보강.
+    _kill_other_aurora_processes()
 
     # v0.1.19: 직전 다운된 launcher.new 가 있으면 swap → 새 launcher 재시작.
     # 본 함수는 swap 성공 시 sys.exit(0) — 도달 X.

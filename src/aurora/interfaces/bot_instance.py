@@ -307,7 +307,7 @@ class BotInstance:
             cfg: ``ConfigDTO.model_dump()`` 형식 dict.
         """
         # Selectable 지표 — 즉시 (다음 step 부터)
-        for key in ("use_bollinger", "use_ma_cross", "use_ichimoku", "use_harmonic"):
+        for key in ("use_bollinger", "use_ma_cross", "use_ichimoku", "use_harmonic", "use_twin_trend"):
             if key in cfg:
                 setattr(self._strategy_config, key, bool(cfg[key]))
 
@@ -699,7 +699,7 @@ class BotInstance:
 
         # StrategyConfig 의 use_* 토글 cfg 에서 반영
         strategy_cfg = StrategyConfig()
-        for key in ("use_bollinger", "use_ma_cross", "use_harmonic", "use_ichimoku"):
+        for key in ("use_bollinger", "use_ma_cross", "use_harmonic", "use_ichimoku", "use_twin_trend"):
             if key in cfg:
                 setattr(strategy_cfg, key, bool(cfg[key]))
 
@@ -1256,10 +1256,12 @@ class BotInstance:
                 market_trend.direction, market_trend.score, sig_dir, boost,
             )
 
-        # v0.1.79 (D): Tako 두 SuperTrend booster — Ichi-ST + DMI-ST 정렬 본질.
-        # Coinalyze 추세 booster 와 별개 layer — 가격 자체 (close) 의 ATR 기반
-        # trailing trend 정렬 시 보조 가중치.
-        # 진입 차단 X (Coinalyze 가 이미 강제) — 단순 score multiplier 로그용.
+        # v0.1.81 (Twin Trend booster): Tako 두 SuperTrend 정렬 → size 부스터.
+        # 부스터 역할 — 다른 지표 신호 진입 시 Twin Trend 정렬 일치 시 risk_pct × 1.5
+        # (강 정렬) 또는 × 0.5 (강 반대). 별도 진입 신호 (detect_twin_trend) 는
+        # evaluate_selectable 측 별도 박힘. Twin Trend 자체 진입 시 booster X
+        # (이중 가중 회피).
+        twin_trend_size_boost = 1.0
         try:
             from aurora.core.indicators import (
                 dual_supertrend_alignment,
@@ -1273,13 +1275,15 @@ class BotInstance:
                     period_slow=14, mult_slow=3.0,
                 )
                 st_boost = dual_supertrend_booster(st_align, sig_dir)
-                if st_align != 0 and st_boost != 1.0:
+                is_twin_trend_entry = "twin_trend" in decision.triggered_by
+                if st_align != 0 and st_boost != 1.0 and not is_twin_trend_entry:
+                    twin_trend_size_boost = st_boost
                     logger.info(
-                        "Dual SuperTrend booster: alignment=%+d / 신호 방향=%s / boost ×%.1f",
+                        "Twin Trend booster: alignment=%+d / 신호 방향=%s / size ×%.1f",
                         st_align, sig_dir, st_boost,
                     )
         except Exception as e:  # noqa: BLE001 — booster 계산 실패 시 silent
-            logger.debug("dual SuperTrend booster 계산 실패: %s", e)
+            logger.debug("Twin Trend booster 계산 실패: %s", e)
 
         # v0.1.42: bar-level 진입 dedup — 같은 1H 봉 + 같은 source 재진입 차단.
         # Why: BB stateful 신호 (또는 last_high 누적) 가 봉 닫힐 때까지 살아있어
@@ -1329,13 +1333,15 @@ class BotInstance:
 
         # 6. 진입 실행 — equity 조회 + RiskPlan 산출
         balance = await self._client.get_equity()
+        # v0.1.81: Twin Trend booster 적용 — risk_pct × twin_trend_size_boost.
+        # 강 정렬 (×1.5) → 큰 포지션 / 강 반대 (×0.5) → 작은 포지션 / 정렬 X (×1.0) → 그대로.
         plan = build_risk_plan(
             entry_price=current_price,
             direction=decision.direction.value,
             leverage=self._leverage,
             equity_usd=balance.total_usd,
             config=self._tpsl_config,
-            risk_pct=self._risk_pct,
+            risk_pct=self._risk_pct * twin_trend_size_boost,
             full_seed=self._full_seed,
             bb_upper=bb_upper_at_entry,
             bb_lower=bb_lower_at_entry,

@@ -1201,7 +1201,8 @@ input[type="range"].slider-input:disabled {
 .trades-source-toggle,
 .trades-pair-filter,
 .chart-tf-toggle,
-.chart-overlay-toggle {
+.chart-overlay-toggle,
+.dflow-coin-toggle {
     display: inline-flex;
     gap: 4px;
     margin-left: 0.75rem;
@@ -1212,7 +1213,8 @@ input[type="range"].slider-input:disabled {
 .trades-source-toggle button,
 .trades-pair-filter button,
 .chart-tf-toggle button,
-.chart-overlay-toggle button {
+.chart-overlay-toggle button,
+.dflow-coin-toggle button {
     background: transparent;
     border: 1px solid var(--border-soft);
     color: var(--text-3);
@@ -1228,7 +1230,8 @@ input[type="range"].slider-input:disabled {
 .trades-source-toggle button:hover,
 .trades-pair-filter button:hover,
 .chart-tf-toggle button:hover,
-.chart-overlay-toggle button:hover {
+.chart-overlay-toggle button:hover,
+.dflow-coin-toggle button:hover {
     color: var(--text-1);
     border-color: var(--text-3);
 }
@@ -1236,10 +1239,88 @@ input[type="range"].slider-input:disabled {
 .trades-source-toggle button.active,
 .trades-pair-filter button.active,
 .chart-tf-toggle button.active,
-.chart-overlay-toggle button.active {
+.chart-overlay-toggle button.active,
+.dflow-coin-toggle button.active {
     color: var(--text-1);
     border-color: var(--aurora-purple);
     background: rgba(96, 81, 155, 0.18);
+}
+
+/* ============================================================
+   v0.1.87: Phase 3 Dashboard Flow — 5 거래소 합본 (Market Flow / L-S Ratio)
+   ============================================================ */
+.dflow-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+.dflow-summary-card {
+    background: rgba(13, 14, 22, 0.85);
+    border: 1px solid rgba(96, 81, 155, 0.18);
+    border-radius: 8px;
+    padding: 0.55rem 0.75rem;
+}
+.dflow-summary-label {
+    font-size: 0.62rem;
+    color: var(--text-3);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 0.25rem;
+}
+.dflow-summary-value {
+    font-size: 0.92rem;
+    color: var(--text-1);
+    font-weight: 500;
+}
+
+.dflow-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.7rem;
+}
+.dflow-table th {
+    background: rgba(96, 81, 155, 0.08);
+    color: var(--text-3);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 0.6rem;
+    padding: 0.5rem 0.6rem;
+    text-align: left;
+    border-bottom: 1px solid rgba(96, 81, 155, 0.18);
+}
+.dflow-table td {
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid rgba(96, 81, 155, 0.08);
+    font-family: var(--font-mono);
+    color: var(--text-2);
+}
+.dflow-table tr:last-child td {
+    border-bottom: none;
+}
+.dflow-table tr:hover td {
+    background: rgba(96, 81, 155, 0.05);
+}
+.dflow-table .dflow-exchange {
+    color: var(--text-1);
+    font-weight: 500;
+    font-family: var(--font-sans);
+    letter-spacing: 0.04em;
+}
+.dflow-table .pos { color: #34d399; }
+.dflow-table .neg { color: #fb7185; }
+.dflow-empty {
+    text-align: center;
+    color: var(--text-3);
+    padding: 1.2rem !important;
+    font-size: 0.75rem;
+}
+
+@media (max-width: 768px) {
+    .dflow-summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 /* ============================================================

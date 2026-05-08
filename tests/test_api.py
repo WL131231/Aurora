@@ -412,6 +412,63 @@ def test_chart_with_cache_returns_candles_and_indicators() -> None:
 
 
 # ============================================================
+# Dashboard Flow (v0.1.87) — Phase 3 거래소 합본
+# ============================================================
+
+
+def test_dashboard_flow_returns_exchange_list() -> None:
+    """``GET /dashboard-flow`` — exchanges 리스트 박힘. fetch 실패해도 빈 응답 정상."""
+    from aurora.market import dashboard_flow as df_mod
+
+    df_mod.reset_for_test()
+    client = _client()
+
+    # provider.fetch 측 raise → exception 격리 후 빈 snapshot 반환
+    r = client.get("/dashboard-flow?coin=BTC")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["coin"] == "BTC"
+    assert "binance" in body["exchanges"]
+    # snapshot 박힘 (실제 네트워크 호출 — 측 errors 가 박힐 수도 / 정상일 수도)
+    assert isinstance(body["snapshots"], list)
+
+
+def test_dashboard_flow_uses_aggregator_singleton() -> None:
+    """v0.1.87: 싱글톤 aggregator — 두 번째 호출 cache hit (TTL 60초)."""
+    from aurora.market import dashboard_flow as df_mod
+
+    df_mod.reset_for_test()
+    # 싱글톤 박을 때 fake provider 측 박음 (실제 네트워크 호출 X)
+    from aurora.market.dashboard_flow import (
+        DashboardFlowAggregator,
+    )
+    from aurora.market.exchanges.base import ExchangeMarketData, ExchangeSnapshot
+
+    class _Stub(ExchangeMarketData):
+        EXCHANGE_NAME = "stub"
+        call_count = 0
+
+        async def fetch_snapshot(self, session, coin: str) -> ExchangeSnapshot:
+            type(self).call_count += 1
+            return ExchangeSnapshot(
+                exchange="stub", symbol=f"{coin}USDT",
+                fetched_at_ms=0, oi_usd=1_000_000.0,
+            )
+
+    df_mod._singleton = DashboardFlowAggregator([_Stub()], cache_ttl_sec=60)
+
+    client = _client()
+    r1 = client.get("/dashboard-flow?coin=BTC")
+    r2 = client.get("/dashboard-flow?coin=BTC")
+    assert r1.status_code == r2.status_code == 200
+    body = r1.json()
+    assert body["exchanges"] == ["stub"]
+    assert body["total_oi_usd"] == 1_000_000.0
+    # 두 번째 호출은 cache hit
+    assert _Stub.call_count == 1
+
+
+# ============================================================
 # Logs
 # ============================================================
 

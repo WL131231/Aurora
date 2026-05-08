@@ -76,6 +76,12 @@ const getMarketTrend = () => _request("/market-trend");
 const getChart = (timeframe = "1H", limit = 100) =>
     _request(`/chart?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`);
 
+// ─── Dashboard Flow (Phase 3, v0.1.87+) ───────
+// 5 거래소 (Binance/Bybit/OKX/Bitget/Hyperliquid) 시장 자료 합본 (60초 cache).
+// coin: "BTC" / "ETH" 등.
+const getDashboardFlow = (coin = "BTC") =>
+    _request(`/dashboard-flow?coin=${encodeURIComponent(coin)}`);
+
 // ─── Config ─────────────────────────────────────────
 
 const getConfig = () => _request("/config");
@@ -162,6 +168,7 @@ window.AuroraApi = {
     getReleaseLatest,
     getMarketTrend,
     getChart,
+    getDashboardFlow,
     getConfig,
     updateConfig,
     startBot,

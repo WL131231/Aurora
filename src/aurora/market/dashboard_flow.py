@@ -168,14 +168,22 @@ _singleton: DashboardFlowAggregator | None = None
 def get_aggregator() -> DashboardFlowAggregator:
     """싱글톤 aggregator — 등록 거래소는 v0.1.87+ 순차 박힘.
 
-    v0.1.87: Binance 1개
+    v0.1.87: Binance
     v0.1.88: + Bybit, OKX
-    v0.1.89: + Bitget, Hyperliquid
+    v0.1.89: + Bitget, Hyperliquid (예정)
     """
     global _singleton
     if _singleton is None:
-        from aurora.market.exchanges import BinanceMarketData
-        _singleton = DashboardFlowAggregator([BinanceMarketData()])
+        from aurora.market.exchanges import (
+            BinanceMarketData,
+            BybitMarketData,
+            OkxMarketData,
+        )
+        _singleton = DashboardFlowAggregator([
+            BinanceMarketData(),
+            BybitMarketData(),
+            OkxMarketData(),
+        ])
     return _singleton
 
 

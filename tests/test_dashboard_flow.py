@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from aurora.market.dashboard_flow import DashboardFlow, DashboardFlowAggregator
-from aurora.market.exchanges import BinanceMarketData
+from aurora.market.exchanges import BinanceMarketData, BybitMarketData, OkxMarketData
 from aurora.market.exchanges.base import ExchangeMarketData, ExchangeSnapshot
 
 # ============================================================
@@ -255,3 +255,166 @@ async def test_binance_partial_failure_isolated() -> None:
     # 실패 필드 None + 에러 박힘
     assert snap.ls_ratio_top_position is None
     assert any("ls_top_pos" in e for e in snap.errors)
+
+
+# ============================================================
+# BybitMarketData (v0.1.88) — V5 endpoint mock
+# ============================================================
+
+
+def _make_dispatch_session(base_url: str, path_to_response: dict[str, Any]) -> MagicMock:
+    """url 측 path 매핑 dispatch — base_url 제거 후 path lookup."""
+    session = MagicMock()
+    def _get(url: str, params=None, timeout=None):
+        path = url.replace(base_url, "")
+        ctx = AsyncMock()
+        resp = MagicMock()
+        if path in path_to_response and isinstance(path_to_response[path], Exception):
+            resp.raise_for_status = MagicMock(side_effect=path_to_response[path])
+            resp.json = AsyncMock(return_value={})
+        else:
+            resp.raise_for_status = MagicMock()
+            resp.json = AsyncMock(return_value=path_to_response.get(path, {}))
+        ctx.__aenter__.return_value = resp
+        ctx.__aexit__.return_value = None
+        return ctx
+    session.get = _get
+    return session
+
+
+@pytest.mark.asyncio
+async def test_bybit_fetch_snapshot_happy_path() -> None:
+    """Bybit V5 — tickers + account-ratio 두 endpoint 정상."""
+    bybit = BybitMarketData()
+    session = _make_dispatch_session("https://api.bybit.com", {
+        "/v5/market/tickers": {
+            "retCode": 0,
+            "result": {"list": [{
+                "symbol": "BTCUSDT",
+                "lastPrice": "80000.0",
+                "price24hPcnt": "0.015",   # 1.5%
+                "turnover24h": "3000000000",
+                "openInterest": "10000",
+                "openInterestValue": "800000000",  # USD notional
+                "fundingRate": "0.00008",
+            }]},
+        },
+        "/v5/market/account-ratio": {
+            "retCode": 0,
+            "result": {"list": [{
+                "buyRatio": "0.55", "sellRatio": "0.45", "timestamp": "1",
+            }]},
+        },
+    })
+
+    snap = await bybit.fetch_snapshot(session, "BTC")
+    assert snap.exchange == "bybit"
+    assert snap.symbol == "BTCUSDT"
+    assert snap.price == pytest.approx(80000.0)
+    assert snap.price_24h_change_pct == pytest.approx(1.5)
+    assert snap.volume_24h_usd == pytest.approx(3_000_000_000.0)
+    assert snap.oi_usd == pytest.approx(800_000_000.0)
+    assert snap.funding_rate == pytest.approx(0.00008)
+    # ls_ratio = 0.55 / 0.45
+    assert snap.ls_ratio_global == pytest.approx(0.55 / 0.45)
+    assert snap.long_account_pct == pytest.approx(0.55)
+    # Bybit V5 측 top trader endpoint X — None 유지
+    assert snap.ls_ratio_top_position is None
+    assert snap.errors == []
+
+
+@pytest.mark.asyncio
+async def test_bybit_ret_code_nonzero_raises_in_subfetch() -> None:
+    """retCode != 0 = 부분 실패 (해당 필드만 None + errors 박힘)."""
+    bybit = BybitMarketData()
+    session = _make_dispatch_session("https://api.bybit.com", {
+        "/v5/market/tickers": {
+            "retCode": 0,
+            "result": {"list": [{
+                "lastPrice": "80000", "price24hPcnt": "0",
+                "turnover24h": "0", "openInterestValue": "0", "fundingRate": "0",
+            }]},
+        },
+        "/v5/market/account-ratio": {
+            "retCode": 10001, "retMsg": "param error",
+        },
+    })
+
+    snap = await bybit.fetch_snapshot(session, "BTC")
+    assert snap.price == pytest.approx(80000.0)  # ticker 측 성공
+    assert snap.ls_ratio_global is None
+    assert any("ls" in e for e in snap.errors)
+
+
+# ============================================================
+# OkxMarketData (v0.1.88) — V5 endpoint mock
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_okx_fetch_snapshot_happy_path() -> None:
+    """OKX V5 — 5 endpoint 정상 (ticker / OI / funding / L-S acc / L-S top)."""
+    okx = OkxMarketData()
+    session = _make_dispatch_session("https://www.okx.com", {
+        "/api/v5/market/ticker": {
+            "code": "0",
+            "data": [{
+                "instId": "BTC-USDT-SWAP",
+                "last": "80000",
+                "open24h": "78818.18",  # +1.5%
+                "volCcy24h": "1500000000",
+            }],
+        },
+        "/api/v5/public/open-interest": {
+            "code": "0",
+            "data": [{"oi": "10000", "oiCcy": "5000.0"}],  # 5000 BTC
+        },
+        "/api/v5/public/funding-rate": {
+            "code": "0",
+            "data": [{"fundingRate": "0.00010"}],
+        },
+        "/api/v5/rubik/stat/contracts/long-short-account-ratio": {
+            "code": "0",
+            "data": [["1700000000000", "1.20"]],
+        },
+        "/api/v5/rubik/stat/contracts/long-short-position-ratio": {
+            "code": "0",
+            "data": [["1700000000000", "1.05"]],
+        },
+    })
+
+    snap = await okx.fetch_snapshot(session, "BTC")
+    assert snap.exchange == "okx"
+    assert snap.symbol == "BTC-USDT-SWAP"
+    assert snap.price == pytest.approx(80000.0)
+    # 24h pct = (80000 - 78818.18) / 78818.18 × 100 ≈ 1.5
+    assert snap.price_24h_change_pct == pytest.approx(1.5, rel=1e-3)
+    # OI = 5000 × 80000 = 400_000_000
+    assert snap.oi_usd == pytest.approx(400_000_000.0)
+    assert snap.funding_rate == pytest.approx(0.00010)
+    assert snap.ls_ratio_global == pytest.approx(1.20)
+    assert snap.ls_ratio_top_position == pytest.approx(1.05)
+    assert snap.errors == []
+
+
+@pytest.mark.asyncio
+async def test_okx_oi_skipped_when_price_missing() -> None:
+    """ticker 실패 → price None → OI USD 환산 skip (oiCcy 만 받아도 None)."""
+    okx = OkxMarketData()
+    session = _make_dispatch_session("https://www.okx.com", {
+        "/api/v5/market/ticker": {
+            "code": "1", "msg": "broken",
+        },
+        "/api/v5/public/open-interest": {
+            "code": "0",
+            "data": [{"oi": "10000", "oiCcy": "5000.0"}],
+        },
+        "/api/v5/public/funding-rate": {"code": "0", "data": [{"fundingRate": "0"}]},
+        "/api/v5/rubik/stat/contracts/long-short-account-ratio": {"code": "0", "data": []},
+        "/api/v5/rubik/stat/contracts/long-short-position-ratio": {"code": "0", "data": []},
+    })
+
+    snap = await okx.fetch_snapshot(session, "BTC")
+    assert snap.price is None
+    assert snap.oi_usd is None  # price 없어서 환산 skip
+    assert any("ticker" in e for e in snap.errors)

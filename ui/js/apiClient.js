@@ -18,20 +18,30 @@ class ApiError extends Error {
 
 async function _request(path, options = {}) {
     const url = `${API_BASE}${path}`;
+    // v0.1.112: AbortController 측 30초 hard timeout 박음. fetch 측 JS 자체 timeout
+    // X 라 backend slow 측 무한 대기 본질. 30초 측 충분히 길어서 정상 응답엔 영향 X,
+    // hang 측 빨리 fail 박혀 retry 흐름 정합.
+    const timeoutMs = options.timeoutMs || 30000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const init = {
         ...options,
         headers: {
             "Content-Type": "application/json",
             ...(options.headers || {}),
         },
+        signal: controller.signal,
     };
     let res;
     try {
         res = await fetch(url, init);
     } catch (e) {
-        // 네트워크 / CORS / API 미기동 — 호출자에서 retry 또는 표시
-        throw new ApiError(`네트워크 오류: ${e.message}`, 0, null);
+        clearTimeout(timeoutId);
+        // 네트워크 / CORS / API 미기동 / abort — 호출자에서 retry 또는 표시
+        const reason = e.name === "AbortError" ? `timeout (${timeoutMs}ms)` : e.message;
+        throw new ApiError(`네트워크 오류: ${reason}`, 0, null);
     }
+    clearTimeout(timeoutId);
     let body = null;
     try {
         body = await res.json();

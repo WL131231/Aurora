@@ -37,6 +37,7 @@ from aurora import __version__
 from aurora.config import settings
 from aurora.core.stats import compute_stats
 from aurora.interfaces import bot_instance, config_store, log_buffer, release_check
+from aurora.timeouts import API_CCXT_TIMEOUT_SEC, API_HISTORY_TIMEOUT_SEC
 
 logger = logging.getLogger(__name__)
 
@@ -449,6 +450,16 @@ def create_app() -> FastAPI:
         # TODO(정용우): 거래소 ping / DB 연결 등 실제 헬스 점검 추가.
         return HealthResponse(status="ok", version=__version__, mode=settings.run_mode)
 
+    @app.get("/indicators/list")
+    async def indicators_list() -> dict[str, list[str]]:
+        """v0.1.98: UI 측 지표 카테고리 dynamic — Python ↔ JS 하드코드 desync 차단.
+
+        UI 측 supported categories (대시보드 \"지표 트리거 상태\" 박스) 측 hard-code
+        대신 본 endpoint 호출 → 새 지표 추가 시 backend 만 수정 박음.
+        """
+        from aurora.interfaces.bot_instance import _INDICATOR_CATEGORIES
+        return {"categories": list(_INDICATOR_CATEGORIES)}
+
     @app.get("/status", response_model=StatusResponse)
     async def status() -> StatusResponse:
         """봇 런타임 상태 요약 — 대시보드 첫 화면용.
@@ -466,14 +477,14 @@ def create_app() -> FastAPI:
         open_count = 0
         if bot.client is not None:
             try:
-                balance = await asyncio.wait_for(bot.client.get_equity(), timeout=5.0)
+                balance = await asyncio.wait_for(bot.client.get_equity(), timeout=API_CCXT_TIMEOUT_SEC)
                 equity = balance.total_usd
             except TimeoutError:
                 logger.warning("/status get_equity timeout (5초) — None 반환")
             except Exception as e:  # noqa: BLE001 — 거래소 호출 실패는 UI 끄지 않고 None 반환
                 logger.warning("/status get_equity 실패 (None 반환): %s", e)
             try:
-                positions = await asyncio.wait_for(bot.client.get_positions(), timeout=5.0)
+                positions = await asyncio.wait_for(bot.client.get_positions(), timeout=API_CCXT_TIMEOUT_SEC)
                 open_count = len(positions)
             except TimeoutError:
                 logger.warning("/status get_positions timeout (5초) — 0 반환")
@@ -504,7 +515,7 @@ def create_app() -> FastAPI:
         if bot.client is None:
             return []
         try:
-            raw = await asyncio.wait_for(bot.client.get_positions(), timeout=5.0)
+            raw = await asyncio.wait_for(bot.client.get_positions(), timeout=API_CCXT_TIMEOUT_SEC)
         except TimeoutError:
             logger.warning("/positions get_positions timeout (5초) — 빈 리스트 반환")
             return []
@@ -661,7 +672,7 @@ def create_app() -> FastAPI:
             try:
                 closed = await asyncio.wait_for(
                     bot.client.fetch_closed_positions(since_ms=since_ms, limit=limit),
-                    timeout=8.0,
+                    timeout=API_HISTORY_TIMEOUT_SEC,
                 )
                 for c in closed:
                     # v0.1.65: 봇 record 와 매칭 → reason / triggered_by / fee 정정.
@@ -839,7 +850,7 @@ def create_app() -> FastAPI:
             try:
                 ex_records = await asyncio.wait_for(
                     bot.client.fetch_closed_positions(since_ms=since_ms, limit=200),
-                    timeout=8.0,
+                    timeout=API_HISTORY_TIMEOUT_SEC,
                 )
             except TimeoutError:
                 logger.warning("/stats fetch_closed_positions timeout (8초) — 봇 buffer 만 통계")

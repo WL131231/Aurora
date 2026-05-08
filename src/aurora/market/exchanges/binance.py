@@ -21,11 +21,12 @@ import time
 import aiohttp
 
 from aurora.market.exchanges.base import ExchangeMarketData, ExchangeSnapshot
+from aurora.timeouts import make_exchange_timeout
 
 logger = logging.getLogger(__name__)
 
 _FAPI_BASE = "https://fapi.binance.com"
-_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=8)
+_HTTP_TIMEOUT = make_exchange_timeout()  # v0.1.98: central config
 _LS_PERIOD = "5m"  # globalLongShortAccountRatio / topLongShortPositionRatio period
 _WHALE_THRESHOLD_USD = 100_000.0  # v0.1.90: 큰 거래 기준 (≥ $100K notional)
 _WHALE_WINDOW_MS = 5 * 60 * 1000  # 최근 5분

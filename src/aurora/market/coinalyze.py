@@ -31,11 +31,14 @@ from typing import Literal
 
 import aiohttp
 
+from aurora.timeouts import COINALYZE_HTTP_TIMEOUT_SEC
+
 logger = logging.getLogger(__name__)
 
 # Coinalyze API endpoint
 BASE_URL = "https://api.coinalyze.net/v1"
-HTTP_TIMEOUT_SEC = 10
+# v0.1.98: 중앙 timeouts 모듈 위임 (이전 hardcode 10초 → 8초로 통일)
+HTTP_TIMEOUT_SEC = COINALYZE_HTTP_TIMEOUT_SEC
 
 # Aggregated 선물 심볼 (매매일지 정합)
 FUTURES_AGG: dict[str, str] = {

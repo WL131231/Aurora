@@ -18,11 +18,15 @@ from dataclasses import dataclass, field
 import aiohttp
 
 from aurora.market.exchanges.base import ExchangeMarketData, ExchangeSnapshot
+from aurora.timeouts import (
+    DASHBOARD_FLOW_PROVIDER_TIMEOUT_SEC,
+    make_dashboard_session_timeout,
+)
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TTL_SEC = 60
-_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=10)
+_HTTP_TIMEOUT = make_dashboard_session_timeout()  # v0.1.98: central config
 
 
 @dataclass(slots=True)
@@ -141,7 +145,8 @@ class DashboardFlowAggregator:
         async def _fetch_with_timeout(provider, sess) -> ExchangeSnapshot:
             try:
                 return await asyncio.wait_for(
-                    provider.fetch_snapshot(sess, coin), timeout=8.0,
+                    provider.fetch_snapshot(sess, coin),
+                    timeout=DASHBOARD_FLOW_PROVIDER_TIMEOUT_SEC,
                 )
             except TimeoutError:
                 logger.warning(

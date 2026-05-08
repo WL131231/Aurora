@@ -858,3 +858,156 @@ def atr_wilder(ohlc: pd.DataFrame, period: int = 14) -> pd.Series:
     # Wilder smoothing = ewm(alpha=1/period, adjust=False).mean()
     # (RSI 와 동일 — TradingView ta.atr Pine 구현과 일치)
     return tr.ewm(alpha=1.0 / period, adjust=False).mean()
+
+
+# ============================================================
+# SuperTrend — ATR-based trailing trend (v0.1.79, Tako D booster)
+# ============================================================
+
+
+def supertrend(
+    ohlc: pd.DataFrame, period: int = 14, multiplier: float = 3.0,
+) -> pd.DataFrame:
+    """SuperTrend 지표 — ATR 기반 trailing trend line (TradingView ``ta.supertrend`` 정합).
+
+    Tako 봇 (DualST Ichi DMI Cornix) 의 핵심 지표 중 하나. Aurora 측엔 booster
+    로 박음 — 진입 신호 자체 X, 두 SuperTrend (Ichi 2.0 / DMI 3.0) 동시 정렬
+    시 score multiplier 본질 (Coinalyze 추세 방향 강제 패턴 정합).
+
+    공식 (Pine Script 정합):
+        hl2 = (high + low) / 2
+        upper_band = hl2 + multiplier × ATR(period)
+        lower_band = hl2 - multiplier × ATR(period)
+
+        # trend flip 본질
+        if close > prev_upper_band: trend = +1 (bull, line = lower_band)
+        if close < prev_lower_band: trend = -1 (bear, line = upper_band)
+        else: trend = prev_trend
+
+    Args:
+        ohlc: ``high``, ``low``, ``close`` 컬럼.
+        period: ATR 기간 (Tako default 14).
+        multiplier: ATR 배수 (Tako Ichi-ST = 2.0 / DMI-ST = 3.0).
+
+    Returns:
+        DataFrame ``[trend (+1/-1), line (현재 trend line)]``.
+
+    Raises:
+        ValueError: 컬럼 누락 또는 period < 1.
+    """
+    if period < 1:
+        raise ValueError(f"period 는 1 이상 (받은: {period})")
+    required = {"high", "low", "close"}
+    if not required.issubset(ohlc.columns):
+        raise ValueError(
+            f"ohlc 에 'high','low','close' 필요 (받은: {list(ohlc.columns)})"
+        )
+
+    atr = atr_wilder(ohlc, period=period)
+    hl2 = (ohlc["high"] + ohlc["low"]) / 2.0
+    upper = hl2 + multiplier * atr
+    lower = hl2 - multiplier * atr
+
+    # Pine Script `ta.supertrend` 흐름 — line 측 lock + flip
+    n = len(ohlc)
+    line = pd.Series(index=ohlc.index, dtype=float)
+    trend = pd.Series(index=ohlc.index, dtype=float)
+
+    closes = ohlc["close"].to_numpy()
+    upper_arr = upper.to_numpy()
+    lower_arr = lower.to_numpy()
+
+    if n == 0:
+        return pd.DataFrame({"trend": trend, "line": line})
+
+    # 초기값 — 첫 봉
+    line.iloc[0] = lower_arr[0]
+    trend.iloc[0] = 1.0
+
+    for i in range(1, n):
+        prev_line = line.iloc[i - 1]
+        prev_trend = trend.iloc[i - 1]
+        # line lock — 같은 추세 방향이면 line 이 한 방향으로만 움직임
+        if prev_trend > 0:
+            cur_line = max(lower_arr[i], prev_line)
+        else:
+            cur_line = min(upper_arr[i], prev_line)
+
+        # flip 본질
+        if prev_trend > 0 and closes[i] < cur_line:
+            cur_trend = -1.0
+            cur_line = upper_arr[i]
+        elif prev_trend < 0 and closes[i] > cur_line:
+            cur_trend = 1.0
+            cur_line = lower_arr[i]
+        else:
+            cur_trend = prev_trend
+
+        line.iloc[i] = cur_line
+        trend.iloc[i] = cur_trend
+
+    return pd.DataFrame({"trend": trend, "line": line}, index=ohlc.index)
+
+
+def dual_supertrend_alignment(
+    ohlc: pd.DataFrame,
+    period_fast: int = 14,
+    mult_fast: float = 2.0,
+    period_slow: int = 14,
+    mult_slow: float = 3.0,
+) -> int:
+    """v0.1.79 (D): 두 SuperTrend 동시 정렬 본질 — Tako Ichi-ST + DMI-ST 패턴.
+
+    Args:
+        ohlc: high/low/close 컬럼.
+        period_fast / mult_fast: 짧은 ST (Tako Ichi-ST default 14, 2.0).
+        period_slow / mult_slow: 긴 ST (Tako DMI-ST default 14, 3.0).
+
+    Returns:
+        +1: 두 ST 모두 bull (close > both lines)
+        -1: 두 ST 모두 bear (close < both lines)
+         0: 정렬 X (한 개만 또는 데이터 부족)
+
+    Aurora 측 활용: 진입 시 두 ST 정렬 + 진입 방향 일치 시 score booster
+    (Coinalyze trend_score_multiplier 패턴 정합).
+    """
+    if len(ohlc) < max(period_fast, period_slow) + 2:
+        return 0
+    st_fast = supertrend(ohlc, period=period_fast, multiplier=mult_fast)
+    st_slow = supertrend(ohlc, period=period_slow, multiplier=mult_slow)
+    if st_fast.empty or st_slow.empty:
+        return 0
+    last_fast = st_fast["trend"].iloc[-1]
+    last_slow = st_slow["trend"].iloc[-1]
+    if pd.isna(last_fast) or pd.isna(last_slow):
+        return 0
+    if last_fast > 0 and last_slow > 0:
+        return 1
+    if last_fast < 0 and last_slow < 0:
+        return -1
+    return 0
+
+
+def dual_supertrend_booster(
+    alignment: int, signal_direction: str,
+) -> float:
+    """v0.1.79 (D): 두 SuperTrend 정렬 → 진입 score multiplier.
+
+    Coinalyze ``trend_score_multiplier`` 패턴 정합:
+    - 두 ST 모두 진입 방향 일치 = ×1.5 (강 정렬)
+    - 정렬 X (한 개만 또는 데이터 부족) = ×1.0 (중립)
+    - 두 ST 모두 반대 방향 = ×0.5 (강 반대 — 차단 X but 가중치 ↓)
+
+    Args:
+        alignment: dual_supertrend_alignment 반환 (+1/-1/0).
+        signal_direction: "long" 또는 "short".
+
+    Returns:
+        score multiplier (0.5 ~ 1.5).
+    """
+    if alignment == 0:
+        return 1.0
+    sig = 1 if signal_direction == "long" else -1
+    if alignment == sig:
+        return 1.5  # 강 정렬 일치
+    return 0.5  # 강 반대

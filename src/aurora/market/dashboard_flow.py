@@ -44,6 +44,10 @@ class DashboardFlow:
     avg_ls_ratio_top_position: float | None = None
     avg_ls_ratio_top_account: float | None = None
     # avg 가중치 = 거래소 OI 비중 (큰 거래소 영향 큼). OI 미상 시 단순 평균.
+    # v0.1.90: Whale notional 합 (5분 윈도우, 거래소별 None 제외)
+    total_whale_buy_5m_usd: float | None = None
+    total_whale_sell_5m_usd: float | None = None
+    total_whale_count_5m: int | None = None
 
     @classmethod
     def from_snapshots(
@@ -77,6 +81,11 @@ class DashboardFlow:
                 return sum(simple_vals) / len(simple_vals)
             return None
 
+        # v0.1.90: Whale notional 합 (None 제외 sum)
+        whale_buy_vals = [s.whale_buy_5m_usd for s in snaps if s.whale_buy_5m_usd is not None]
+        whale_sell_vals = [s.whale_sell_5m_usd for s in snaps if s.whale_sell_5m_usd is not None]
+        whale_count_vals = [s.whale_count_5m for s in snaps if s.whale_count_5m is not None]
+
         return cls(
             coin=coin,
             fetched_at_ms=int(time.time() * 1000),
@@ -87,6 +96,9 @@ class DashboardFlow:
             avg_ls_ratio_global=_weighted("ls_ratio_global"),
             avg_ls_ratio_top_position=_weighted("ls_ratio_top_position"),
             avg_ls_ratio_top_account=_weighted("ls_ratio_top_account"),
+            total_whale_buy_5m_usd=sum(whale_buy_vals) if whale_buy_vals else None,
+            total_whale_sell_5m_usd=sum(whale_sell_vals) if whale_sell_vals else None,
+            total_whale_count_5m=sum(whale_count_vals) if whale_count_vals else None,
         )
 
 

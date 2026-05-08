@@ -331,6 +331,21 @@
                             <div class="dflow-summary-value mono" id="dflow-avg-ls">—</div>
                         </div>
                     </div>
+                    <!-- v0.1.90: Whale Notional 합 (5분, ≥ $100K 거래) -->
+                    <div class="dflow-whale-row">
+                        <div class="dflow-whale-card">
+                            <div class="dflow-whale-label">🐋 Whale 매수 (5m)</div>
+                            <div class="dflow-whale-value mono pos" id="dflow-whale-buy">—</div>
+                        </div>
+                        <div class="dflow-whale-card">
+                            <div class="dflow-whale-label">🐋 Whale 매도 (5m)</div>
+                            <div class="dflow-whale-value mono neg" id="dflow-whale-sell">—</div>
+                        </div>
+                        <div class="dflow-whale-card">
+                            <div class="dflow-whale-label">Whale 거래 수 (5m)</div>
+                            <div class="dflow-whale-value mono" id="dflow-whale-count">—</div>
+                        </div>
+                    </div>
                     <div class="metric-card dflow-table-card" style="padding: 0">
                         <table class="dflow-table">
                             <thead>
@@ -343,10 +358,11 @@
                                     <th>L/S Global</th>
                                     <th>L/S Top (Pos)</th>
                                     <th>L/S Top (Acc)</th>
+                                    <th>🐋 5m</th>
                                 </tr>
                             </thead>
                             <tbody id="dflow-tbody">
-                                <tr><td colspan="8" class="dflow-empty">로드 중…</td></tr>
+                                <tr><td colspan="9" class="dflow-empty">로드 중…</td></tr>
                             </tbody>
                         </table>
                     </div>

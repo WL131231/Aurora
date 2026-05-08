@@ -1102,6 +1102,10 @@ async function refreshDashboardFlow() {
     set("dflow-total-vol", data.total_volume_24h_usd != null ? "$" + _fmtUsd(data.total_volume_24h_usd) : "—");
     set("dflow-avg-funding", _fmtFunding(data.avg_funding_rate));
     set("dflow-avg-ls", _fmtRatio(data.avg_ls_ratio_global));
+    // v0.1.90: Whale Notional 합 카드
+    set("dflow-whale-buy", data.total_whale_buy_5m_usd != null ? "$" + _fmtUsd(data.total_whale_buy_5m_usd) : "—");
+    set("dflow-whale-sell", data.total_whale_sell_5m_usd != null ? "$" + _fmtUsd(data.total_whale_sell_5m_usd) : "—");
+    set("dflow-whale-count", data.total_whale_count_5m != null ? data.total_whale_count_5m + "건" : "—");
 
     // 거래소별 row — 등록된 exchanges 순서대로 (snapshot 미존재 시 placeholder)
     const snapsByEx = {};
@@ -1112,10 +1116,20 @@ async function refreshDashboardFlow() {
         const s = snapsByEx[ex];
         if (!s) {
             return `<tr><td class="dflow-exchange">${ex}</td>` +
-                   `<td colspan="7" class="dflow-empty">데이터 없음</td></tr>`;
+                   `<td colspan="8" class="dflow-empty">데이터 없음</td></tr>`;
         }
         const chgCls = _signClass(s.price_24h_change_pct);
         const fundingCls = _signClass(s.funding_rate);
+        // v0.1.90: Whale 셀 — 매수↑ / 매도↓ + 거래 수
+        let whaleCell = "—";
+        if (s.whale_count_5m != null) {
+            const buy = s.whale_buy_5m_usd ?? 0;
+            const sell = s.whale_sell_5m_usd ?? 0;
+            const cnt = s.whale_count_5m;
+            whaleCell = cnt === 0
+                ? "0건"
+                : `${cnt}건 <span class="pos">↑$${_fmtUsd(buy)}</span> / <span class="neg">↓$${_fmtUsd(sell)}</span>`;
+        }
         return `<tr>
             <td class="dflow-exchange">${ex}</td>
             <td>${s.price != null ? "$" + s.price.toLocaleString(undefined, {maximumFractionDigits: 2}) : "—"}</td>
@@ -1125,10 +1139,11 @@ async function refreshDashboardFlow() {
             <td>${_fmtRatio(s.ls_ratio_global)}</td>
             <td>${_fmtRatio(s.ls_ratio_top_position)}</td>
             <td>${_fmtRatio(s.ls_ratio_top_account)}</td>
+            <td>${whaleCell}</td>
         </tr>`;
     }).join("");
 
-    tbody.innerHTML = rows || `<tr><td colspan="8" class="dflow-empty">등록된 거래소 없음</td></tr>`;
+    tbody.innerHTML = rows || `<tr><td colspan="9" class="dflow-empty">등록된 거래소 없음</td></tr>`;
 }
 
 function _wireDflowToggles() {

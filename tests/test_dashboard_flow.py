@@ -182,6 +182,8 @@ def _binance_mock_responses() -> dict[str, Any]:
         "/futures/data/topLongShortAccountRatio":
             [{"longShortRatio": "1.10", "longAccount": "0.52", "shortAccount": "0.48",
               "timestamp": 1, "symbol": "BTCUSDT"}],
+        "/fapi/v1/aggTrades":  # v0.1.90 — happy path 측 빈 list (whale 0건)
+            [],
     }
 
 
@@ -559,3 +561,76 @@ async def test_hyperliquid_post_raises_returns_empty() -> None:
     snap = await hl.fetch_snapshot(session, "BTC")
     assert snap.price is None
     assert snap.errors  # 에러 메시지 박힘
+
+
+# ============================================================
+# v0.1.90: Whale Notional — Binance aggTrades 측 큰 거래 필터
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_binance_whale_notional_filtering() -> None:
+    """≥ $100K 큰 거래만 합산 — buy / sell 분리 (m=true → sell, m=false → buy)."""
+    binance = BinanceMarketData()
+
+    # mock 측 aggTrades 응답에 큰 거래 / 작은 거래 섞어 박음
+    big_buy = {"p": "80000", "q": "2.5", "T": 1, "m": False}    # $200K BUY
+    big_sell = {"p": "80000", "q": "1.5", "T": 2, "m": True}    # $120K SELL
+    small_buy = {"p": "80000", "q": "0.1", "T": 3, "m": False}  # $8K (skip)
+    big_buy2 = {"p": "80000", "q": "5.0", "T": 4, "m": False}   # $400K BUY
+
+    base_responses = _binance_mock_responses()
+    base_responses["/fapi/v1/aggTrades"] = [big_buy, big_sell, small_buy, big_buy2]
+
+    session = MagicMock()
+    def _get(url: str, params=None, timeout=None):
+        path = url.replace("https://fapi.binance.com", "")
+        ctx = AsyncMock()
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json = AsyncMock(return_value=base_responses[path])
+        ctx.__aenter__.return_value = resp
+        ctx.__aexit__.return_value = None
+        return ctx
+    session.get = _get
+
+    snap = await binance.fetch_snapshot(session, "BTC")
+
+    # threshold 박힘
+    assert snap.whale_threshold_usd == pytest.approx(100_000.0)
+    # 큰 거래 3개 (small_buy 제외)
+    assert snap.whale_count_5m == 3
+    # 매수 = 200K + 400K = 600K, 매도 = 120K
+    assert snap.whale_buy_5m_usd == pytest.approx(600_000.0)
+    assert snap.whale_sell_5m_usd == pytest.approx(120_000.0)
+
+
+def test_dashboard_flow_aggregates_whale_total() -> None:
+    """DashboardFlow.from_snapshots — whale 합 박힘 (None 제외)."""
+    snaps = [
+        ExchangeSnapshot(
+            exchange="binance", symbol="BTCUSDT", fetched_at_ms=0,
+            whale_buy_5m_usd=500_000.0, whale_sell_5m_usd=200_000.0,
+            whale_count_5m=4, whale_threshold_usd=100_000.0,
+        ),
+        ExchangeSnapshot(
+            exchange="bybit", symbol="BTCUSDT", fetched_at_ms=0,
+            # whale 측 None — 합산 제외
+        ),
+    ]
+    flow = DashboardFlow.from_snapshots("BTC", snaps)
+    assert flow.total_whale_buy_5m_usd == pytest.approx(500_000.0)
+    assert flow.total_whale_sell_5m_usd == pytest.approx(200_000.0)
+    assert flow.total_whale_count_5m == 4
+
+
+def test_dashboard_flow_whale_total_none_when_all_none() -> None:
+    """모든 거래소 측 whale None → total_whale_* 도 None."""
+    snaps = [
+        ExchangeSnapshot(exchange="a", symbol="X", fetched_at_ms=0),
+        ExchangeSnapshot(exchange="b", symbol="X", fetched_at_ms=0),
+    ]
+    flow = DashboardFlow.from_snapshots("BTC", snaps)
+    assert flow.total_whale_buy_5m_usd is None
+    assert flow.total_whale_sell_5m_usd is None
+    assert flow.total_whale_count_5m is None

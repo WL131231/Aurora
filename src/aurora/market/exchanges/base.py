@@ -41,6 +41,11 @@ class ExchangeSnapshot:
     ls_ratio_top_position: float | None = None
     # Top trader long-short ratio (account 기준)
     ls_ratio_top_account: float | None = None
+    # v0.1.90: Whale notional — 최근 5분 큰 거래 (≥ threshold) 합산. 거래소별 미지원 시 None.
+    whale_buy_5m_usd: float | None = None       # 최근 5분 매수 측 큰 거래 합 (USD)
+    whale_sell_5m_usd: float | None = None      # 최근 5분 매도 측 큰 거래 합 (USD)
+    whale_count_5m: int | None = None           # 최근 5분 큰 거래 개수
+    whale_threshold_usd: float | None = None    # 사용된 threshold (예: 100_000)
     # 에러 메시지 (UI debug 용)
     errors: list[str] = field(default_factory=list)
 

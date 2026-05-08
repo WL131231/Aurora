@@ -129,15 +129,10 @@
                  View 01: 대시보드
                  ============================================================ -->
             <section data-view-content="dashboard" class="view-section view-active">
-                <div class="dashboard-header-row">
-                    <div class="view-header">
-                        <span class="view-num">01</span>
-                        <h1 class="view-title">대시보드</h1>
-                        <p class="view-sub">봇 상태 · 포지션 · 자본금 한눈에</p>
-                    </div>
-
-                    <!-- v0.1.54 → v0.1.55: Market Data 우상단 위치로 이동 (사용자 결정) -->
-                    <div id="market-data-section" class="market-data-section" style="display:none">
+                <!-- v0.1.85: Market Data 좌측 컬럼 / 본문 우측 컬럼 (사용자 요청 — 단기/중단기/중기 추가로 세로 길이 늘어 좌측 사이드 배치가 더 자연스러움) -->
+                <div class="dashboard-split">
+                    <!-- 좌측 컬럼: Market Data (BTC/ETH 세로 stack) -->
+                    <aside id="market-data-section" class="market-data-section" style="display:none">
                         <div class="md-section-title">
                             Market Data
                             <span class="md-subtitle">선물 메타 추세 (5분)</span>
@@ -177,8 +172,15 @@
                                 <div class="md-updated">갱신: <span class="md-updated-ts">—</span></div>
                             </div>
                         </div>
-                    </div>
-                </div>
+                    </aside>
+
+                    <!-- 우측 컬럼: 헤더 + 본문 -->
+                    <div class="dashboard-main">
+                        <div class="view-header">
+                            <span class="view-num">01</span>
+                            <h1 class="view-title">대시보드</h1>
+                            <p class="view-sub">봇 상태 · 포지션 · 자본금 한눈에</p>
+                        </div>
 
                 <div class="section">
                     <div class="grid grid-cols-4 gap-4">
@@ -351,6 +353,8 @@
                         </table>
                     </div>
                 </div>
+                    </div><!-- /.dashboard-main -->
+                </div><!-- /.dashboard-split -->
             </section>
 
             <!-- ============================================================

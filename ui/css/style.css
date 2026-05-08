@@ -1338,26 +1338,24 @@ input[type="range"].slider-input:disabled {
 }
 
 /* ============================================================
-   Market Data — Coinalyze 추세 카드 (v0.1.54 → v0.1.55 우상단 위치)
+   Market Data — Coinalyze 추세 카드 (v0.1.54 → v0.1.55 우상단 → v0.1.85 좌측 컬럼)
    ============================================================ */
 
-/* v0.1.55: 대시보드 헤더 + Market Data 좌우 분할 (사용자 결정) */
-.dashboard-header-row {
+/* v0.1.85: Market Data 좌측 사이드 컬럼 + 본문 우측 컬럼 (사용자 요청 — multi-tf 추가로 카드 세로↑ → 좌측 사이드 배치가 자연) */
+.dashboard-split {
     display: flex;
     align-items: flex-start;
-    justify-content: space-between;
     gap: 1.5rem;
-    margin-bottom: 1.5rem;
-    flex-wrap: wrap;
 }
-.dashboard-header-row .view-header {
-    flex: 0 0 auto;
-}
-
 .market-data-section {
-    flex: 0 1 auto;
+    flex: 0 0 280px;
     min-width: 0;
-    max-width: 460px;
+    position: sticky;
+    top: 0;
+}
+.dashboard-main {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .md-section-title {
@@ -1380,8 +1378,8 @@ input[type="range"].slider-input:disabled {
 
 .market-data-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.5rem;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.6rem;
 }
 
 .md-card {
@@ -1484,11 +1482,23 @@ input[type="range"].slider-input:disabled {
     letter-spacing: 0.02em;
 }
 
-/* 좁은 화면 — 헤더 아래로 떨어짐 (반응형) */
+/* 좁은 화면 — 좌측 컬럼 본문 위로 떨어짐 (반응형) */
 @media (max-width: 1100px) {
+    .dashboard-split {
+        flex-direction: column;
+    }
     .market-data-section {
-        max-width: 100%;
+        flex: 1 1 auto;
         width: 100%;
+        position: static;
+    }
+    .market-data-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+@media (max-width: 640px) {
+    .market-data-grid {
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 

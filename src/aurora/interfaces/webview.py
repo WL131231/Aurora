@@ -66,6 +66,56 @@ def _acquire_single_instance_mutex() -> bool:
     return True
 
 
+# ============================================================
+# v0.1.94: Body file logging — 진단 자료 (disconnect / crash 추적)
+# ============================================================
+# Why: 사용자 보고 (2026-05-08) "갑자기 연결끊김" — body 자체 측 file log X 라
+# in-memory log_buffer 만 있음. body process 죽으면 in-memory 측 사라짐 →
+# 진단 자료 자체 X. launcher 측 file log 패턴 (v0.1.63) 차용 — 본체도 disk
+# 박아 다음 cycle root cause 진단 가능.
+
+
+def _setup_body_file_logging() -> Path | None:
+    """본체 진단용 file logging — `%LOCALAPPDATA%\\Aurora\\aurora.log` (Windows).
+
+    Returns:
+        log 파일 절대 경로 (성공 시) / None (디렉토리 권한 등 실패 시).
+    """
+    import logging.handlers
+    import os
+    import platform as _plat
+
+    try:
+        if _plat.system() == "Windows":
+            local_app = os.environ.get("LOCALAPPDATA")
+            log_dir = Path(local_app) / "Aurora" if local_app else Path.home() / ".aurora"
+        elif _plat.system() == "Darwin":
+            log_dir = Path.home() / "Library" / "Application Support" / "Aurora"
+        else:
+            log_dir = Path.home() / ".aurora"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "aurora.log"
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=2_000_000,  # 2 MB (launcher 1MB 보다 큼 — 매매 사이클 로그 많음)
+            backupCount=3,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        ))
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)
+        # self-update swap 등 main 재진입 시 중복 handler 박힘 방지
+        for existing in list(root_logger.handlers):
+            if isinstance(existing, logging.handlers.RotatingFileHandler):
+                root_logger.removeHandler(existing)
+        root_logger.addHandler(file_handler)
+        return log_file
+    except OSError:
+        return None
+
+
 def _exe_dir() -> Path | None:
     """PyInstaller 환경에서 .exe 가 있는 디렉토리 — UI 핫 업데이트의 override 위치 기준.
 
@@ -144,6 +194,15 @@ def launch() -> None:
     from aurora.interfaces import log_buffer
     log_buffer.install()
 
+    # v0.1.94: file logging — disconnect / crash 진단 자료. mutex 박기 전에 박음
+    # (mutex 측 sys.exit(0) 도 로그에 남음).
+    body_log_file = _setup_body_file_logging()
+    if body_log_file is not None:
+        logger.info("=" * 60)
+        logger.info("Aurora body 시작 — file log: %s", body_log_file)
+    else:
+        logger.warning("body file logging 활성 실패 (디렉토리 권한 등)")
+
     # v0.1.92: 중복 실행 차단 — 이미 Aurora 살아있으면 즉시 exit
     if not _acquire_single_instance_mutex():
         logger.warning(
@@ -182,6 +241,12 @@ def launch_headless(host: str | None = None, port: int | None = None) -> None:
     """
     from aurora.interfaces import log_buffer
     log_buffer.install()
+
+    # v0.1.94: file logging (headless 도 동일 박음)
+    body_log_file = _setup_body_file_logging()
+    if body_log_file is not None:
+        logger.info("=" * 60)
+        logger.info("Aurora body (headless) 시작 — file log: %s", body_log_file)
 
     # v0.1.92: 중복 실행 차단 — headless 도 같은 mutex 적용
     if not _acquire_single_instance_mutex():

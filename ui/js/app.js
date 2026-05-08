@@ -320,14 +320,33 @@ async function refreshDashboard() {
         // 백엔드 60초 cache 박힘 → 사용자 UI 폴링 부담 X.
         await refreshDashboardFlow();
     } catch (_) {
+        // v0.1.94: 연결 실패 카운트 + 빠른 재연결 시도 (5초 후) 가시화.
+        // 본체 측 file log 박혔으니 (v0.1.94) 사용자 측 진단 자료 박힘.
         connDot.style.background = "#fb7185";
         connDot.style.boxShadow  = "0 0 8px #fb7185";
-        connLabel.textContent = "DISCONNECTED";
+        _disconnectCount = (_disconnectCount || 0) + 1;
+        connLabel.textContent = `DISCONNECTED (재연결 ${_disconnectCount}회 시도)`;
         _setStatusBadge(mStatus, false, true);
         _setButtons(btnStart, btnStop, false, true);
         _updateBotActivity(false, 0);  // 백엔드 끊김 — indicator 숨김
+        // 빠른 재연결 — 끊긴 직후 5초 후 1회 즉시 retry (15초 폴링 외 추가)
+        if (!_disconnectRetryTimer) {
+            _disconnectRetryTimer = setTimeout(() => {
+                _disconnectRetryTimer = null;
+                refreshDashboard();
+            }, 5000);
+        }
+        return;
+    }
+    // 정상 연결 — 카운트 reset
+    _disconnectCount = 0;
+    if (_disconnectRetryTimer) {
+        clearTimeout(_disconnectRetryTimer);
+        _disconnectRetryTimer = null;
     }
 }
+let _disconnectCount = 0;
+let _disconnectRetryTimer = null;
 
 // 열린 포지션 표 갱신 — /positions API 호출 + tbody 행 렌더링
 async function refreshPositions() {

@@ -154,6 +154,16 @@
             <p class="text-[10px] text-white/80">
                 Windows / macOS: ~13 MB 미니 런처 · 첫 실행 시 본체 자동 다운로드 &nbsp;|&nbsp; Android: APK 직접 설치
             </p>
+            <!-- v0.1.102: 최신 버전 동적 표시 (GitHub API 측 fetch). 사용자 측 어떤 버전 다운 박힐지 명확. -->
+            <div id="latest-version-badge" class="mt-3 flex items-center gap-2 text-[10px] tracking-[0.18em]">
+                <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span class="text-zinc-400">LATEST</span>
+                <a id="latest-version-tag" href="https://github.com/WL131231/Aurora/releases/latest"
+                   target="_blank" rel="noopener"
+                   class="text-emerald-300 font-medium hover:text-emerald-200 transition">—</a>
+                <span class="text-zinc-600">·</span>
+                <span id="latest-version-date" class="text-zinc-500">—</span>
+            </div>
         </div>
 
         <!-- 부가 정보 카드 (3개, 가운데 정렬) -->

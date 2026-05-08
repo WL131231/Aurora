@@ -84,14 +84,19 @@ async function startFlow() {
 }
 
 async function launchOnly() {
+    // v0.1.116 (ChoYoon #133): 이전 흐름 측 launch() 측 즉시 "✓ Aurora 시작됨"
+    // 박힘 → 사용자 측 까만 화면 (본체 startup ~37초). 신규 흐름 측 launch()
+    // 측 backend readiness polling thread 측 status 측 매 5초 박음 →
+    //     "본체 시작 중... (10초)" → "본체 시작 중... (35초)" → "✓ Aurora 시작됨"
+    // → 0.3초 후 launcher hide. JS 측 init 만 박고 backend 측 갱신 박음.
     setStatus("Aurora 시작 중...", "var(--text-2)");
     try {
         const r = await Api.launch();
         if (r.success) {
-            // v0.1.80: launcher 항상 살아있음 + 본체 spawn 시 hide. 본체 종료 시
-            // 자동 등장 (LauncherApi 측 polling thread). Api.quit() 호출 X.
-            log("Aurora 시작 — Launcher 백그라운드 대기");
-            setStatus("✓ Aurora 시작됨 — 봇 종료 시 Launcher 자동 등장", "#34d399");
+            // v0.1.80: launcher 항상 살아있음 + 본체 ready 박힐 때 hide.
+            // 본체 종료 시 자동 등장 (LauncherApi 측 polling thread).
+            log("Aurora 시작 — readiness polling 박힘 (본체 /health 200 대기)");
+            // status 측 backend _start_readiness_polling 측 박음 — JS overwrite X
         } else {
             setStatus(`✗ ${r.message}`, "#fb7185");
             log(`시작 실패: ${r.message}`);

@@ -357,64 +357,52 @@ async function refreshDashboard() {
         // 백엔드 60초 cache 박힘 → 사용자 UI 폴링 부담 X.
         await refreshDashboardFlow();
     } catch (err) {
-        // v0.1.112: tolerance + /health probe 박음 — endpoint slow vs 진짜
-        // disconnect 구분. 1번 fail 시 /health probe (빠른 응답, ccxt 호출 X).
-        // health OK = backend 살아있음 → soft retry (UI 변화 X). health 도 fail =
-        // 진짜 disconnect → DISCONNECTED 박음.
-        _consecutiveFails = (_consecutiveFails || 0) + 1;
+        // v0.1.113: refreshDashboard 측 실패 측 connection 상태 영향 X.
+        // 사용자 보고 (2026-05-09) "끊김 / 실행중 반복" 본질 = data fetch 측
+        // transient slow → DISCONNECTED 깜빡임. v0.1.113 측 connection 상태 측
+        // /health 별도 polling (3초 주기) 박아 decouple 박음. data fetch 측
+        // 실패 측 silent — UI 측 stale data 그대로 표시 (next refresh 측 정상
+        // 박힐 때까지).
         if (typeof console !== "undefined" && console.warn) {
-            console.warn(`[refreshDashboard] fail #${_consecutiveFails}:`, err);
+            console.warn("[refreshDashboard] fail (silent — connection 별도 폴링):", err);
         }
-
-        // /health probe — backend 살아있는지 빠른 확인 (ccxt 호출 X 라 즉시 응답)
-        let backendAlive = false;
-        try {
-            const h = await Api.health();
-            backendAlive = !!(h && h.status === "ok");
-        } catch (_) {
-            backendAlive = false;
-        }
-
-        if (backendAlive && _consecutiveFails < 4) {
-            // Backend 측 alive — endpoint slow / transient blip. UI 측 변화 X,
-            // 빠른 soft retry 박음. 4번 연속 측 그제야 hard fail.
-            if (_disconnectRetryTimer) clearTimeout(_disconnectRetryTimer);
-            _disconnectRetryTimer = setTimeout(() => {
-                _disconnectRetryTimer = null;
-                refreshDashboard();
-            }, 1500);
-            return;
-        }
-
-        // Hard fail — backend 측 죽었거나 4+ 연속 실패
-        connDot.style.background = "#fb7185";
-        connDot.style.boxShadow  = "0 0 8px #fb7185";
-        _disconnectCount = (_disconnectCount || 0) + 1;
-        const reason = backendAlive ? "endpoint 측 hang" : "backend 측 응답 X";
-        connLabel.textContent = `DISCONNECTED (${reason}, ${_disconnectCount}회)`;
-        _setStatusBadge(mStatus, false, true);
-        _setButtons(btnStart, btnStop, false, true);
-        _updateBotActivity(false, 0);  // 백엔드 끊김 — indicator 숨김
-        // 빠른 재연결 — 5초 후 retry
-        if (!_disconnectRetryTimer) {
-            _disconnectRetryTimer = setTimeout(() => {
-                _disconnectRetryTimer = null;
-                refreshDashboard();
-            }, 5000);
-        }
+        // UI 측 변화 X — connection 상태 측 _checkHealth() 측 박음.
         return;
     }
-    // 정상 연결 — 카운트 reset (soft + hard 둘 다)
-    _consecutiveFails = 0;
-    _disconnectCount = 0;
-    if (_disconnectRetryTimer) {
-        clearTimeout(_disconnectRetryTimer);
-        _disconnectRetryTimer = null;
+}
+
+// v0.1.113: connection 상태 측 /health 별도 polling 박음 (3초 주기).
+// 3번 연속 fail 측 DISCONNECTED, 1번 success 측 CONNECTED. data refresh 측 영향 X.
+let _healthFailCount = 0;
+const _HEALTH_FAIL_THRESHOLD = 3;
+
+async function _checkHealth() {
+    const connDot   = document.getElementById("conn-dot");
+    const connLabel = document.getElementById("conn-label");
+    if (!connDot || !connLabel) return;
+
+    try {
+        const h = await Api.health();
+        if (!(h && h.status === "ok")) throw new Error("health not ok");
+        // CONNECTED — 정상 응답
+        _healthFailCount = 0;
+        connDot.style.background = "#22d3ee";
+        connDot.style.boxShadow  = "0 0 8px #22d3ee";
+        connLabel.textContent = "CONNECTED";
+    } catch (err) {
+        _healthFailCount++;
+        if (typeof console !== "undefined" && console.warn) {
+            console.warn(`[_checkHealth] fail #${_healthFailCount}:`, err);
+        }
+        if (_healthFailCount >= _HEALTH_FAIL_THRESHOLD) {
+            // DISCONNECTED — backend 측 진짜 죽음 (3번 연속 = ~9초 응답 X)
+            connDot.style.background = "#fb7185";
+            connDot.style.boxShadow  = "0 0 8px #fb7185";
+            connLabel.textContent = `DISCONNECTED (재연결 시도 ${_healthFailCount}회)`;
+        }
+        // 1~2번 측 silent — UI 변화 X
     }
 }
-let _disconnectCount = 0;
-let _disconnectRetryTimer = null;
-let _consecutiveFails = 0;  // v0.1.112: tolerance 카운트
 
 // 열린 포지션 표 갱신 — /positions API 호출 + tbody 행 렌더링
 async function refreshPositions() {
@@ -2356,3 +2344,8 @@ loadConfigToToggles();
 
 // 15초 주기 대시보드 폴링 (봇 상태 자주 안 바뀜, /start /stop 직후엔 즉시 fetch)
 setInterval(refreshDashboard, 15000);
+
+// v0.1.113: connection 상태 별도 polling (3초 주기) — data refresh 측 transient
+// slow 측 connection 깜빡임 본질 차단. /health 측 ccxt 호출 X 라 즉시 응답.
+_checkHealth();
+setInterval(_checkHealth, 3000);

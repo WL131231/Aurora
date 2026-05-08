@@ -354,6 +354,8 @@ async function refreshDashboard() {
     await refreshMarketTrend();
     await refreshBotChart();
     await refreshDashboardFlow();
+    await refreshDashboardRatios();
+    await refreshDashboardSeries();
 }
 
 // v0.1.113: connection 상태 측 /health 별도 polling 박음 (3초 주기).
@@ -1215,10 +1217,267 @@ function _wireDflowToggles() {
             btn.classList.add("active");
             Dflow.coin = btn.dataset.coin;
             refreshDashboardFlow();
+            refreshDashboardRatios();
+            refreshDashboardSeries();
         });
     }
 }
 _wireDflowToggles();
+
+// ============================================================
+// v0.1.115: 5단 L/S Ratio segments + 14D 시계열 차트 + L/S timeline
+// ============================================================
+
+const DflowRatios = {
+    // label → CSS class 안내용 (현 미사용, 시각 정합 fallback)
+    _labels: ["WHALE NOTIONAL", "WHALE ACCOUNTS", "TOP NOTIONAL", "TOP ACCOUNTS", "GLOBAL ACCOUNTS"],
+};
+
+async function refreshDashboardRatios() {
+    const list = document.getElementById("dflow-ratios-list");
+    const meta = document.getElementById("dflow-ratios-meta");
+    if (!list) return;
+
+    let data;
+    try {
+        data = await Api.getDashboardRatios(Dflow.coin);
+    } catch (_) {
+        list.innerHTML = `<div class="dflow-empty">로드 실패</div>`;
+        return;
+    }
+
+    if (!data || !Array.isArray(data.segments) || data.segments.length === 0) {
+        list.innerHTML = `<div class="dflow-empty">데이터 없음</div>`;
+        return;
+    }
+
+    if (meta) {
+        const ageMs = Date.now() - (data.fetched_at_ms || Date.now());
+        meta.textContent = `5분 snapshot · ${Math.max(0, Math.floor(ageMs / 1000))}초 전`;
+    }
+
+    list.innerHTML = data.segments.map(seg => {
+        if (seg.long_pct == null || seg.short_pct == null) {
+            return `
+                <div class="dflow-ratio-row">
+                    <span class="dflow-ratio-label">${seg.label}</span>
+                    <div class="dflow-ratio-bar">
+                        <span class="dflow-ratio-pct empty">— 데이터 없음 —</span>
+                    </div>
+                </div>`;
+        }
+        const longPct = seg.long_pct * 100;
+        const shortPct = seg.short_pct * 100;
+        const sources = (seg.source_exchanges || []).length;
+        const sample = seg.sample_size != null ? ` · ${seg.sample_size}건` : "";
+        return `
+            <div class="dflow-ratio-row" title="${sources} 거래소 합본${sample}">
+                <span class="dflow-ratio-label">${seg.label}</span>
+                <div class="dflow-ratio-bar">
+                    <div class="dflow-ratio-bar-long" style="width:${longPct.toFixed(1)}%"></div>
+                    <div class="dflow-ratio-bar-short" style="width:${shortPct.toFixed(1)}%"></div>
+                    <span class="dflow-ratio-pct">
+                        <span>${longPct.toFixed(1)}%</span>
+                        <span>${shortPct.toFixed(1)}%</span>
+                    </span>
+                </div>
+            </div>`;
+    }).join("");
+}
+
+// ─── 14D 시계열 차트 ──────────────────────────────
+
+const DflowSeries = {
+    priceChart: null,
+    flowChart: null,
+    priceSeries: null,    // 가격 line (좌 axis)
+    oiSeries: null,       // OI line (우 axis)
+    cvdSeries: null,      // Perp CVD line (우 axis 별도)
+    fundingSeries: null,  // Funding bars (histogram)
+    takerSeries: null,    // Taker Δvol histogram
+};
+
+function _initDflowCharts() {
+    if (typeof LightweightCharts === "undefined") return;
+
+    // 1) 메인 차트: Price + OI + CVD
+    const priceContainer = document.getElementById("dflow-chart-price");
+    if (priceContainer && !DflowSeries.priceChart) {
+        DflowSeries.priceChart = LightweightCharts.createChart(priceContainer, {
+            layout: {
+                background: { type: "solid", color: "transparent" },
+                textColor: "#a1a1aa",
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 9,
+            },
+            grid: {
+                vertLines: { color: "rgba(96, 81, 155, 0.06)" },
+                horzLines: { color: "rgba(96, 81, 155, 0.06)" },
+            },
+            rightPriceScale: { borderColor: "rgba(96, 81, 155, 0.18)", visible: true },
+            leftPriceScale: { borderColor: "rgba(96, 81, 155, 0.18)", visible: true },
+            timeScale: {
+                borderColor: "rgba(96, 81, 155, 0.18)",
+                timeVisible: false,
+                secondsVisible: false,
+            },
+            crosshair: { mode: 1 },
+            handleScroll: false,
+            handleScale: false,
+            autoSize: true,
+        });
+        DflowSeries.priceSeries = DflowSeries.priceChart.addLineSeries({
+            color: "#f4f4f5",
+            lineWidth: 2,
+            priceScaleId: "right",
+            lastValueVisible: false,
+            priceLineVisible: false,
+        });
+        DflowSeries.oiSeries = DflowSeries.priceChart.addLineSeries({
+            color: "#a78bfa",
+            lineWidth: 1,
+            priceScaleId: "left",
+            lastValueVisible: false,
+            priceLineVisible: false,
+        });
+        DflowSeries.cvdSeries = DflowSeries.priceChart.addLineSeries({
+            color: "#fbbf24",
+            lineWidth: 1,
+            priceScaleId: "cvd",
+            lastValueVisible: false,
+            priceLineVisible: false,
+        });
+        DflowSeries.priceChart.priceScale("cvd").applyOptions({
+            scaleMargins: { top: 0.7, bottom: 0.0 },
+            visible: false,
+        });
+    }
+
+    // 2) 보조 차트: Funding bars + Taker Δvol histogram
+    const flowContainer = document.getElementById("dflow-chart-flow");
+    if (flowContainer && !DflowSeries.flowChart) {
+        DflowSeries.flowChart = LightweightCharts.createChart(flowContainer, {
+            layout: {
+                background: { type: "solid", color: "transparent" },
+                textColor: "#a1a1aa",
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 9,
+            },
+            grid: {
+                vertLines: { color: "rgba(96, 81, 155, 0.06)" },
+                horzLines: { color: "rgba(96, 81, 155, 0.06)" },
+            },
+            rightPriceScale: { borderColor: "rgba(96, 81, 155, 0.18)" },
+            timeScale: {
+                borderColor: "rgba(96, 81, 155, 0.18)",
+                timeVisible: false,
+                secondsVisible: false,
+            },
+            handleScroll: false,
+            handleScale: false,
+            autoSize: true,
+        });
+        DflowSeries.takerSeries = DflowSeries.flowChart.addHistogramSeries({
+            color: "rgba(52, 211, 153, 0.75)",
+            priceScaleId: "right",
+            lastValueVisible: false,
+            priceLineVisible: false,
+        });
+        DflowSeries.fundingSeries = DflowSeries.flowChart.addHistogramSeries({
+            color: "rgba(96, 165, 250, 0.85)",
+            priceScaleId: "left",
+            lastValueVisible: false,
+            priceLineVisible: false,
+        });
+        DflowSeries.flowChart.priceScale("left").applyOptions({
+            visible: false,
+            scaleMargins: { top: 0.0, bottom: 0.5 },
+        });
+    }
+}
+
+function _seriesPointsToData(points, transform) {
+    // SeriesPoint[] → lightweight-charts {time, value}[] (None 제외)
+    const out = [];
+    for (const p of points || []) {
+        if (p.value == null || !isFinite(p.value)) continue;
+        out.push({
+            time: Math.floor(p.ts_ms / 1000),
+            value: transform ? transform(p.value) : p.value,
+        });
+    }
+    return out;
+}
+
+function _seriesPointsToHistogram(points, posColor, negColor) {
+    const out = [];
+    for (const p of points || []) {
+        if (p.value == null || !isFinite(p.value)) continue;
+        out.push({
+            time: Math.floor(p.ts_ms / 1000),
+            value: p.value,
+            color: p.value >= 0 ? posColor : negColor,
+        });
+    }
+    return out;
+}
+
+async function refreshDashboardSeries() {
+    _initDflowCharts();
+    const meta = document.getElementById("dflow-series-meta");
+    const tbars = document.getElementById("dflow-timeline-bars");
+
+    let data;
+    try {
+        data = await Api.getDashboardSeries(Dflow.coin, 14);
+    } catch (_) {
+        if (meta) meta.textContent = "로드 실패 (네트워크)";
+        if (tbars) tbars.innerHTML = `<div class="dflow-empty">로드 실패</div>`;
+        return;
+    }
+
+    if (meta) {
+        const ageMs = Date.now() - (data.fetched_at_ms || Date.now());
+        const exCount = (data.exchanges || []).length;
+        meta.textContent = `${exCount} 거래소 합본 · ${Math.max(0, Math.floor(ageMs / 60000))}분 전`;
+    }
+
+    // 차트 박힘 — lightweight-charts 미로드 시 silent skip
+    if (DflowSeries.priceChart) {
+        DflowSeries.priceSeries.setData(_seriesPointsToData(data.price_close));
+        DflowSeries.oiSeries.setData(_seriesPointsToData(data.oi_usd, v => v / 1e9)); // B 단위
+        DflowSeries.cvdSeries.setData(_seriesPointsToData(data.perp_cvd, v => v / 1e9));
+    }
+    if (DflowSeries.flowChart) {
+        DflowSeries.fundingSeries.setData(_seriesPointsToHistogram(
+            data.funding_rate, "rgba(96, 165, 250, 0.85)", "rgba(251, 113, 133, 0.85)",
+        ));
+        DflowSeries.takerSeries.setData(_seriesPointsToHistogram(
+            data.taker_delta_usd, "rgba(52, 211, 153, 0.75)", "rgba(251, 113, 133, 0.75)",
+        ));
+    }
+
+    // L/S Timeline — 14봉 long%/short% 띠
+    if (tbars) {
+        const points = data.ls_global_timeline || [];
+        if (!points.length) {
+            tbars.innerHTML = `<div class="dflow-empty">데이터 없음</div>`;
+        } else {
+            tbars.innerHTML = points.map(p => {
+                if (p.value == null || !isFinite(p.value) || p.value <= 0) {
+                    return `<div class="dflow-timeline-bar empty" title="—"></div>`;
+                }
+                const longPct = (p.value / (1 + p.value)) * 100;
+                const shortPct = 100 - longPct;
+                const date = new Date(p.ts_ms).toISOString().slice(0, 10);
+                return `<div class="dflow-timeline-bar" title="${date} · L:${longPct.toFixed(1)}% / S:${shortPct.toFixed(1)}%">
+                    <div class="dflow-timeline-bar-long" style="height:${longPct.toFixed(1)}%"></div>
+                    <div class="dflow-timeline-bar-short" style="height:${shortPct.toFixed(1)}%"></div>
+                </div>`;
+            }).join("");
+        }
+    }
+}
 
 // 차트 토글 — TF / 오버레이 (DOM ready 후 박힘)
 function _wireChartToggles() {

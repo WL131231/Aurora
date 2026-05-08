@@ -2056,13 +2056,18 @@ const Logs = (() => {
         const empty = $empty();
         if (empty) empty.style.display = visibleCount === 0 ? "block" : "none";
         box.scrollTop = box.scrollHeight;
-        updateCount();
+        updateCount(visibleCount);
         updateScrollBtn();
     }
 
-    function updateCount() {
+    function updateCount(visible) {
         const c = $count();
-        if (c) c.textContent = `(${buffer.length} 줄)`;
+        if (!c) return;
+        if (visible !== undefined && visible !== buffer.length) {
+            c.textContent = `(필터 ${visible} / 전체 ${buffer.length})`;
+        } else {
+            c.textContent = `(${buffer.length} 줄)`;
+        }
     }
 
     function setStatus(text, ok) {
@@ -2178,6 +2183,20 @@ const Logs = (() => {
                 stopPolling();
                 setStatus("실시간 OFF", true);
             }
+        });
+
+        // 퀵 필터 버튼 — ERROR만 / 전체
+        $("log-filter-error-only")?.addEventListener("click", () => {
+            document.querySelectorAll("[data-log-level]").forEach((el) => {
+                el.checked = el.dataset.logLevel === "ERROR";
+            });
+            rerenderAll();
+        });
+        $("log-filter-all-levels")?.addEventListener("click", () => {
+            document.querySelectorAll("[data-log-level]").forEach((el) => {
+                el.checked = true;
+            });
+            rerenderAll();
         });
 
         // 버튼들

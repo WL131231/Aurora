@@ -58,8 +58,23 @@ def main() -> None:
     args = _parse_args()
 
     from aurora import __version__, updater
-    from aurora.interfaces import bot_instance
-    from aurora.interfaces.webview import launch, launch_headless
+    from aurora.interfaces import bot_instance, log_buffer
+    from aurora.interfaces.webview import (
+        _setup_body_file_logging,
+        launch,
+        launch_headless,
+    )
+
+    # v0.1.99: file log 박기 가장 먼저 — apply_pending_update / configure 단계 측
+    # 예외도 디스크 박힘. webview.launch() 안 (이전 위치) 박는 패턴 측 main 초반
+    # crash 시 로그 자체 X 본질.
+    log_buffer.install()
+    log_file = _setup_body_file_logging()
+    if log_file is not None:
+        import logging
+        logging.getLogger(__name__).info(
+            "Aurora body main() 진입 — file log: %s", log_file,
+        )
 
     # 1. 자동 업데이트 적용 (직전 실행에서 다운된 .new 가 있으면 swap + 재시작)
     updater.apply_pending_update()

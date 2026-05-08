@@ -1297,13 +1297,35 @@ def create_app() -> FastAPI:
         """최근 로그 라인 조회 (단순 폴링용 — 실시간은 ``/ws/live``)."""
         return {"lines": log_buffer.get_recent(limit), "limit": limit}
 
+    logger.info(
+        "[create_app] step 3.13a (%.3f초): /logs 등록 OK",
+        _t.monotonic() - t0,
+    )
+    _flush()
+
     # ───── WebSocket 실시간 push ────────────────────
 
     _ws_clients: set[WebSocket] = set()
+    logger.info(
+        "[create_app] step 3.13b (%.3f초): _ws_clients set() OK",
+        _t.monotonic() - t0,
+    )
+    _flush()
+
     # v0.1.34: _ws_clients 동시 mutate 보호 — broadcast_log (iterate) + ws_live
     # (add/discard) 동시 진행 가능. CPython GIL 만으로는 set 변경 도중 RuntimeError
-    # ("Set changed size during iteration") 가능성 → asyncio.Lock 으로 직렬화.
-    _ws_lock = asyncio.Lock()
+    # ("Set changed size during iteration") 가능성 → 직렬화.
+    # v0.1.105: asyncio.Lock() → threading.Lock() 변경. 이전 측 사용자 환경 측
+    # `asyncio.Lock()` 측 hang 확인 (step 3.13 박힌 후 멈춤). asyncio context 안
+    # 측 sync threading.Lock with 측 OK — critical section 매우 짧 (list copy /
+    # set discard).
+    import threading as _threading
+    _ws_lock = _threading.Lock()
+    logger.info(
+        "[create_app] step 3.13c (%.3f초): _ws_lock = threading.Lock() OK",
+        _t.monotonic() - t0,
+    )
+    _flush()
 
     async def broadcast_log(record: dict) -> None:
         """새 log record 발생 시 모든 연결된 클라이언트에 push.
@@ -1311,7 +1333,7 @@ def create_app() -> FastAPI:
         Lock 으로 iterate snapshot — broadcast 중 새 connect/disconnect 와 race 회피.
         send 자체는 lock 밖에서 실행 (개별 client 응답 대기 시 다른 client 영향 X).
         """
-        async with _ws_lock:
+        with _ws_lock:
             snapshot = list(_ws_clients)  # 불변 스냅샷 — iterate 중 mutate 차단
         dead: list[WebSocket] = []
         for ws in snapshot:
@@ -1320,11 +1342,22 @@ def create_app() -> FastAPI:
             except Exception:  # noqa: BLE001 — 어떤 send 실패도 dead 처리
                 dead.append(ws)
         if dead:
-            async with _ws_lock:
+            with _ws_lock:
                 for ws in dead:
                     _ws_clients.discard(ws)
 
+    logger.info(
+        "[create_app] step 3.13d (%.3f초): broadcast_log 정의 OK",
+        _t.monotonic() - t0,
+    )
+    _flush()
+
     log_buffer.set_broadcaster(broadcast_log)
+    logger.info(
+        "[create_app] step 3.13e (%.3f초): log_buffer.set_broadcaster OK",
+        _t.monotonic() - t0,
+    )
+    _flush()
 
     logger.info(
         "[create_app] step 3.14 (%.3f초): /logs + ws_clients/lock/broadcaster 박힘 — WebSocket 등록 시작",
@@ -1336,7 +1369,7 @@ def create_app() -> FastAPI:
     async def ws_live(websocket: WebSocket) -> None:
         """실시간 로그 broadcast — 연결 직후 최근 50줄 catch-up 후 신규 record push."""
         await websocket.accept()
-        async with _ws_lock:
+        with _ws_lock:
             _ws_clients.add(websocket)
         try:
             for line in log_buffer.get_recent(50):
@@ -1344,7 +1377,7 @@ def create_app() -> FastAPI:
             while True:
                 await websocket.receive_text()  # 클라이언트 ping 수신 (keep-alive)
         except WebSocketDisconnect:
-            async with _ws_lock:
+            with _ws_lock:
                 _ws_clients.discard(websocket)
 
     logger.info(

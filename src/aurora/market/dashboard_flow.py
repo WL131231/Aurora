@@ -137,9 +137,26 @@ class DashboardFlowAggregator:
             return self._cache[coin]
 
         # 새 fetch — 모든 거래소 병렬
+        # v0.1.96: per-provider 8초 timeout — 한 거래소 측 hang 이 다른 거래소 영향 X
+        async def _fetch_with_timeout(provider, sess) -> ExchangeSnapshot:
+            try:
+                return await asyncio.wait_for(
+                    provider.fetch_snapshot(sess, coin), timeout=8.0,
+                )
+            except TimeoutError:
+                logger.warning(
+                    "DashboardFlow %s.%s timeout (8초)", provider.EXCHANGE_NAME, coin,
+                )
+                return ExchangeSnapshot(
+                    exchange=provider.EXCHANGE_NAME,
+                    symbol=provider.symbol_for(coin),
+                    fetched_at_ms=int(time.time() * 1000),
+                    errors=["fetch: timeout 8s"],
+                )
+
         async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
             results = await asyncio.gather(
-                *[p.fetch_snapshot(session, coin) for p in self._providers],
+                *[_fetch_with_timeout(p, session) for p in self._providers],
                 return_exceptions=True,
             )
 

@@ -935,7 +935,12 @@ class BotInstance:
             return
 
         # 1. 새 봉 fetch (봉 경계 시점만 실 호출)
-        df_by_tf = await self._cache.step()
+        # v0.1.96: 15초 timeout 박음 — 거래소 ohlcv 응답 hang 시 _step 무한 대기 차단
+        try:
+            df_by_tf = await asyncio.wait_for(self._cache.step(), timeout=15.0)
+        except TimeoutError:
+            logger.warning("_cache.step timeout (15초) — 이번 step skip")
+            return
 
         # 2. 현재가 (가장 빠른 TF 의 마지막 close)
         primary_tf = self._timeframes[0]
@@ -953,9 +958,14 @@ class BotInstance:
             # paper 모드 / 실패 시 close fallback.
             if settings.run_mode != "paper":
                 try:
-                    rt_price = await self._client.fetch_ticker(self._symbol)
+                    # v0.1.96: 5초 timeout — ticker hang 시 close fallback
+                    rt_price = await asyncio.wait_for(
+                        self._client.fetch_ticker(self._symbol), timeout=5.0,
+                    )
                     if rt_price is not None:
                         current_price = rt_price
+                except TimeoutError:
+                    logger.debug("fetch_ticker timeout (5초) — close fallback")
                 except Exception as e:  # noqa: BLE001 — ticker 실패 시 close fallback
                     logger.debug("fetch_ticker 실패 (close fallback): %s", e)
 
@@ -965,7 +975,14 @@ class BotInstance:
             # v0.1.52 fix: 3회 연속 None 일 때만 reset — Bybit demo 일시 응답
             # 지연 보호 (사용자 보고 v0.1.51 외부 포지션 오인지).
             if settings.run_mode != "paper":
-                actual = await self._client.fetch_position(self._symbol)
+                # v0.1.96: 5초 timeout — fetch_position hang 시 None 처리 (3회 연속이면 reset)
+                try:
+                    actual = await asyncio.wait_for(
+                        self._client.fetch_position(self._symbol), timeout=5.0,
+                    )
+                except TimeoutError:
+                    logger.warning("fetch_position timeout (5초) — None 처리")
+                    actual = None
                 if actual is None:
                     self._fetch_position_none_count += 1
                     if self._fetch_position_none_count >= 3:
@@ -1153,8 +1170,15 @@ class BotInstance:
         # → 다음 신호 발생 시 또 WARNING 출력 (반복 로그). 신호 평가 전 detect 하면
         # flag 가 외부 포지션 자체 변화에만 반응 → WARNING 1회 보장.
         # paper 모드는 fetch_position 항상 None 정책 → sync skip.
+        # v0.1.96: 5초 timeout — hang 시 None (외부 포지션 X 가정으로 진행).
         if settings.run_mode != "paper":
-            external = await self._client.fetch_position(self._symbol)
+            try:
+                external = await asyncio.wait_for(
+                    self._client.fetch_position(self._symbol), timeout=5.0,
+                )
+            except TimeoutError:
+                logger.warning("fetch_position (외부) timeout (5초) — None 가정")
+                external = None
             if external is not None:
                 # v0.1.59: dust 잔여 자동 정리 — 분할 익절 후 0.001 BTC 같은 잔여를
                 # 외부 포지션으로 오인지하지 말고 봇이 reduce_only 로 정리.
@@ -1254,7 +1278,12 @@ class BotInstance:
         market_trend: MarketTrend | None = None
         if self._coinalyze is not None:
             try:
-                market_trend = await self._coinalyze.fetch_trend_for_symbol(self._symbol)
+                # v0.1.96: 5초 timeout — Coinalyze hang 시 진입 평가 멈추는 본질 X
+                market_trend = await asyncio.wait_for(
+                    self._coinalyze.fetch_trend_for_symbol(self._symbol), timeout=5.0,
+                )
+            except TimeoutError:
+                logger.warning("Coinalyze fetch_trend timeout (5초) — None (필터 X)")
             except Exception as e:  # noqa: BLE001 — 네트워크 실패 시 None
                 logger.debug("Coinalyze fetch 실패 (진입 평가 진행): %s", e)
                 market_trend = None

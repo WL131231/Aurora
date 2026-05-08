@@ -412,6 +412,25 @@ def test_chart_with_cache_returns_candles_and_indicators() -> None:
 
 
 # ============================================================
+# Indicators list (v0.1.98) — UI 측 dynamic 카테고리 endpoint
+# ============================================================
+
+
+def test_indicators_list_returns_categories() -> None:
+    """v0.1.98: /indicators/list 측 7 카테고리 반환 — UI hardcode desync 차단."""
+    r = _client().get("/indicators/list")
+    assert r.status_code == 200
+    body = r.json()
+    assert "categories" in body
+    assert isinstance(body["categories"], list)
+    # 현재 7 카테고리 (EMA / RSI / BB / MA / Ichimoku / Harmonic / 가격 매매)
+    assert len(body["categories"]) == 7
+    assert "EMA" in body["categories"]
+    assert "Harmonic" in body["categories"]
+    assert "가격 매매" in body["categories"]
+
+
+# ============================================================
 # Dashboard Flow (v0.1.87) — Phase 3 거래소 합본
 # ============================================================
 

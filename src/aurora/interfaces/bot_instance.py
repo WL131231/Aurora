@@ -32,6 +32,7 @@ from collections.abc import Callable
 
 import ccxt
 
+from aurora import timeouts as _to  # v0.1.98: 중앙 timeout 상수
 from aurora.config import settings
 from aurora.core.risk import TpSlConfig, build_risk_plan
 from aurora.core.signal import compose_entry, compose_exit
@@ -127,6 +128,18 @@ _DEFAULT_LEVERAGE = 10
 # 외부 포지션으로 오인지하지 않고 봇이 reduce_only 로 자동 정리. 사용자가 직접 그렇게
 # 작은 포지션 박을 가능성 0 (BTC minimum order 보다 작거나 비슷한 수준).
 _DUST_NOTIONAL_USD: float = 200.0
+
+# v0.1.98: qty 비교 임계값 (audit P3 #18) — 곳곳 hardcode 1e-3 / 1e-6 / 1e-9 박힘.
+# 명명 상수로 박아 의미 명확화 + 튜닝 시 한 곳 수정.
+_QTY_USER_DIFF_THRESHOLD: float = 1e-3
+"""봇 _remaining_qty 와 거래소 actual.qty 측 차이 임계값.
+초과 시 사용자 직접 거래로 인지 (WARNING 박힘). 1e-3 = 0.001 BTC ≈ $80 ~ Bybit step size 충돌 회피."""
+
+_QTY_ROUNDING_THRESHOLD: float = 1e-6
+"""작은 라운딩 차이 임계값 — silent min 갱신 트리거. 1e-6 ~ Bybit step 라운딩 본질."""
+
+_QTY_ZERO_THRESHOLD: float = 1e-9
+"""qty 0 으로 간주 임계값 — float 부정확성 방어. 1e-9 ~ 거래소 측 0 표시 본질."""
 
 # 지표 트리거 패널 카테고리 (UI 표시 7개) — signal.source 의 prefix 매핑.
 # v0.1.14 — 사용자가 "각 지표 현재 어떻게 보고 있나" 한눈에 확인용.
@@ -881,7 +894,7 @@ class BotInstance:
         saved_remaining = float(saved.get("remaining_qty", plan.position.coin_amount))
         # qty 10% 이상 차이 = 외부 추가/부분 청산 의심. 작은 차이는 부동소수 + 거래소
         # 반올림 허용 (Bybit 0.001 단위 등).
-        denom = max(saved_remaining, 1e-9)
+        denom = max(saved_remaining, _QTY_ZERO_THRESHOLD)
         if abs(actual.qty - saved_remaining) / denom > 0.1:
             logger.warning(
                 "재시작: 영속 qty(%.6f) != 거래소(%.6f) — 차이 큼, 복원 skip",
@@ -969,8 +982,11 @@ class BotInstance:
 
         # 1. 새 봉 fetch (봉 경계 시점만 실 호출)
         # v0.1.96: 15초 timeout 박음 — 거래소 ohlcv 응답 hang 시 _step 무한 대기 차단
+        # v0.1.98: timeout 상수 aurora.timeouts 박힘 (중앙 관리)
         try:
-            df_by_tf = await asyncio.wait_for(self._cache.step(), timeout=15.0)
+            df_by_tf = await asyncio.wait_for(
+                self._cache.step(), timeout=_to.BOT_CACHE_FETCH_TIMEOUT_SEC,
+            )
         except TimeoutError:
             logger.warning("_cache.step timeout (15초) — 이번 step skip")
             return
@@ -993,7 +1009,8 @@ class BotInstance:
                 try:
                     # v0.1.96: 5초 timeout — ticker hang 시 close fallback
                     rt_price = await asyncio.wait_for(
-                        self._client.fetch_ticker(self._symbol), timeout=5.0,
+                        self._client.fetch_ticker(self._symbol),
+                        timeout=_to.BOT_TICKER_TIMEOUT_SEC,
                     )
                     if rt_price is not None:
                         current_price = rt_price
@@ -1011,7 +1028,8 @@ class BotInstance:
                 # v0.1.96: 5초 timeout — fetch_position hang 시 None 처리 (3회 연속이면 reset)
                 try:
                     actual = await asyncio.wait_for(
-                        self._client.fetch_position(self._symbol), timeout=5.0,
+                        self._client.fetch_position(self._symbol),
+                        timeout=_to.BOT_POSITION_TIMEOUT_SEC,
                     )
                 except TimeoutError:
                     logger.warning("fetch_position timeout (5초) — None 처리")
@@ -1046,17 +1064,17 @@ class BotInstance:
                     logger.warning("fetch_position 응답 측 qty=None — qty sync skip")
                 else:
                     qty_diff = abs(act_qty - self._executor._remaining_qty)
-                    if qty_diff > 1e-3:
+                    if qty_diff > _QTY_USER_DIFF_THRESHOLD:
                         logger.warning(
                             "qty 불일치: 봇 %.4f / 거래소 %.4f (차이 %.4f) → min 보수 갱신",
                             self._executor._remaining_qty, act_qty, qty_diff,
                         )
-                    if qty_diff > 1e-6:
+                    if qty_diff > _QTY_ROUNDING_THRESHOLD:
                         # 작은 라운딩 차이 (1e-6~1e-3) 도 min 갱신은 함 (silent)
                         self._executor._remaining_qty = min(
                             self._executor._remaining_qty, act_qty,
                         )
-                        if self._executor._remaining_qty <= 1e-9:
+                        if self._executor._remaining_qty <= _QTY_ZERO_THRESHOLD:
                             # 거래소 측 0 (사용자 전량 청산) — reset
                             self._executor.reset_position()
                             return
@@ -1078,7 +1096,7 @@ class BotInstance:
                         entry_qty * (allocations[new_tp_idx] / 100.0),
                         self._executor._remaining_qty,
                     )
-                    if partial_qty > 1e-9:
+                    if partial_qty > _QTY_ZERO_THRESHOLD:
                         try:
                             _, closed = await self._executor.close_position(
                                 qty=partial_qty, reason="tp_partial",
@@ -1212,7 +1230,8 @@ class BotInstance:
         if settings.run_mode != "paper":
             try:
                 external = await asyncio.wait_for(
-                    self._client.fetch_position(self._symbol), timeout=5.0,
+                    self._client.fetch_position(self._symbol),
+                    timeout=_to.BOT_POSITION_TIMEOUT_SEC,
                 )
             except TimeoutError:
                 logger.warning("fetch_position (외부) timeout (5초) — None 가정")
@@ -1288,6 +1307,8 @@ class BotInstance:
         # 지표 트리거 상태 갱신 (v0.1.14, v0.1.18 4-state 확장).
         # 값: "long" / "short" (활성) / "neutral" (대기) / "disabled" (Selectable 꺼짐).
         # Fixed 지표 (EMA/RSI) 는 항상 enabled. Selectable 4 종은 use_* 토글에 따라.
+        # v0.1.98: in-place update 박음 (audit P2 #13) — 매 step rebuild 대신 같은 dict
+        # 측 값만 갱신. dict 객체 GC 부담 ↓ + property 측 dict() 복사 자체 가벼움.
         cfg = self._strategy_config
         disabled_map = {
             "BB": not cfg.use_bollinger,
@@ -1295,10 +1316,10 @@ class BotInstance:
             "Ichimoku": not cfg.use_ichimoku,
             "Harmonic": not cfg.use_harmonic,
         }
-        self._last_indicator_status = {
-            cat: ("disabled" if disabled_map.get(cat, False) else "neutral")
-            for cat in _INDICATOR_CATEGORIES
-        }
+        for cat in _INDICATOR_CATEGORIES:
+            self._last_indicator_status[cat] = (
+                "disabled" if disabled_map.get(cat, False) else "neutral"
+            )
         for sig in signals:
             cat = _categorize_source(sig.source)
             if cat is not None and self._last_indicator_status[cat] != "disabled":
@@ -1329,7 +1350,8 @@ class BotInstance:
             try:
                 # v0.1.96: 5초 timeout — Coinalyze hang 시 진입 평가 멈추는 본질 X
                 market_trend = await asyncio.wait_for(
-                    self._coinalyze.fetch_trend_for_symbol(self._symbol), timeout=5.0,
+                    self._coinalyze.fetch_trend_for_symbol(self._symbol),
+                    timeout=_to.BOT_TREND_TIMEOUT_SEC,
                 )
             except TimeoutError:
                 logger.warning("Coinalyze fetch_trend timeout (5초) — None (필터 X)")

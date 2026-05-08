@@ -18,11 +18,12 @@ import time
 import aiohttp
 
 from aurora.market.exchanges.base import ExchangeMarketData, ExchangeSnapshot
+from aurora.timeouts import make_exchange_timeout
 
 logger = logging.getLogger(__name__)
 
 _BITGET_BASE = "https://api.bitget.com"
-_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=8)
+_HTTP_TIMEOUT = make_exchange_timeout()  # v0.1.98: central config
 _LS_PERIOD = "5m"
 _PRODUCT_TYPE = "usdt-futures"
 

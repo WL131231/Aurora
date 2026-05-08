@@ -29,9 +29,9 @@ def test_launcher_mutex_name_distinct_from_body_mutex() -> None:
     Why: launcher + body 동시 실행은 정상 흐름. 같은 mutex 박으면 launcher
     살아있는 동안 body spawn 차단됨.
     """
-    from aurora.interfaces.webview import _MUTEX_NAME as body_name
+    from aurora.interfaces import webview as body_webview_mod
 
-    assert launcher_mod._LAUNCHER_MUTEX_NAME != body_name
+    assert launcher_mod._LAUNCHER_MUTEX_NAME != body_webview_mod._MUTEX_NAME
     assert "Launcher" in launcher_mod._LAUNCHER_MUTEX_NAME
 
 

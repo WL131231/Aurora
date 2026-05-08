@@ -443,6 +443,20 @@ def _find_bot_match(
 
 def create_app() -> FastAPI:
     """FastAPI 앱 인스턴스 생성 + CORS + 엔드포인트 등록."""
+    # v0.1.103: hang 진단 — \"create_app 호출 중\" 박힌 후 안 박히는 본질 추적.
+    # 매 단계 measure 박아 정확한 hang 지점 박힘.
+    import time as _t
+
+    def _flush() -> None:
+        for h in logging.getLogger().handlers:
+            try:
+                h.flush()
+            except (OSError, ValueError):
+                pass
+
+    t0 = _t.monotonic()
+    logger.info("[create_app] step 1: 진입 — lifespan 정의 시작")
+    _flush()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -458,12 +472,16 @@ def create_app() -> FastAPI:
         heartbeat_task.cancel()
         logger.info("FastAPI lifespan shutdown")
 
+    logger.info("[create_app] step 2 (%.3f초): FastAPI() 생성 시작", _t.monotonic() - t0)
+    _flush()
     app = FastAPI(
         title="Aurora API",
         version="0.1.0",
         description="고빈도 룰 기반 자동매매 봇 백엔드",
         lifespan=lifespan,
     )
+    logger.info("[create_app] step 3 (%.3f초): FastAPI() 생성 OK", _t.monotonic() - t0)
+    _flush()
 
     # ───── CORS ─────────────────────────────────────
     # Pywebview 의 file:// origin 은 ``null`` 로 들어오므로 ``allow_origins=["*"]``
@@ -475,6 +493,11 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    logger.info(
+        "[create_app] step 3.5 (%.3f초): CORS middleware 박힘 — endpoint 등록 시작",
+        _t.monotonic() - t0,
+    )
+    _flush()
 
     # ───── Health / Status ──────────────────────────
 
@@ -1270,4 +1293,9 @@ def create_app() -> FastAPI:
             async with _ws_lock:
                 _ws_clients.discard(websocket)
 
+    logger.info(
+        "[create_app] step 4 (%.3f초): 모든 endpoint 등록 끝 — return app",
+        _t.monotonic() - t0,
+    )
+    _flush()
     return app

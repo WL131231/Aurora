@@ -323,10 +323,15 @@ def _start_api_server() -> None:
     try:
         logger.info("api thread 시작 — create_app 호출 중")
         _flush()
+        # v0.1.103: create_app() 호출 측 전후 박음 — 사용자 보고 (2026-05-08)
+        # \"api thread 시작\" 박힌 후 다음 로그 안 박힘 → create_app() 측 hang 추정
+        # 정밀 진단 박음.
+        import time as _t
+        t0 = _t.monotonic()
         app = create_app()
         logger.info(
-            "uvicorn.run 호출 직전: host=%s port=%s",
-            settings.api_host, settings.api_port,
+            "create_app() 반환 OK (%.3f초) — uvicorn.run 호출 직전: host=%s port=%s",
+            _t.monotonic() - t0, settings.api_host, settings.api_port,
         )
         _flush()
         uvicorn.run(

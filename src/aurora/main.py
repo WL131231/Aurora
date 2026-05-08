@@ -72,8 +72,18 @@ def main() -> None:
     log_file = _setup_body_file_logging()
     if log_file is not None:
         import logging
-        logging.getLogger(__name__).info(
+        import os as _os
+        log = logging.getLogger(__name__)
+        log.info(
             "Aurora body main() 진입 — file log: %s", log_file,
+        )
+        # v0.1.103: launcher 환경 인식 측 진단 박음 — 사용자 보고 (2026-05-08)
+        # 부모 PID 측 Aurora.exe 박힌 본질 측 self-spawn (apply_pending_update)
+        # 흐름 가능성. AURORA_FROM_LAUNCHER env 측 verify 박음.
+        log.info(
+            "env: AURORA_FROM_LAUNCHER=%s | parent_pid=%s | own_pid=%s",
+            _os.environ.get("AURORA_FROM_LAUNCHER", "(unset)"),
+            _os.getppid(), _os.getpid(),
         )
 
     # 1. 자동 업데이트 적용 (직전 실행에서 다운된 .new 가 있으면 swap + 재시작)

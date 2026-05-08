@@ -1091,13 +1091,19 @@ class LauncherApi:
         self._start_readiness_polling()
         return {"success": True, "message": "Aurora 시작됨"}
 
-    def _start_readiness_polling(self) -> None:
+    def _start_readiness_polling(
+        self, ready_timeout: float = 60.0, ready_interval: float = 0.5,
+    ) -> None:
         """v0.1.116 (ChoYoon #133 ⭐⭐⭐⭐⭐): 본체 startup 측 ``/health`` 200 OK
         박힐 때까지 polling → ready 시점 launcher hide.
 
-        매 0.5초 체크, 60초 timeout. 사용자 측 시간 분해 — 본체 startup ~37초
-        + buffer 23초. timeout 초과 측 launcher hide 강행 (본체 측 startup
+        매 0.5초 체크, 60초 timeout (default). 사용자 측 시간 분해 — 본체 startup
+        ~37초 + buffer 23초. timeout 초과 측 launcher hide 강행 (본체 측 startup
         실패 가능, 사용자 측 status 측 표시).
+
+        Args:
+            ready_timeout: polling deadline (테스트 측 짧게 박음).
+            ready_interval: poll attempt 간격.
 
         Status 갱신:
             - 매 5초 측 elapsed 박음 ("본체 시작 중... (12초)")
@@ -1105,11 +1111,10 @@ class LauncherApi:
             - timeout 측 ⚠ 표기 + 1초 후 hide 강행
         """
         ready_url = "http://127.0.0.1:8765/health"
-        ready_interval = 0.5
-        ready_timeout = 60.0
 
         def _poll() -> None:
-            deadline = time.time() + ready_timeout
+            poll_start = time.time()
+            deadline = poll_start + ready_timeout
             attempt = 0
             while time.time() < deadline:
                 attempt += 1

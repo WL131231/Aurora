@@ -157,6 +157,17 @@ def test_launcher_api_check_update_has_update(tmp_path, monkeypatch):
 # ============================================================
 
 
+def _wait_for(predicate, timeout=3.0, interval=0.05):
+    """thread 측 결과 박힐 때까지 짧게 polling — flaky test 회피."""
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return False
+
+
 def test_readiness_polling_hides_when_health_ok():
     """본체 /health 200 OK 박힐 때 _hide_launcher_window 측 호출 박힘."""
     import time
@@ -174,18 +185,21 @@ def test_readiness_polling_hides_when_health_ok():
     fake_resp.__exit__ = MagicMock(return_value=False)
 
     with patch("aurora_launcher.launcher.urllib.request.urlopen", return_value=fake_resp):
-        api._start_readiness_polling()
-        # thread daemon — 짧게 대기 (200ms 측 ready 박힘 + 0.3s sleep 박힘)
-        time.sleep(1.0)
+        api._start_readiness_polling(ready_timeout=2.0, ready_interval=0.05)
+        # thread 측 hide 호출 박힐 때까지 대기
+        assert _wait_for(lambda: api._hide_launcher_window.called)
 
-    api._hide_launcher_window.assert_called()
     # status 측 ✓ 박힌 갱신 박힘
     calls = [c.args[0] for c in api._update_status_js.call_args_list]
     assert any("✓ Aurora 시작됨" in c for c in calls)
 
 
 def test_readiness_polling_timeout_hides_anyway():
-    """/health 측 끝까지 응답 X → timeout 박힘 + hide 강행 + ⚠ status."""
+    """/health 측 끝까지 응답 X → timeout 박힘 + hide 강행 + ⚠ status.
+
+    real time 측 ready_timeout=0.3 박아 빨리 만료. 시간 mock X (thread 측
+    logger 등 time.time 호출 측 안 깨지게).
+    """
     import time
     from unittest.mock import MagicMock
     from urllib.error import URLError
@@ -195,17 +209,12 @@ def test_readiness_polling_timeout_hides_anyway():
     api._hide_launcher_window = MagicMock()
     api._update_status_js = MagicMock()
 
-    # urlopen 측 항상 raise → timeout 박힘
     with patch("aurora_launcher.launcher.urllib.request.urlopen",
-               side_effect=URLError("connection refused")), \
-         patch("aurora_launcher.launcher.time.time",
-               side_effect=[api._aurora_spawn_at, api._aurora_spawn_at + 100,
-                            api._aurora_spawn_at + 100]):
-        # spawn_at + 100 = deadline (60s) 이미 초과 → 즉시 timeout
-        api._start_readiness_polling()
-        time.sleep(2.0)
+               side_effect=URLError("connection refused")):
+        api._start_readiness_polling(ready_timeout=0.3, ready_interval=0.05)
+        # timeout 박힌 후 hide 강행 박힐 때까지 대기 (1초 sleep + buffer)
+        assert _wait_for(lambda: api._hide_launcher_window.called, timeout=4.0)
 
-    api._hide_launcher_window.assert_called()
     calls = [c.args[0] for c in api._update_status_js.call_args_list]
     # ⚠ 또는 hide 강행 status 박힘
     assert any("응답 X" in c or "hide 강행" in c or "⚠" in c for c in calls)

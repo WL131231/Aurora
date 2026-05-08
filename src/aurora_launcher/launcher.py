@@ -859,15 +859,40 @@ class LauncherApi:
 
     def _start_aurora_polling(self) -> None:
         """v0.1.80: 본체 process 종료 감지 polling thread.
+        v0.1.83: marker file 검사 추가 — 본체 측 /relaunch 시 marker 박음
+        → launcher 가 본체 process.terminate() 호출 (본체 자체 종료 의무 X).
 
         본체 종료 시 launcher webview show + START 버튼 활성. 사용자 측
-        "본체 X 클릭 → launcher 등장" 흐름 자연 본질.
+        "본체 X 클릭 또는 재시작하기 → launcher 등장" 흐름 자연 본질.
         """
+        marker_path = _aurora_data_dir() / ".relaunch_request"
+
         def _poll() -> None:
             while True:
                 proc = self._aurora_proc
                 if proc is None:
                     break
+                # v0.1.83: marker 검사 — 본체 측 /relaunch 호출 시 박음
+                if marker_path.exists():
+                    logger.info(
+                        "marker 발견 (%s) → 본체 process.terminate() 호출",
+                        marker_path,
+                    )
+                    try:
+                        proc.terminate()
+                        # 짧은 대기 후 안 죽으면 kill
+                        try:
+                            proc.wait(timeout=3.0)
+                        except subprocess.TimeoutExpired:
+                            logger.warning("terminate 후도 살아있음 → kill")
+                            proc.kill()
+                    except OSError as e:
+                        logger.warning("본체 종료 실패: %s", e)
+                    # marker 정리
+                    try:
+                        marker_path.unlink()
+                    except OSError:
+                        pass
                 rc = proc.poll()
                 if rc is not None:
                     # 본체 종료 감지

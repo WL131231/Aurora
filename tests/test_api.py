@@ -314,19 +314,28 @@ def test_market_trend_returns_disabled_without_api_key_v0_1_54() -> None:
     assert body["trends"] == []
 
 
-def test_relaunch_without_launcher_path_v0_1_43(monkeypatch) -> None:
-    """v0.1.43: ``/relaunch`` 호출 시 launcher path env 없으면 실패 응답.
+def test_relaunch_marker_pattern_v0_1_83(monkeypatch, tmp_path) -> None:
+    """v0.1.83: ``/relaunch`` 측 marker file 박음 패러다임.
 
-    Why: 사용자가 launcher 없이 직접 본체 .exe 실행한 경우 launcher path 모름.
-    위험한 spawn 방지 위해 명시 실패 응답 (silent 종료 X).
+    이전 (v0.1.43~v0.1.82): launcher_path env 검사 + launcher Popen + 본체 자체
+    종료. 본체 자체 종료 9 회 fail (사용자 보고).
+
+    새 패러다임 (v0.1.83): 본체 측 marker file 박음 + response 반환. launcher
+    polling thread 가 marker 발견 시 process.terminate() 호출 (본체 kill).
+    본체 자체 종료 의무 자체 X.
     """
+    # tmp_path 측 LOCALAPPDATA fake — 본체 marker 박는 위치
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.delenv("AURORA_LAUNCHER_PATH", raising=False)
     client = _client()
     r = client.post("/relaunch")
     assert r.status_code == 200
     body = r.json()
-    assert body["success"] is False
-    assert "launcher" in body["message"].lower()
+    # launcher_path env 검사 X — marker 박음 자체 success 본질
+    assert body["success"] is True
+    # marker file 박힘 verify
+    marker_path = tmp_path / "Aurora" / ".relaunch_request"
+    assert marker_path.exists(), f"marker file 박힘 X: {marker_path}"
 
 
 # ============================================================

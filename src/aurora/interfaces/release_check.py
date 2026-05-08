@@ -41,6 +41,8 @@ _state: dict[str, Any] = {
     "pending_release": None,   # dict | None — 새 버전 정보
     "last_check_ts": None,     # int | None — 마지막 체크 ms
     "task": None,              # asyncio.Task | None — 폴링 루프
+    "_notify_tag": None,       # str | None — 마지막 알림 전송 tag (중복 전송 방지)
+    "_notify_cb": None,        # callable | None — 새 버전 발견 시 호출 (telegram 등)
 }
 
 
@@ -99,6 +101,14 @@ def check_once() -> None:
     }
     logger.info("새 버전 발견: %s (현재 v%s)", tag, __version__)
 
+    # 새 tag 첫 발견 시만 콜백 — 5분 주기 재체크마다 중복 알림 방지
+    if tag != _state["_notify_tag"] and callable(_state["_notify_cb"]):
+        _state["_notify_tag"] = tag
+        try:
+            _state["_notify_cb"](_state["pending_release"])
+        except Exception as e:
+            logger.warning("release 알림 콜백 실패: %s", e)
+
 
 def get_pending_release() -> dict | None:
     """현재 pending release dict 또는 None — UI 가 노출용."""
@@ -154,6 +164,8 @@ def reset_state() -> None:
     """test 격리용 — 모든 state 초기화."""
     _state["pending_release"] = None
     _state["last_check_ts"] = None
+    _state["_notify_tag"] = None
+    _state["_notify_cb"] = None
     if _state["task"] is not None and not _state["task"].done():
         _state["task"].cancel()
     _state["task"] = None

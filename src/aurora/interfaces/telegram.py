@@ -192,6 +192,7 @@ class TelegramBot:
             ("toggleichimoku", self.cmd_toggleichimoku),
             ("positions", self.cmd_positions),
             ("equity", self.cmd_equity),
+            ("update", self.cmd_update),
         ]
         for cmd, fn in pairs:
             self._app.add_handler(CommandHandler(cmd, fn))
@@ -211,6 +212,10 @@ class TelegramBot:
             self._daily_briefing,
             time=dt_time(9, 0, tzinfo=_KST),
         )
+
+        # release_check 새 버전 발견 콜백 등록 — 5분 주기 폴링 중 첫 발견 시 알림 전송
+        from aurora.interfaces import release_check as _rc
+        _rc._state["_notify_cb"] = self._on_new_release
 
         await self._app.initialize()
         await self._app.start()
@@ -450,6 +455,63 @@ class TelegramBot:
             _SEP,
             _kst_now_str(),
         ])
+        await update.message.reply_text(text)
+
+
+    def _on_new_release(self, pending: dict) -> None:
+        """release_check 콜백 — 새 버전 첫 발견 시 Telegram 알림 전송.
+
+        Args:
+            pending: release_check._state["pending_release"] 딕셔너리.
+        """
+        from aurora import __version__
+
+        text = "\n".join([
+            _SEP,
+            "🆕 새 버전 발견",
+            _SEP,
+            f"현재 버전: v{__version__}",
+            f"새 버전:   {pending['tag']}",
+            f"릴리스 노트: {pending['html_url']}",
+            _SEP,
+            _kst_now_str(),
+        ])
+        self.send_alert_threadsafe(text)
+
+    async def cmd_update(self, update, _context) -> None:  # type: ignore[no-untyped-def]
+        """/update — 현재 버전 + 업데이트 여부 조회.
+
+        Args:
+            update: Telegram Update 객체.
+            _context: 미사용.
+        """
+        if not self._is_authorized(update.effective_chat.id):
+            return
+        from aurora import __version__
+        from aurora.interfaces import release_check
+
+        pending = release_check.get_pending_release()
+        if pending:
+            text = "\n".join([
+                _SEP,
+                "🆕 업데이트 가능",
+                _SEP,
+                f"현재 버전: v{__version__}",
+                f"새 버전:   {pending['tag']}",
+                f"릴리스 노트: {pending['html_url']}",
+                _SEP,
+                _kst_now_str(),
+            ])
+        else:
+            text = "\n".join([
+                _SEP,
+                "✅ 최신 버전",
+                _SEP,
+                f"현재 버전: v{__version__}",
+                "업데이트 없음",
+                _SEP,
+                _kst_now_str(),
+            ])
         await update.message.reply_text(text)
 
 

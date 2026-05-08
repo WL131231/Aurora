@@ -771,138 +771,52 @@ def create_app() -> FastAPI:
 
     @app.post("/relaunch", response_model=ControlResponse)
     async def relaunch_via_launcher() -> ControlResponse:
-        """본체 자체 재시작 — launcher 다시 spawn + 본체 종료 (v0.1.43).
+        """본체 종료 요청 — file marker 박음 (v0.1.83).
 
-        UI 업데이트 팝업의 "재시작하기" 버튼이 호출. launcher 가 본체 spawn 시
-        박은 ``AURORA_LAUNCHER_PATH`` env 사용해 launcher 다시 실행 +
-        ``AURORA_LAUNCHER_AUTO_START=1`` env 박아 launcher 가 시작 즉시 자동
-        START. 본체는 응답 반환 후 1초 뒤 자기 종료.
+        v0.1.82~v0.1.42 옛 패러다임 (본체 자체 종료 9 회 시도 모두 fail) 폐기.
+        새 패러다임 (사용자 제안) — launcher 가 본체 process 죽이는 책임.
 
-        Why: 새 .exe 다운 후 사용자가 한 번 클릭으로 본체 재시작 흐름. 직접 본체
-        실행 모드 (launcher 없이) 면 launcher path env 없음 → 실패 응답.
+        흐름:
+            1. 본체 ``%LOCALAPPDATA%\\Aurora\\.relaunch_request`` marker 박음
+            2. response 반환 (UI 표시)
+            3. launcher polling thread 가 marker 발견 → process.terminate() 호출
+            4. 본체 종료 → launcher polling 의 일반 종료 감지 → launcher webview show
+
+        본체 자체 종료 의무 자체 X — launcher 가 별개 process 라 무조건 동작.
         """
         import os as _os
-        import platform as _platform
-        import subprocess as _subprocess
+        from pathlib import Path as _Path
 
-        # v0.1.52: 단계별 trace log — 무반응 root cause 디버깅 가능 (사용자 보고
-        # v0.1.50 fix 후도 안 먹힘). 로그 panel + WebSocket /ws/live 통해 사용자
-        # 가 어디서 막힌지 가시화.
-        logger.info("[/relaunch] step 1/5 — launcher_path env 확인 시작")
+        # v0.1.83: marker file 패러다임 — 본체 측 종료 의무 자체 X.
+        # launcher polling thread (v0.1.80) 가 marker 발견 시 process.terminate()
+        # 호출 → 본체 종료 → launcher webview show. 본체 자체 종료 9 회 fail
+        # (v0.1.42~v0.1.58/v0.1.61) 흐름 폐기.
+        local_app = _os.environ.get("LOCALAPPDATA")
+        if local_app:
+            marker_dir = _Path(local_app) / "Aurora"
+        else:
+            # macOS / Linux fallback — ~/Library/Application Support/Aurora 또는 home
+            import platform as _platform
+            if _platform.system() == "Darwin":
+                marker_dir = _Path.home() / "Library" / "Application Support" / "Aurora"
+            else:
+                marker_dir = _Path.home() / ".aurora"
 
-        launcher_path = _os.environ.get("AURORA_LAUNCHER_PATH")
-        if not launcher_path or not _os.path.exists(launcher_path):
-            logger.warning(
-                "[/relaunch] FAIL — launcher_path env 없음 또는 존재 X (env=%s)",
-                launcher_path,
-            )
+        try:
+            marker_dir.mkdir(parents=True, exist_ok=True)
+            marker_path = marker_dir / ".relaunch_request"
+            marker_path.write_text(str(_os.getpid()), encoding="utf-8")
+            logger.info("[/relaunch] marker 박음: %s", marker_path)
+        except OSError as e:
+            logger.warning("[/relaunch] marker 박음 실패: %s", e)
             return ControlResponse(
                 success=False,
-                message="launcher 경로 없음 — 본체 직접 실행 모드 (launcher 통해 시작 필요)",
+                message=f"marker 박음 실패: {e}",
             )
-        logger.info("[/relaunch] step 2/5 — launcher_path 확인 OK: %s", launcher_path)
 
-        # PyInstaller 잔재 env 제거 + auto-start flag
-        clean_env = {
-            k: v for k, v in _os.environ.items()
-            if not (k.startswith("_MEI") or k.startswith("_PYI"))
-        }
-        clean_env["AURORA_LAUNCHER_AUTO_START"] = "1"
-        # v0.1.61: 새 launcher 가 시작 즉시 본체 (자기) PID 강제 종료.
-        # Why: 본체 자기 죽이기 (v0.1.42~v0.1.58 8회 시도) 모두 일부 환경에서
-        # 실패. launcher 는 별개 process group → taskkill /F /T 무조건 동작.
-        clean_env["AURORA_KILL_PARENT_PID"] = str(_os.getpid())
-        # 본체 자기-launcher 마커 제거 (새 launcher 가 본체로 잘못 인식 방지)
-        clean_env.pop("AURORA_FROM_LAUNCHER", None)
-
-        flags = 0
-        if _platform.system() == "Windows":
-            DETACHED_PROCESS = 0x00000008  # noqa: N806
-            CREATE_NEW_PROCESS_GROUP = 0x00000200  # noqa: N806
-            CREATE_BREAKAWAY_FROM_JOB = 0x01000000  # noqa: N806
-            flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
-
-        logger.info("[/relaunch] step 3/5 — launcher Popen 시작 (flags=0x%x)", flags)
-        try:
-            popen_proc = _subprocess.Popen(  # noqa: S603 — launcher path env 검증됨
-                [launcher_path],
-                env=clean_env,
-                creationflags=flags,
-                close_fds=True,
-                cwd=_os.path.dirname(launcher_path),
-            )
-            logger.info(
-                "[/relaunch] step 4/5 — Popen 성공 (pid=%d)", popen_proc.pid,
-            )
-        except OSError as e:
-            logger.exception("[/relaunch] FAIL — launcher Popen OSError: %s", e)
-            return ControlResponse(success=False, message=f"launcher 실행 실패: {e}")
-
-        # v0.1.58: 외부 watchdog cmd 로 taskkill /F — 가장 robust 한 강제 종료.
-        # Why: v0.1.46/48/50/52/56 fallback (os._exit / ExitProcess / sys.exit) 모두
-        # 사용자 환경에서 먹통 (PyInstaller frozen + uvicorn + threading + webview
-        # 복합 hold). 자기 자신 죽이기는 hook 들이 막아도, 외부 cmd 프로세스는
-        # 무조건 동작. taskkill /F /PID <self_pid> 가 OS-level 종료라 모든 hook 우회.
-        #
-        # 흐름:
-        #   1) 외부 detached cmd 프로세스 spawn (timeout 1.5s 대기 후 taskkill /F)
-        #   2) 응답 반환 — UI 가 "재시작 중..." 토스트 표시
-        #   3) 1.5초 후 외부 cmd 가 본체 강제 종료 → launcher 가 새 본체 spawn
-        # 자체 종료 (os._exit / ExitProcess / sys.exit) 도 백업으로 시도 — 외부
-        # watchdog 도착 전에 먼저 끝나면 더 좋음.
-        import threading as _threading
-        import time as _time
-
-        if _platform.system() == "Windows":
-            self_pid = _os.getpid()
-            # /T = 자식 프로세스도 함께. /F = 강제 종료. timeout 1.5s = 응답 도달
-            # + UI 토스트 노출 시간 확보. CREATE_NO_WINDOW = cmd 창 안 뜸.
-            kill_cmd = f'timeout /t 2 /nobreak >nul & taskkill /F /T /PID {self_pid}'
-            CREATE_NO_WINDOW = 0x08000000  # noqa: N806
-            try:
-                _subprocess.Popen(  # noqa: S602 — self pid 만 박힘 (외부 입력 X)
-                    kill_cmd,
-                    shell=True,
-                    creationflags=(
-                        DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-                        | CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW
-                    ),
-                    close_fds=True,
-                )
-                logger.info(
-                    "[/relaunch] watchdog cmd spawn — 2초 후 taskkill /F /PID %d",
-                    self_pid,
-                )
-            except OSError as e:
-                logger.warning("[/relaunch] watchdog cmd spawn 실패: %s", e)
-
-        def _shutdown_thread() -> None:
-            """자체 종료 시도 (백업) — 외부 watchdog 도착 전에 종료되면 더 빠름."""
-            try:
-                _time.sleep(0.5)
-                logger.info("[/relaunch shutdown] 자체 종료 시도: os._exit(0)")
-            except Exception as e:  # noqa: BLE001
-                logger.warning("[/relaunch shutdown] log/sleep 예외 (무시): %s", e)
-            try:
-                _os._exit(0)  # noqa: S603
-            except SystemExit:
-                pass
-            try:
-                import ctypes  # noqa: PLC0415
-                ctypes.windll.kernel32.ExitProcess(0)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("[/relaunch shutdown] ExitProcess 예외: %s", e)
-            import sys as _sys  # noqa: PLC0415
-            _sys.exit(0)
-
-        _threading.Thread(target=_shutdown_thread, daemon=False).start()
-        logger.info("[/relaunch] step 5/5 — watchdog + self-shutdown 시작")
         return ControlResponse(
             success=True,
-            message=(
-                "launcher 재실행 — launcher 가 옛 본체 자동 정리 (v0.1.64). "
-                "사용자 시각: launcher GUI 로 돌아감 + START 클릭 시 자동 swap"
-            ),
+            message="본체 종료 요청 박음 — launcher 가 곧 정리 + 등장",
         )
 
     # ───── 로그 (단순 폴링) ─────────────────────────

@@ -990,11 +990,13 @@ class LauncherApi:
             ``{"latest": str | None, "has_update": bool, "url": str | None,
               "error": str | None}``
         """
+        # v0.1.116: ChoYoon #133 진단 강화 — 진입/결과 logger.info 박음.
+        # 다음 swap fail 시점 측 정확 진단 자료 박힘.
+        logger.info("check_update 진입")
         release = fetch_latest_release()
         if release is None:
-            # v0.1.63: 일반 메시지 + 마지막 fetch 에러 (HTTP 코드 / URLError reason 등)
-            # 자세히 노출 → 사용자 진단 가능. ChoYoon Claude #133 fix 3.
             detail = f" [{_last_fetch_error}]" if _last_fetch_error else ""
+            logger.warning("check_update: release=None%s", detail)
             return {
                 "latest": None, "has_update": False, "url": None,
                 "error": f"GitHub Releases 조회 실패{detail}",
@@ -1014,6 +1016,10 @@ class LauncherApi:
             # 부터는 정상 비교. (v0.1.14 fix — 이전엔 exe 존재 시 has_update=False
             # 라 사용자가 launcher 통해 swap 못 받음.)
             has_update = True
+        logger.info(
+            "check_update 결과: latest=%s local=%s has_update=%s url=%s",
+            latest_tag, local_v, has_update, url,
+        )
         return {"latest": latest_tag, "has_update": has_update, "url": url,
                 "error": None}
 
@@ -1031,6 +1037,8 @@ class LauncherApi:
         Returns:
             ``{"success": bool, "message": str}``
         """
+        # v0.1.116: ChoYoon #133 진단 강화 — 진입/결과 logger.info 박음.
+        logger.info("download_and_swap 진입: url=%s", url)
         if platform.system() == "Darwin":
             # macOS: download target = .zip.new — apply_swap 가 zip 풀어서 .app 박음.
             target = _aurora_data_dir() / "Aurora-macOS.zip.new"
@@ -1039,8 +1047,10 @@ class LauncherApi:
         # 폴더 자동 생성 (첫 다운 시)
         target.parent.mkdir(parents=True, exist_ok=True)
         if not download_to(url, target):
+            logger.warning("download_and_swap: download_to 실패 url=%s", url)
             return {"success": False, "message": "다운로드 실패 (네트워크 확인)"}
         if not apply_swap(target):
+            logger.warning("download_and_swap: apply_swap 실패 target=%s", target)
             return {"success": False, "message": "swap 실패 (본체 권한 확인)"}
         # 새 버전 기록
         try:
@@ -1053,36 +1063,139 @@ class LauncherApi:
                 )
         except OSError:
             pass
+        logger.info("download_and_swap 완료: success=True")
         return {"success": True, "message": "업데이트 적용 완료"}
 
     def launch(self) -> dict:
-        """본체 실행 — v0.1.80 사용자 제안 패러다임:
-        launcher 항상 살아있음 + 본체 spawn 시 webview hide + 본체 종료 시 show.
-        본체 자기 죽이기 / launcher 가 본체 죽이기 의무 자체 X.
+        """본체 실행 — v0.1.80 사용자 제안 패러다임 + v0.1.116 readiness polling:
+        launcher 항상 살아있음 + 본체 spawn 시 readiness 측 wait → ready 박힌 후
+        webview hide → 본체 GUI 차지. 본체 종료 시 show.
 
-        v0.1.99: spawn 시각 + crash auto-respawn 카운트 박음 (사용자 보고
-        2026-05-08 \"본체 짧게 살다가 종료\" 본질 — WebView2 native crash 추정).
-        짧은 시간 (60초) 안 정상 종료 = likely crash → 최대 3회 자동 respawn.
+        v0.1.116 (ChoYoon #133): 이전 흐름 측 spawn 즉시 hide → 사용자 측 까만
+        화면 51초+37초 본질 (launcher swap + 본체 startup). 신규 흐름 측 spawn
+        후 launcher webview 측 그대로 + status "본체 시작 중..." 박음 → /health
+        200 OK 박힐 때까지 polling → ready 시점 hide. 사용자 측 마찰 ↓↓↓.
         """
+        # v0.1.116: spawn 직후 launcher status 측 "본체 시작 중..." 박음
+        self._update_status_js("본체 시작 중...", "var(--text-2)")
         proc = launch_aurora()
         if proc is None:
+            self._update_status_js("✗ 본체 미존재", "#fb7185")
             return {"success": False, "message": "본체 .exe 미존재 — 먼저 업데이트"}
         # 본체 process 보관 + polling thread 시작
         self._aurora_proc = proc
         self._aurora_spawn_at = time.time()  # v0.1.99: crash 감지용
         self._aurora_crash_respawn_count = 0  # v0.1.99: 자동 respawn 카운터
         self._start_aurora_polling()
-        # launcher webview hide — 본체 GUI 가 사용자 화면 차지
-        self._hide_launcher_window()
+        # v0.1.116: readiness polling 시작 — ready 박힐 때 hide
+        self._start_readiness_polling()
         return {"success": True, "message": "Aurora 시작됨"}
 
+    def _start_readiness_polling(self) -> None:
+        """v0.1.116 (ChoYoon #133 ⭐⭐⭐⭐⭐): 본체 startup 측 ``/health`` 200 OK
+        박힐 때까지 polling → ready 시점 launcher hide.
+
+        매 0.5초 체크, 60초 timeout. 사용자 측 시간 분해 — 본체 startup ~37초
+        + buffer 23초. timeout 초과 측 launcher hide 강행 (본체 측 startup
+        실패 가능, 사용자 측 status 측 표시).
+
+        Status 갱신:
+            - 매 5초 측 elapsed 박음 ("본체 시작 중... (12초)")
+            - ready 박힐 때 ✓ 표기 + 0.3초 후 hide
+            - timeout 측 ⚠ 표기 + 1초 후 hide 강행
+        """
+        ready_url = "http://127.0.0.1:8765/health"
+        ready_interval = 0.5
+        ready_timeout = 60.0
+
+        def _poll() -> None:
+            deadline = time.time() + ready_timeout
+            attempt = 0
+            while time.time() < deadline:
+                attempt += 1
+                try:
+                    req = urllib.request.Request(ready_url)
+                    with urllib.request.urlopen(req, timeout=2.0) as resp:  # noqa: S310
+                        if resp.status == 200:
+                            elapsed = time.time() - self._aurora_spawn_at
+                            logger.info(
+                                "readiness OK (시작 후 %.1f초, %d 시도) → launcher hide",
+                                elapsed, attempt,
+                            )
+                            self._update_status_js(
+                                f"✓ Aurora 시작됨 ({elapsed:.0f}초)",
+                                "#34d399",
+                            )
+                            time.sleep(0.3)  # 짧은 빈 보여주기
+                            self._hide_launcher_window()
+                            return
+                except Exception:  # noqa: BLE001 — startup 중 connection refused 정상
+                    pass
+                # 매 10번 (5초) 측 status 갱신
+                if attempt % 10 == 0:
+                    elapsed = time.time() - self._aurora_spawn_at
+                    self._update_status_js(
+                        f"본체 시작 중... ({elapsed:.0f}초)",
+                        "var(--text-2)",
+                    )
+                time.sleep(ready_interval)
+            # timeout — hide 강행
+            elapsed = time.time() - self._aurora_spawn_at
+            logger.warning(
+                "readiness timeout (%.1f초, %d 시도) → launcher hide 강행",
+                elapsed, attempt,
+            )
+            self._update_status_js(
+                f"⚠ 본체 응답 X ({elapsed:.0f}초) — hide 강행",
+                "#fbbf24",
+            )
+            time.sleep(1.0)
+            self._hide_launcher_window()
+
+        threading.Thread(target=_poll, daemon=True, name="readiness-poll").start()
+
+    def _update_status_js(self, text: str, color: str) -> None:
+        """v0.1.116: launcher webview status_line 측 외부 thread 측 갱신.
+
+        readiness polling thread 측 status 측 매 5초 갱신 본질. JS 측 setStatus
+        측 window 박혀있어 evaluate_js 측 호출 가능.
+        """
+        try:
+            import webview  # type: ignore[import-not-found]
+            if not webview.windows:
+                return
+            text_esc = text.replace("\\", "\\\\").replace("'", "\\'")
+            color_esc = color.replace("\\", "\\\\").replace("'", "\\'")
+            webview.windows[0].evaluate_js(
+                f"if (window.setStatus) setStatus('{text_esc}', '{color_esc}');",
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("status JS update fail: %s", e)
+
     def _hide_launcher_window(self) -> None:
-        """v0.1.80: launcher webview hide — 백그라운드 살아있음."""
+        """v0.1.80: launcher webview hide — 백그라운드 살아있음.
+
+        v0.1.116 (ChoYoon #133): macOS 측 ``webview.windows[0].hide()`` 만으론
+        dock icon 측 그대로 박힘 → process 측 visible=false 박아 완전 hide.
+        Windows 측 영향 X.
+        """
         try:
             import webview  # type: ignore[import-not-found]
             if webview.windows:
                 webview.windows[0].hide()
                 logger.info("launcher webview hide — 본체 GUI 차지")
+                # v0.1.116: macOS 측 osascript 측 process visible=false 박음
+                if platform.system() == "Darwin":
+                    try:
+                        subprocess.run(  # noqa: S603, S607
+                            ["osascript", "-e",
+                             'tell application "System Events" to set visible'
+                             ' of process "Aurora-launcher" to false'],
+                            capture_output=True, timeout=3, check=False,
+                        )
+                        logger.debug("macOS osascript hide 박힘")
+                    except (OSError, subprocess.TimeoutExpired) as e:
+                        logger.debug("osascript hide 실패 (계속 진행): %s", e)
         except Exception as e:  # noqa: BLE001
             logger.warning("launcher hide 실패: %s", e)
 

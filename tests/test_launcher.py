@@ -150,3 +150,98 @@ def test_launcher_api_check_update_has_update(tmp_path, monkeypatch):
     assert result["latest"] == "v0.2.0"
     assert result["has_update"] is True
     assert result["url"] == "https://example.com/x"
+
+
+# ============================================================
+# v0.1.116: readiness polling — ChoYoon #133
+# ============================================================
+
+
+def test_readiness_polling_hides_when_health_ok():
+    """본체 /health 200 OK 박힐 때 _hide_launcher_window 측 호출 박힘."""
+    import time
+    from unittest.mock import MagicMock
+
+    api = launcher.LauncherApi()
+    api._aurora_spawn_at = time.time()
+    api._hide_launcher_window = MagicMock()
+    api._update_status_js = MagicMock()
+
+    # urlopen 측 200 OK 응답 mock
+    fake_resp = MagicMock()
+    fake_resp.status = 200
+    fake_resp.__enter__ = MagicMock(return_value=fake_resp)
+    fake_resp.__exit__ = MagicMock(return_value=False)
+
+    with patch("aurora_launcher.launcher.urllib.request.urlopen", return_value=fake_resp):
+        api._start_readiness_polling()
+        # thread daemon — 짧게 대기 (200ms 측 ready 박힘 + 0.3s sleep 박힘)
+        time.sleep(1.0)
+
+    api._hide_launcher_window.assert_called()
+    # status 측 ✓ 박힌 갱신 박힘
+    calls = [c.args[0] for c in api._update_status_js.call_args_list]
+    assert any("✓ Aurora 시작됨" in c for c in calls)
+
+
+def test_readiness_polling_timeout_hides_anyway():
+    """/health 측 끝까지 응답 X → timeout 박힘 + hide 강행 + ⚠ status."""
+    import time
+    from unittest.mock import MagicMock
+    from urllib.error import URLError
+
+    api = launcher.LauncherApi()
+    api._aurora_spawn_at = time.time()
+    api._hide_launcher_window = MagicMock()
+    api._update_status_js = MagicMock()
+
+    # urlopen 측 항상 raise → timeout 박힘
+    with patch("aurora_launcher.launcher.urllib.request.urlopen",
+               side_effect=URLError("connection refused")), \
+         patch("aurora_launcher.launcher.time.time",
+               side_effect=[api._aurora_spawn_at, api._aurora_spawn_at + 100,
+                            api._aurora_spawn_at + 100]):
+        # spawn_at + 100 = deadline (60s) 이미 초과 → 즉시 timeout
+        api._start_readiness_polling()
+        time.sleep(2.0)
+
+    api._hide_launcher_window.assert_called()
+    calls = [c.args[0] for c in api._update_status_js.call_args_list]
+    # ⚠ 또는 hide 강행 status 박힘
+    assert any("응답 X" in c or "hide 강행" in c or "⚠" in c for c in calls)
+
+
+def test_check_update_logs_entry_and_result(caplog):
+    """check_update 측 진입/결과 logger.info 박힘 (ChoYoon #133 진단 강화)."""
+    import logging
+    fake_release = {
+        "tag_name": "v0.2.0",
+        "assets": [
+            {"name": "Aurora-windows.exe", "browser_download_url": "https://example.com/x"},
+        ],
+    }
+    api = launcher.LauncherApi()
+    with caplog.at_level(logging.INFO, logger="aurora_launcher.launcher"), \
+         patch("aurora_launcher.launcher.fetch_latest_release", return_value=fake_release):
+        api.check_update()
+
+    msgs = [r.message for r in caplog.records]
+    assert any("check_update 진입" in m for m in msgs)
+    assert any("check_update 결과" in m for m in msgs)
+
+
+def test_download_and_swap_logs_entry_and_result(caplog, tmp_path, monkeypatch):
+    """download_and_swap 측 진입/완료 logger 박힘."""
+    import logging
+    monkeypatch.setattr(launcher, "_launcher_dir", lambda: tmp_path)
+    monkeypatch.setattr(launcher, "_aurora_data_dir", lambda: tmp_path / "_aurora")
+    api = launcher.LauncherApi()
+    with caplog.at_level(logging.INFO, logger="aurora_launcher.launcher"), \
+         patch("aurora_launcher.launcher.download_to", return_value=True), \
+         patch("aurora_launcher.launcher.apply_swap", return_value=True), \
+         patch("aurora_launcher.launcher.fetch_latest_release", return_value=None):
+        api.download_and_swap("https://example.com/x")
+
+    msgs = [r.message for r in caplog.records]
+    assert any("download_and_swap 진입" in m for m in msgs)
+    assert any("download_and_swap 완료" in m for m in msgs)

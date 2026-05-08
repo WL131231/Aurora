@@ -14,7 +14,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from aurora.market.dashboard_flow import DashboardFlow, DashboardFlowAggregator
-from aurora.market.exchanges import BinanceMarketData, BybitMarketData, OkxMarketData
+from aurora.market.exchanges import (
+    BinanceMarketData,
+    BitgetMarketData,
+    BybitMarketData,
+    HyperliquidMarketData,
+    OkxMarketData,
+)
 from aurora.market.exchanges.base import ExchangeMarketData, ExchangeSnapshot
 
 # ============================================================
@@ -418,3 +424,138 @@ async def test_okx_oi_skipped_when_price_missing() -> None:
     assert snap.price is None
     assert snap.oi_usd is None  # price 없어서 환산 skip
     assert any("ticker" in e for e in snap.errors)
+
+
+# ============================================================
+# BitgetMarketData (v0.1.89) — V2 mix endpoint mock
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_bitget_fetch_snapshot_happy_path() -> None:
+    """Bitget V2 — ticker + L-S 둘 정상."""
+    bitget = BitgetMarketData()
+    session = _make_dispatch_session("https://api.bitget.com", {
+        "/api/v2/mix/market/ticker": {
+            "code": "00000",
+            "data": [{
+                "symbol": "BTCUSDT",
+                "lastPr": "80000",
+                "change24h": "0.015",     # 1.5%
+                "quoteVolume": "2000000000",
+                "holdingAmount": "8000",  # 8000 BTC
+                "fundingRate": "0.00009",
+            }],
+        },
+        "/api/v2/mix/market/account-long-short": {
+            "code": "00000",
+            "data": [{
+                "ts": "1", "longAccountRatio": "0.62", "shortAccountRatio": "0.38",
+            }],
+        },
+    })
+
+    snap = await bitget.fetch_snapshot(session, "BTC")
+    assert snap.exchange == "bitget"
+    assert snap.symbol == "BTCUSDT"
+    assert snap.price == pytest.approx(80000.0)
+    assert snap.price_24h_change_pct == pytest.approx(1.5)
+    assert snap.volume_24h_usd == pytest.approx(2_000_000_000.0)
+    # OI = 8000 × 80000 = 640_000_000
+    assert snap.oi_usd == pytest.approx(640_000_000.0)
+    assert snap.funding_rate == pytest.approx(0.00009)
+    assert snap.ls_ratio_global == pytest.approx(0.62 / 0.38)
+    assert snap.long_account_pct == pytest.approx(0.62)
+    # Bitget 측 top trader endpoint X
+    assert snap.ls_ratio_top_position is None
+    assert snap.errors == []
+
+
+# ============================================================
+# HyperliquidMarketData (v0.1.89) — Info API POST mock
+# ============================================================
+
+
+def _make_hl_session(meta_response: Any) -> MagicMock:
+    """Hyperliquid POST /info dispatch — body type 별."""
+    session = MagicMock()
+    def _post(url: str, json=None, timeout=None):
+        ctx = AsyncMock()
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        if isinstance(meta_response, Exception):
+            resp.raise_for_status = MagicMock(side_effect=meta_response)
+        resp.json = AsyncMock(return_value=meta_response)
+        ctx.__aenter__.return_value = resp
+        ctx.__aexit__.return_value = None
+        return ctx
+    session.post = _post
+    return session
+
+
+@pytest.mark.asyncio
+async def test_hyperliquid_fetch_snapshot_happy_path() -> None:
+    """Hyperliquid Info API — metaAndAssetCtxs 정상."""
+    hl = HyperliquidMarketData()
+    session = _make_hl_session([
+        {"universe": [
+            {"name": "BTC", "szDecimals": 5, "maxLeverage": 50},
+            {"name": "ETH", "szDecimals": 4, "maxLeverage": 50},
+        ]},
+        [
+            {  # BTC ctx (idx=0)
+                "markPx": "80000",
+                "prevDayPx": "78818.18",   # +1.5% 이상 이내
+                "dayNtlVlm": "500000000",  # USD notional
+                "openInterest": "1000",    # 1000 BTC
+                "funding": "0.00001",
+            },
+            {  # ETH ctx (idx=1)
+                "markPx": "3000",
+                "prevDayPx": "2950",
+                "dayNtlVlm": "100000000",
+                "openInterest": "10000",
+                "funding": "0.00002",
+            },
+        ],
+    ])
+
+    snap = await hl.fetch_snapshot(session, "BTC")
+    assert snap.exchange == "hyperliquid"
+    assert snap.symbol == "BTC"
+    assert snap.price == pytest.approx(80000.0)
+    assert snap.price_24h_change_pct == pytest.approx(1.5, rel=1e-3)
+    assert snap.volume_24h_usd == pytest.approx(500_000_000.0)
+    # OI = 1000 × 80000 = 80_000_000
+    assert snap.oi_usd == pytest.approx(80_000_000.0)
+    assert snap.funding_rate == pytest.approx(0.00001)
+    # L-S ratio 측 Hyperliquid X — None
+    assert snap.ls_ratio_global is None
+    assert snap.errors == []
+
+
+@pytest.mark.asyncio
+async def test_hyperliquid_coin_not_in_universe() -> None:
+    """coin 측 universe 안 없음 → errors 박힘 + 모든 필드 None."""
+    hl = HyperliquidMarketData()
+    session = _make_hl_session([
+        {"universe": [{"name": "ETH"}]},  # BTC 없음
+        [{"markPx": "3000", "prevDayPx": "2950", "dayNtlVlm": "0",
+          "openInterest": "0", "funding": "0"}],
+    ])
+
+    snap = await hl.fetch_snapshot(session, "BTC")
+    assert snap.price is None
+    assert snap.oi_usd is None
+    assert any("not in universe" in e for e in snap.errors)
+
+
+@pytest.mark.asyncio
+async def test_hyperliquid_post_raises_returns_empty() -> None:
+    """POST /info raise → snapshot.errors 박힘 + 모든 필드 None."""
+    hl = HyperliquidMarketData()
+    session = _make_hl_session(RuntimeError("503 service unavailable"))
+
+    snap = await hl.fetch_snapshot(session, "BTC")
+    assert snap.price is None
+    assert snap.errors  # 에러 메시지 박힘

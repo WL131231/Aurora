@@ -62,4 +62,62 @@
         requestAnimationFrame(animateParallax);
     }
     animateParallax();
+
+    // ===== v0.1.102: 최신 release 버전 동적 표시 =====
+    // GitHub API /releases/latest 측 fetch → tag_name + published_at 박음.
+    // localStorage 측 캐시 박아 30분 안 재호출 (rate limit 회피 + 빠른 표시).
+    // fetch 실패 시 silent skip — fallback "—" 그대로.
+    const latestTagEl = document.getElementById("latest-version-tag");
+    const latestDateEl = document.getElementById("latest-version-date");
+    if (latestTagEl && latestDateEl) {
+        const CACHE_KEY = "aurora_latest_release_v1";
+        const CACHE_TTL_MS = 30 * 60 * 1000; // 30분
+
+        const applyRelease = (rel) => {
+            if (!rel || !rel.tag_name) return;
+            latestTagEl.textContent = rel.tag_name;
+            if (rel.html_url) latestTagEl.href = rel.html_url;
+            if (rel.published_at) {
+                const d = new Date(rel.published_at);
+                const yy = d.getFullYear();
+                const mm = String(d.getMonth() + 1).padStart(2, "0");
+                const dd = String(d.getDate()).padStart(2, "0");
+                latestDateEl.textContent = `${yy}.${mm}.${dd}`;
+            }
+        };
+
+        // 캐시 hit 우선 적용 (즉시 표시)
+        try {
+            const raw = localStorage.getItem(CACHE_KEY);
+            if (raw) {
+                const cached = JSON.parse(raw);
+                if (cached && cached.fetched_at &&
+                    Date.now() - cached.fetched_at < CACHE_TTL_MS) {
+                    applyRelease(cached.release);
+                }
+            }
+        } catch (_) { /* 캐시 손상 — 무시 후 새 fetch */ }
+
+        // 백그라운드 fetch — 캐시 만료 / 신선 데이터 박음.
+        fetch("https://api.github.com/repos/WL131231/Aurora/releases/latest", {
+            headers: { Accept: "application/vnd.github.v3+json" },
+            cache: "no-cache",
+        })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((rel) => {
+                if (!rel) return;
+                applyRelease(rel);
+                try {
+                    localStorage.setItem(CACHE_KEY, JSON.stringify({
+                        fetched_at: Date.now(),
+                        release: {
+                            tag_name: rel.tag_name,
+                            html_url: rel.html_url,
+                            published_at: rel.published_at,
+                        },
+                    }));
+                } catch (_) { /* localStorage quota — 무시 */ }
+            })
+            .catch(() => { /* 네트워크 실패 — silent (fallback "—") */ });
+    }
 })();

@@ -344,6 +344,11 @@ class ExchangeSnapshotDTO(BaseModel):
     short_account_pct: float | None = None
     ls_ratio_top_position: float | None = None
     ls_ratio_top_account: float | None = None
+    # v0.1.90: Whale notional (5분 윈도우, 거래소별 미지원 시 None)
+    whale_buy_5m_usd: float | None = None
+    whale_sell_5m_usd: float | None = None
+    whale_count_5m: int | None = None
+    whale_threshold_usd: float | None = None
     errors: list[str] = []
 
 
@@ -363,6 +368,10 @@ class DashboardFlowDTO(BaseModel):
     avg_ls_ratio_global: float | None = None
     avg_ls_ratio_top_position: float | None = None
     avg_ls_ratio_top_account: float | None = None
+    # v0.1.90: Whale notional 합 (5분 윈도우)
+    total_whale_buy_5m_usd: float | None = None
+    total_whale_sell_5m_usd: float | None = None
+    total_whale_count_5m: int | None = None
 
 
 # ============================================================
@@ -1010,6 +1019,10 @@ def create_app() -> FastAPI:
                     short_account_pct=s.short_account_pct,
                     ls_ratio_top_position=s.ls_ratio_top_position,
                     ls_ratio_top_account=s.ls_ratio_top_account,
+                    whale_buy_5m_usd=s.whale_buy_5m_usd,
+                    whale_sell_5m_usd=s.whale_sell_5m_usd,
+                    whale_count_5m=s.whale_count_5m,
+                    whale_threshold_usd=s.whale_threshold_usd,
                     errors=s.errors,
                 )
                 for s in flow.snapshots
@@ -1020,6 +1033,9 @@ def create_app() -> FastAPI:
             avg_ls_ratio_global=flow.avg_ls_ratio_global,
             avg_ls_ratio_top_position=flow.avg_ls_ratio_top_position,
             avg_ls_ratio_top_account=flow.avg_ls_ratio_top_account,
+            total_whale_buy_5m_usd=flow.total_whale_buy_5m_usd,
+            total_whale_sell_5m_usd=flow.total_whale_sell_5m_usd,
+            total_whale_count_5m=flow.total_whale_count_5m,
         )
 
     # ───── Config ───────────────────────────────────

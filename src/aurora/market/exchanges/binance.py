@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 _FAPI_BASE = "https://fapi.binance.com"
 _HTTP_TIMEOUT = aiohttp.ClientTimeout(total=8)
 _LS_PERIOD = "5m"  # globalLongShortAccountRatio / topLongShortPositionRatio period
+_WHALE_THRESHOLD_USD = 100_000.0  # v0.1.90: 큰 거래 기준 (≥ $100K notional)
+_WHALE_WINDOW_MS = 5 * 60 * 1000  # 최근 5분
 
 
 class BinanceMarketData(ExchangeMarketData):
@@ -46,7 +48,9 @@ class BinanceMarketData(ExchangeMarketData):
             fetched_at_ms=int(time.time() * 1000),
         )
 
-        # 6 endpoint 병렬 fetch — 부분 실패 격리 (return_exceptions=True)
+        # 7 endpoint 병렬 fetch — 부분 실패 격리 (return_exceptions=True)
+        # v0.1.90: aggTrades 측 추가 박힘 (whale notional 5분 윈도우)
+        now_ms = int(time.time() * 1000)
         results = await asyncio.gather(
             self._fetch_oi(session, symbol),
             self._fetch_premium_index(session, symbol),
@@ -54,9 +58,10 @@ class BinanceMarketData(ExchangeMarketData):
             self._fetch_ls_global(session, symbol),
             self._fetch_ls_top_position(session, symbol),
             self._fetch_ls_top_account(session, symbol),
+            self._fetch_agg_trades(session, symbol, now_ms - _WHALE_WINDOW_MS, now_ms),
             return_exceptions=True,
         )
-        oi_btc, premium, ticker, ls_global, ls_top_pos, ls_top_acc = results
+        oi_btc, premium, ticker, ls_global, ls_top_pos, ls_top_acc, agg_trades = results
 
         # OI — BTC contracts → USD notional (mark price 곱)
         if isinstance(oi_btc, Exception):
@@ -123,6 +128,34 @@ class BinanceMarketData(ExchangeMarketData):
             except (TypeError, ValueError) as e:
                 snap.errors.append(f"ls_top_acc calc: {e}")
 
+        # v0.1.90: Whale notional — aggTrades 측 큰 거래 (≥ threshold) 합산
+        snap.whale_threshold_usd = _WHALE_THRESHOLD_USD
+        if isinstance(agg_trades, Exception):
+            snap.errors.append(f"agg_trades: {agg_trades}")
+        elif isinstance(agg_trades, list):
+            try:
+                buy_sum = 0.0
+                sell_sum = 0.0
+                count = 0
+                for t in agg_trades:
+                    price = float(t.get("p", 0) or 0)
+                    qty = float(t.get("q", 0) or 0)
+                    notional = price * qty
+                    if notional < _WHALE_THRESHOLD_USD:
+                        continue
+                    count += 1
+                    # m=true → buyer is maker → aggressor 측 SELL
+                    # m=false → buyer is taker → aggressor 측 BUY
+                    if t.get("m"):
+                        sell_sum += notional
+                    else:
+                        buy_sum += notional
+                snap.whale_buy_5m_usd = buy_sum
+                snap.whale_sell_5m_usd = sell_sum
+                snap.whale_count_5m = count
+            except (TypeError, ValueError) as e:
+                snap.errors.append(f"agg_trades calc: {e}")
+
         if snap.errors:
             logger.debug("Binance snapshot %s 부분 실패: %s", symbol, "; ".join(snap.errors))
         return snap
@@ -166,4 +199,13 @@ class BinanceMarketData(ExchangeMarketData):
         return await self._get_json(
             session, "/futures/data/topLongShortAccountRatio",
             {"symbol": symbol, "period": _LS_PERIOD, "limit": 1},
+        )
+
+    async def _fetch_agg_trades(
+        self, session, symbol: str, start_ms: int, end_ms: int,
+    ) -> list:
+        """v0.1.90: aggTrades 측 [start_ms, end_ms] 윈도우 거래 list — whale 필터 input."""
+        return await self._get_json(
+            session, "/fapi/v1/aggTrades",
+            {"symbol": symbol, "startTime": start_ms, "endTime": end_ms, "limit": 1000},
         )

@@ -356,9 +356,27 @@ async function refreshDashboard() {
         // v0.1.87: Phase 3 Dashboard Flow — 5 거래소 합본 (Binance 박힘 / 추후 4개 추가).
         // 백엔드 60초 cache 박힘 → 사용자 UI 폴링 부담 X.
         await refreshDashboardFlow();
-    } catch (_) {
-        // v0.1.94: 연결 실패 카운트 + 빠른 재연결 시도 (5초 후) 가시화.
-        // 본체 측 file log 박혔으니 (v0.1.94) 사용자 측 진단 자료 박힘.
+    } catch (err) {
+        // v0.1.111: tolerance 박음 — 1번 실패 측 즉시 DISCONNECTED 박지 X.
+        // 첫 fail = 빠른 soft retry (1초). 2번 연속 = hard DISCONNECTED 박음.
+        // 사용자 보고 (2026-05-09) "정상 → 끊김 → 정상" 본질 = transient blip
+        // (slow endpoint / WebView2 transient network). backend heartbeat 정상이면
+        // 1초 retry 측 보통 회복. soft retry 측 사용자 UI noise X.
+        _consecutiveFails = (_consecutiveFails || 0) + 1;
+        // 콘솔 측 진단 — actual error 박음 (network / HTTP / etc)
+        if (typeof console !== "undefined" && console.warn) {
+            console.warn(`[refreshDashboard] fail #${_consecutiveFails}:`, err);
+        }
+        if (_consecutiveFails < 2) {
+            // Soft fail — UI 측 변화 X, 1초 후 retry (transient blip 흡수)
+            if (_disconnectRetryTimer) clearTimeout(_disconnectRetryTimer);
+            _disconnectRetryTimer = setTimeout(() => {
+                _disconnectRetryTimer = null;
+                refreshDashboard();
+            }, 1000);
+            return;
+        }
+        // Hard fail — 2번 연속 실패 시 DISCONNECTED 박힘
         connDot.style.background = "#fb7185";
         connDot.style.boxShadow  = "0 0 8px #fb7185";
         _disconnectCount = (_disconnectCount || 0) + 1;
@@ -366,7 +384,7 @@ async function refreshDashboard() {
         _setStatusBadge(mStatus, false, true);
         _setButtons(btnStart, btnStop, false, true);
         _updateBotActivity(false, 0);  // 백엔드 끊김 — indicator 숨김
-        // 빠른 재연결 — 끊긴 직후 5초 후 1회 즉시 retry (15초 폴링 외 추가)
+        // 빠른 재연결 — 5초 후 retry
         if (!_disconnectRetryTimer) {
             _disconnectRetryTimer = setTimeout(() => {
                 _disconnectRetryTimer = null;
@@ -375,7 +393,8 @@ async function refreshDashboard() {
         }
         return;
     }
-    // 정상 연결 — 카운트 reset
+    // 정상 연결 — 카운트 reset (soft + hard 둘 다)
+    _consecutiveFails = 0;
     _disconnectCount = 0;
     if (_disconnectRetryTimer) {
         clearTimeout(_disconnectRetryTimer);
@@ -384,6 +403,7 @@ async function refreshDashboard() {
 }
 let _disconnectCount = 0;
 let _disconnectRetryTimer = null;
+let _consecutiveFails = 0;  // v0.1.111: tolerance 카운트
 
 // 열린 포지션 표 갱신 — /positions API 호출 + tbody 행 렌더링
 async function refreshPositions() {

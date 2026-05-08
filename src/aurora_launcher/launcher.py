@@ -104,6 +104,44 @@ _last_fetch_error: str | None = None
 
 
 # ============================================================
+# v0.1.93: Launcher single-instance mutex — 중복 실행 차단
+# ============================================================
+# Why: 사용자 보고 (2026-05-08) — Launcher 가 두 개 실행되는 케이스. v0.1.92 측
+# body 만 mutex 박힘 (body 측 중복 차단). launcher 자체 측 mutex 자체 X 라
+# self-update 측 spawn-then-exit overlap / 사용자 더블클릭 / 어디 stale process
+# 등 시 두 launcher window 동시 표시 가능. body mutex 와 별개 name 박음
+# (launcher + body 동시 실행은 정상 흐름 — 같은 mutex 박으면 launcher 살아있는
+# 동안 body spawn 차단되는 본질).
+
+_LAUNCHER_MUTEX_HANDLE = None  # noqa: N816 — 모듈 lifetime handle 보유 (GC 방지)
+_LAUNCHER_MUTEX_NAME = "Aurora-Launcher-SingleInstance-v0.1.93"
+_ERROR_ALREADY_EXISTS = 183
+
+
+def _acquire_launcher_single_instance_mutex() -> bool:
+    """Windows named mutex — Launcher 중복 실행 차단.
+
+    apply_pending_launcher_update() 다음에 박힘 — self-update spawn-then-exit
+    측 mutex race 회피 (옛 launcher 가 mutex 잡은 채로 새 launcher spawn 하면
+    새 launcher 측 ALREADY_EXISTS 즉시 exit → no launcher 사고).
+
+    Returns:
+        ``True`` — primary launcher (mutex 획득). ``False`` — duplicate (exit 권장).
+    """
+    global _LAUNCHER_MUTEX_HANDLE  # noqa: PLW0603
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+    except (AttributeError, OSError, ImportError):
+        return True  # ctypes 미지원 — fallback OK
+    _LAUNCHER_MUTEX_HANDLE = kernel32.CreateMutexW(None, True, _LAUNCHER_MUTEX_NAME)
+    last_error = kernel32.GetLastError()
+    return last_error != _ERROR_ALREADY_EXISTS
+
+
+# ============================================================
 # 헬퍼
 # ============================================================
 
@@ -1091,6 +1129,16 @@ def main() -> None:
     # v0.1.19: 직전 다운된 launcher.new 가 있으면 swap → 새 launcher 재시작.
     # 본 함수는 swap 성공 시 sys.exit(0) — 도달 X.
     apply_pending_launcher_update()
+
+    # v0.1.93: launcher 측 single-instance mutex — 사용자 보고 (2026-05-08)
+    # "런처가 2개 실행" 본질. apply_pending_launcher_update() 다음에 박힘 —
+    # self-update 측 spawn-then-exit 흐름 측 mutex race 회피.
+    if not _acquire_launcher_single_instance_mutex():
+        logger.warning(
+            "Launcher 이미 실행 중 (Windows named mutex %s) — 중복 실행 차단",
+            _LAUNCHER_MUTEX_NAME,
+        )
+        sys.exit(0)
 
     # v0.1.17: 이전 layout (launcher 옆 Aurora.exe) → _aurora/ 자동 이전.
     _migrate_legacy_layout()

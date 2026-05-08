@@ -192,13 +192,28 @@ class ReleaseDTO(BaseModel):
 
 
 class MarketTrendCoinDTO(BaseModel):
-    """``GET /market-trend`` 응답의 단일 coin trend (v0.1.54)."""
+    """``GET /market-trend`` 응답의 단일 coin trend (v0.1.54).
+
+    v0.1.84: multi-timeframe 박음 — 단기 (15m) / 중단기 (4h) / 중기 (1D).
+    legacy `score` / `direction` / `strong` = 중기 (1D) 측 (호환).
+    """
 
     coin: str
-    score: int  # -4 ~ +4
-    direction: str  # "long" / "short" / "neutral"
+    score: int  # -4 ~ +4 (= score_mid)
+    direction: str  # "long" / "short" / "neutral" (= direction_mid)
     strong: bool
     reasons: list[str] = []
+    # v0.1.84: multi-tf
+    score_short: int = 0
+    score_mid_short: int = 0
+    score_mid: int = 0
+    direction_short: str = "neutral"
+    direction_mid_short: str = "neutral"
+    direction_mid: str = "neutral"
+    reasons_short: list[str] = []
+    reasons_mid_short: list[str] = []
+    reasons_mid: list[str] = []
+    # 원본 (UI) — 1D 기준
     price: float | None = None
     price_24h: float | None = None
     oi: float | None = None
@@ -611,6 +626,15 @@ def create_app() -> FastAPI:
             trends.append(MarketTrendCoinDTO(
                 coin=t.coin, score=t.score, direction=t.direction,
                 strong=t.strong, reasons=list(t.reasons),
+                # v0.1.84: multi-tf
+                score_short=t.score_short, score_mid_short=t.score_mid_short,
+                score_mid=t.score_mid,
+                direction_short=t.direction_short,
+                direction_mid_short=t.direction_mid_short,
+                direction_mid=t.direction_mid,
+                reasons_short=list(t.reasons_short),
+                reasons_mid_short=list(t.reasons_mid_short),
+                reasons_mid=list(t.reasons_mid),
                 price=t.price, price_24h=t.price_24h,
                 oi=t.oi, oi_24h=t.oi_24h,
                 cvd_spot=t.cvd_spot, cvd_futures=t.cvd_futures,

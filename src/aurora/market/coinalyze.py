@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 import aiohttp
@@ -79,9 +79,23 @@ CVD_SPOT: dict[str, list[str]] = {
 TrendDir = Literal["long", "short", "neutral"]
 
 
+def _interval_to_seconds(interval: str) -> int:
+    """v0.1.84: Coinalyze interval 문자열 → 초 단위 변환.
+
+    Coinalyze API 측 박힌 interval 들 (verify 측 모두 동작):
+    1min/5min/15min/30min/1hour/2hour/4hour/6hour/12hour/daily.
+    """
+    table = {
+        "1min": 60, "5min": 300, "15min": 900, "30min": 1800,
+        "1hour": 3600, "2hour": 7200, "4hour": 14400,
+        "6hour": 21600, "12hour": 43200, "daily": 86400,
+    }
+    return table.get(interval, 3600)
+
+
 @dataclass(slots=True)
 class MarketTrend:
-    """Coinalyze 5분 cycle 추세 분석 결과.
+    """Coinalyze 5분 cycle 추세 분석 결과 — multi-timeframe (v0.1.84).
 
     score 범위 -4~+4 (매매일지 정합 — OI/가격 ±2, CVD ±2, Funding ±1).
     합산 강도:
@@ -91,19 +105,33 @@ class MarketTrend:
         == -1 → 약한 숏 (short_weak)
         ≤ -2 → 강한 숏 (short_strong)
 
-    Aurora 진입 평가에 활용:
-        - 강한 추세 (|score| ≥ 2) + 진입 방향 반대 → 차단
-        - 그 외 → 신호 score × 가중치 부스트
+    v0.1.84: 단기 (15m) / 중단기 (4h) / 중기 (1D) 3 timeframe 박음. 진입 평가:
+        - 차단: 중기 (1D) 기준 — macro 추세 거역 진입 차단 (가장 보수적)
+        - booster: 셋 다 일치 → ×2.0 / 둘 일치 → ×1.5 / 한 개 → ×1.0 / 셋 다 반대 → ×0.5
+
+    legacy `score` / `direction` / `strong` 필드 = 중기 (1D) 측 박음 (이전 24h 동일).
     """
 
     coin: str  # "BTC" / "ETH"
+    # 중기 (1D) 측 — legacy 호환
     score: int  # -4 ~ +4
     direction: TrendDir
     strong: bool  # |score| >= 2
     reasons: list[str]
     fetched_at_ms: int
 
-    # 원본 데이터 (디버깅 + UI 표시용)
+    # v0.1.84: multi-timeframe scores (단기 / 중단기 / 중기)
+    score_short: int = 0       # 15m 단기
+    score_mid_short: int = 0   # 4h 중단기
+    score_mid: int = 0         # 1D 중기 (= score 와 동일)
+    direction_short: TrendDir = "neutral"
+    direction_mid_short: TrendDir = "neutral"
+    direction_mid: TrendDir = "neutral"
+    reasons_short: list[str] = field(default_factory=list)
+    reasons_mid_short: list[str] = field(default_factory=list)
+    reasons_mid: list[str] = field(default_factory=list)
+
+    # 원본 데이터 (디버깅 + UI 표시용) — 1D 기준
     price: float | None = None
     price_24h: float | None = None
     oi: float | None = None
@@ -170,41 +198,82 @@ class CoinalyzeClient:
             return self._cache.get(coin)
 
         agg_sym = FUTURES_AGG[coin]
+        # v0.1.84: multi-timeframe — 단기 (15min × 1봉) / 중단기 (4hour × 1봉) / 중기 (daily × 1봉)
+        tfs = [
+            ("short", "15min", 1),       # 15분 전 vs 현재
+            ("mid_short", "4hour", 1),   # 4시간 전 vs 현재
+            ("mid", "daily", 1),         # 1일 전 vs 현재
+        ]
+        results: dict[str, dict] = {}
+
         try:
             timeout = aiohttp.ClientTimeout(total=HTTP_TIMEOUT_SEC)
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                price, cvd_f, price_24h, cvd_f_24h = await self._get_ohlcv(
-                    session, agg_sym,
-                )
-                oi, oi_24h = await self._get_oi(session, agg_sym)
-                fr, _ = await self._get_funding(session, agg_sym)
-                cvd_s, _ = await self._get_cvd_spot_sum(
-                    session, CVD_SPOT[coin], price, price_24h,
-                )
+                for tf_name, interval, lookback in tfs:
+                    price, cvd_f, price_prev, cvd_f_prev = await self._get_ohlcv(
+                        session, agg_sym, interval=interval, lookback_bars=lookback,
+                    )
+                    oi, oi_prev = await self._get_oi(
+                        session, agg_sym, interval=interval, lookback_bars=lookback,
+                    )
+                    fr, _ = await self._get_funding(
+                        session, agg_sym, interval=interval, lookback_bars=lookback,
+                    )
+                    # CVD Spot — 1day 측만 fetch (나머지 timeframe 측 동일 추정,
+                    # spot trades feed 시간 단위 fetch X 라 cvd_spot 측 재계산 X).
+                    cvd_s, _ = await self._get_cvd_spot_sum(
+                        session, CVD_SPOT[coin], price, price_prev,
+                    ) if tf_name == "mid" else (None, None)
+
+                    score, direction, strong, reasons = _interpret_score(
+                        oi=oi, oi_24h=oi_prev, price=price, price_24h=price_prev,
+                        cvd_spot=cvd_s, cvd_futures=cvd_f, funding_rate=fr,
+                    )
+                    results[tf_name] = {
+                        "score": score, "direction": direction, "strong": strong,
+                        "reasons": reasons,
+                        "price": price, "price_prev": price_prev,
+                        "oi": oi, "oi_prev": oi_prev,
+                        "cvd_spot": cvd_s, "cvd_futures": cvd_f,
+                        "funding_rate": fr,
+                    }
         except Exception as e:  # noqa: BLE001 — 네트워크 실패 시 None 반환
             logger.warning("Coinalyze fetch 실패 (%s): %s", coin, e)
             return None
 
-        score, direction, strong, reasons = _interpret_score(
-            oi=oi, oi_24h=oi_24h, price=price, price_24h=price_24h,
-            cvd_spot=cvd_s, cvd_futures=cvd_f, funding_rate=fr,
-        )
+        # 중기 (1D) 측 = legacy `score` / `direction` / `strong` 그대로 박음
+        mid = results.get("mid", {})
+        short = results.get("short", {})
+        mid_short = results.get("mid_short", {})
 
         trend = MarketTrend(
-            coin=coin, score=score, direction=direction, strong=strong,
-            reasons=reasons,
+            coin=coin,
+            score=mid.get("score", 0),
+            direction=mid.get("direction", "neutral"),
+            strong=mid.get("strong", False),
+            reasons=mid.get("reasons", []),
             fetched_at_ms=int(time.time() * 1000),
-            price=price, price_24h=price_24h,
-            oi=oi, oi_24h=oi_24h,
-            cvd_spot=cvd_s, cvd_futures=cvd_f,
-            funding_rate=fr,
+            # multi-tf scores
+            score_short=short.get("score", 0),
+            score_mid_short=mid_short.get("score", 0),
+            score_mid=mid.get("score", 0),
+            direction_short=short.get("direction", "neutral"),
+            direction_mid_short=mid_short.get("direction", "neutral"),
+            direction_mid=mid.get("direction", "neutral"),
+            reasons_short=short.get("reasons", []),
+            reasons_mid_short=mid_short.get("reasons", []),
+            reasons_mid=mid.get("reasons", []),
+            # legacy 24h 원본 (UI)
+            price=mid.get("price"), price_24h=mid.get("price_prev"),
+            oi=mid.get("oi"), oi_24h=mid.get("oi_prev"),
+            cvd_spot=mid.get("cvd_spot"), cvd_futures=mid.get("cvd_futures"),
+            funding_rate=mid.get("funding_rate"),
         )
         self._cache[coin] = trend
         self._cache_ts[coin] = time.time()
         logger.info(
-            "Coinalyze trend %s: score=%+d (%s, %s) — %s",
-            coin, score, direction, "강함" if strong else "약함/중립",
-            " / ".join(reasons[:3]),
+            "Coinalyze trend %s [multi-tf]: 단기(15m)=%+d / 중단기(4h)=%+d / 중기(1D)=%+d",
+            coin, trend.score_short, trend.score_mid_short, trend.score_mid,
         )
         return trend
 
@@ -229,12 +298,23 @@ class CoinalyzeClient:
 
     async def _get_ohlcv(
         self, session: aiohttp.ClientSession, symbol: str,
+        interval: str = "1hour", lookback_bars: int = 24,
     ) -> tuple[float | None, float | None, float | None, float | None]:
-        """OHLCV history (1h) — 마지막 봉 + 24시간 전 봉 → price + CVD futures 산출."""
+        """OHLCV history — 마지막 봉 + lookback_bars 전 봉 → price + CVD futures.
+
+        v0.1.84: interval / lookback_bars 파라미터화 — multi-timeframe 박음.
+        - 단기: interval=15min, lookback_bars=1 (15분 전 vs 현재)
+        - 중단기: interval=4hour, lookback_bars=1 (4시간 전 vs 현재)
+        - 중기: interval=daily, lookback_bars=1 (1일 전 vs 현재)
+        - legacy: interval=1hour, lookback_bars=24 (24시간 전 vs 현재)
+        """
         now = int(time.time())
+        # 충분한 봉 받기 위해 시간 범위 박음 — interval 별 봉 단위 시간
+        interval_sec = _interval_to_seconds(interval)
+        from_ts = now - interval_sec * (lookback_bars + 5)  # 여유분 박음
         data = await self._fetch(session, "ohlcv-history", {
-            "symbols": symbol, "interval": "1hour",
-            "from": now - 90000, "to": now,
+            "symbols": symbol, "interval": interval,
+            "from": from_ts, "to": now,
         })
         if not isinstance(data, list) or not data:
             return None, None, None, None
@@ -242,7 +322,9 @@ class CoinalyzeClient:
         if len(history) < 2:
             return None, None, None, None
         last = history[-1]
-        prev = history[-25] if len(history) >= 25 else history[0]
+        # lookback_bars+1 위치 측 봉 (현재 -1 - lookback_bars 위치)
+        prev_idx = -(lookback_bars + 1)
+        prev = history[prev_idx] if len(history) >= lookback_bars + 1 else history[0]
 
         def calc(candle: dict) -> tuple[float | None, float | None]:
             price = candle.get("c")
@@ -258,16 +340,20 @@ class CoinalyzeClient:
 
     async def _get_oi(
         self, session: aiohttp.ClientSession, symbol: str,
+        interval: str = "1hour", lookback_bars: int = 24,
     ) -> tuple[float | None, float | None]:
-        """Open Interest 현재 + 24시간 전."""
+        """Open Interest 현재 + lookback 전. v0.1.84: multi-tf 파라미터화."""
         now = int(time.time())
         data_now = await self._fetch(session, "open-interest", {
             "symbols": symbol, "convert_to_usd": "true",
         })
         oi_now = data_now[0].get("value") if isinstance(data_now, list) and data_now else None
+        interval_sec = _interval_to_seconds(interval)
+        from_ts = now - interval_sec * (lookback_bars + 1)
+        to_ts = now - interval_sec * lookback_bars + 60  # 봉 1개 폭 박음
         data_hist = await self._fetch(session, "open-interest-history", {
-            "symbols": symbol, "interval": "1hour",
-            "from": now - 90000, "to": now - 82800, "convert_to_usd": "true",
+            "symbols": symbol, "interval": interval,
+            "from": from_ts, "to": to_ts, "convert_to_usd": "true",
         })
         oi_prev = None
         if isinstance(data_hist, list) and data_hist:
@@ -278,14 +364,18 @@ class CoinalyzeClient:
 
     async def _get_funding(
         self, session: aiohttp.ClientSession, symbol: str,
+        interval: str = "1hour", lookback_bars: int = 24,
     ) -> tuple[float | None, float | None]:
-        """Funding rate 현재 + 24시간 전."""
+        """Funding rate 현재 + lookback 전. v0.1.84: multi-tf 파라미터화."""
         now = int(time.time())
         data_now = await self._fetch(session, "funding-rate", {"symbols": symbol})
         fr_now = data_now[0].get("value") if isinstance(data_now, list) and data_now else None
+        interval_sec = _interval_to_seconds(interval)
+        from_ts = now - interval_sec * (lookback_bars + 1)
+        to_ts = now - interval_sec * lookback_bars + 60
         data_hist = await self._fetch(session, "funding-rate-history", {
-            "symbols": symbol, "interval": "1hour",
-            "from": now - 90000, "to": now - 82800,
+            "symbols": symbol, "interval": interval,
+            "from": from_ts, "to": to_ts,
         })
         fr_prev = None
         if isinstance(data_hist, list) and data_hist:
@@ -425,11 +515,9 @@ def _interpret_score(
 def trend_filter(trend: MarketTrend | None, signal_direction: str) -> bool:
     """추세 방향 필터 — 진입 차단 여부.
 
-    v0.1.58: 약한 추세 반대도 차단. 사용자 요청 — "추세 = 롱/강한 롱 이면
-    무조건 롱만, 추세 = 숏/강한 숏 이면 무조건 숏만". 중립 (score=0) 만 양방향 허용.
-
-    Why: BTC 강한 롱 / ETH 롱 추세인데 봇이 가격 매매로 SHORT 진입 후 -4.71% 손실.
-    약한 추세도 반대 방향 진입은 평균적으로 EV 음. trend.strong 조건 제거.
+    v0.1.58: 약한 추세 반대도 차단.
+    v0.1.84: multi-tf — **중기 (1D) 기준** 차단. 단기 (15m) 측 노이즈 차단 X
+    본질 정합. 사용자 결정 — "macro 추세 거역 차단".
 
     Args:
         trend: 현재 시장 추세 (None 이면 차단 X — 데이터 없으면 양방향 허용).
@@ -438,25 +526,26 @@ def trend_filter(trend: MarketTrend | None, signal_direction: str) -> bool:
     Returns:
         True 면 차단 (진입 X), False 면 통과.
     """
-    if trend is None or trend.direction == "neutral" or trend.score == 0:
-        return False  # 데이터 없음 / 중립 — 차단 X
-    if trend.direction == "long" and signal_direction == "short":
-        return True  # 추세 롱 (강/약 무관) → 숏 차단
-    if trend.direction == "short" and signal_direction == "long":
-        return True  # 추세 숏 (강/약 무관) → 롱 차단
+    if trend is None or trend.direction_mid == "neutral" or trend.score_mid == 0:
+        return False  # 데이터 없음 / 중기 중립 — 차단 X
+    if trend.direction_mid == "long" and signal_direction == "short":
+        return True  # 중기 추세 롱 → 숏 차단
+    if trend.direction_mid == "short" and signal_direction == "long":
+        return True  # 중기 추세 숏 → 롱 차단
     return False
 
 
 def trend_score_multiplier(trend: MarketTrend | None, signal_direction: str) -> float:
-    """진입 신호 score 가중치 — 추세 일치/중립/반대 따라 부스트.
+    """진입 신호 score 가중치 — multi-tf 정렬 일치 본질 (v0.1.84).
 
-    | 일치 정도 | 배율 |
+    단기 (15m) / 중단기 (4h) / 중기 (1D) 측 진입 방향 일치 개수 측 booster:
+
+    | 일치 개수 | 배율 |
     |-----------|------|
-    | 강한 추세 일치 (|score|≥2 + 같은 방향) | 1.5 |
-    | 약한 추세 일치 (|score|=1 + 같은 방향) | 1.3 |
-    | 중립 (score=0) | 1.0 |
-    | 약한 추세 반대 (|score|=1 + 다른 방향) | 0.7 |
-    | 강한 추세 반대 — trend_filter 가 차단 처리 (여기 도달 X) | 1.0 fallback |
+    | 셋 다 일치 (3 개) | 2.0 (강 정렬) |
+    | 둘 일치 (2 개) | 1.5 |
+    | 한 개 일치 (1 개) | 1.0 |
+    | 셋 다 반대 (0 개) | 0.5 (강 반대) |
 
     Args:
         trend: 현재 시장 추세 (None 이면 1.0).
@@ -464,11 +553,23 @@ def trend_score_multiplier(trend: MarketTrend | None, signal_direction: str) -> 
     """
     if trend is None:
         return 1.0
-    if trend.direction == "neutral" or trend.score == 0:
+    matches = 0
+    opposites = 0
+    for tf_dir in (
+        trend.direction_short,
+        trend.direction_mid_short,
+        trend.direction_mid,
+    ):
+        if tf_dir == signal_direction:
+            matches += 1
+        elif tf_dir != "neutral":
+            opposites += 1
+    if matches == 3:
+        return 2.0  # 셋 다 일치 — 강 정렬
+    if matches == 2:
+        return 1.5
+    if matches == 1:
         return 1.0
-    if trend.direction == signal_direction:
-        return 1.5 if trend.strong else 1.3
-    # 반대 방향 — 강한 반대는 trend_filter 가 차단했어야 (fallback 1.0)
-    if trend.strong:
-        return 1.0
-    return 0.7
+    if opposites >= 2:
+        return 0.5  # 둘 이상 반대 — 강 반대
+    return 1.0  # 셋 다 중립

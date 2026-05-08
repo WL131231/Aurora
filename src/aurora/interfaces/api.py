@@ -564,6 +564,12 @@ def create_app() -> FastAPI:
 
     # ───── Positions ────────────────────────────────
 
+    logger.info(
+        "[create_app] step 3.6 (%.3f초): /, /health, /indicators/list, /status 등록 OK",
+        _t.monotonic() - t0,
+    )
+    _flush()
+
     @app.get("/positions", response_model=list[PositionDTO])
     async def positions() -> list[PositionDTO]:
         """현재 열린 포지션 목록 — 거래소 어댑터의 ``get_positions()`` 결과 매핑.
@@ -616,6 +622,12 @@ def create_app() -> FastAPI:
         ]
 
     # ───── UI 핫 업데이트 (PR b) ────────────────────
+
+    logger.info(
+        "[create_app] step 3.7 (%.3f초): /positions 등록 OK",
+        _t.monotonic() - t0,
+    )
+    _flush()
 
     @app.post("/update/apply_ui", response_model=UiUpdateResponse)
     async def apply_ui_update_endpoint() -> UiUpdateResponse:
@@ -680,6 +692,12 @@ def create_app() -> FastAPI:
         )
 
     # ───── Trades (거래내역, v0.1.20 + v0.1.23) ────────
+
+    logger.info(
+        "[create_app] step 3.8 (%.3f초): /update/apply_ui 등록 OK",
+        _t.monotonic() - t0,
+    )
+    _flush()
 
     @app.get("/trades", response_model=list[TradeDTO])
     async def trades(
@@ -799,6 +817,12 @@ def create_app() -> FastAPI:
         return merged[:limit]
 
     # ───── Market Trend (Coinalyze, v0.1.54) ───────────
+
+    logger.info(
+        "[create_app] step 3.9 (%.3f초): /trades 등록 OK",
+        _t.monotonic() - t0,
+    )
+    _flush()
 
     @app.get("/market-trend", response_model=MarketTrendDTO)
     async def market_trend() -> MarketTrendDTO:
@@ -936,6 +960,12 @@ def create_app() -> FastAPI:
 
     # ───── Chart (봇 시점 차트, v0.1.86) ───────────────
 
+    logger.info(
+        "[create_app] step 3.10 (%.3f초): /market-trend, /release/latest, /apk-status, /stats 등록 OK",
+        _t.monotonic() - t0,
+    )
+    _flush()
+
     @app.get("/chart", response_model=ChartDTO)
     async def chart_endpoint(timeframe: str = "1H", limit: int = 100) -> ChartDTO:
         """봇이 현재 보고 있는 차트 데이터 — OHLCV + 지표 라인 + 진입 마커.
@@ -1072,6 +1102,12 @@ def create_app() -> FastAPI:
 
     # ───── Dashboard Flow (Phase 3, v0.1.87+) ─────────
 
+    logger.info(
+        "[create_app] step 3.11 (%.3f초): /chart 등록 OK",
+        _t.monotonic() - t0,
+    )
+    _flush()
+
     @app.get("/dashboard-flow", response_model=DashboardFlowDTO)
     async def dashboard_flow_endpoint(coin: str = "BTC") -> DashboardFlowDTO:
         """5 거래소 합본 시장 자료 — OI / Funding / L-S Ratio / Top Trader Ratio.
@@ -1133,6 +1169,12 @@ def create_app() -> FastAPI:
         )
 
     # ───── Config ───────────────────────────────────
+
+    logger.info(
+        "[create_app] step 3.12 (%.3f초): /dashboard-flow 등록 OK",
+        _t.monotonic() - t0,
+    )
+    _flush()
 
     @app.get("/config", response_model=ConfigDTO)
     async def get_config() -> ConfigDTO:
@@ -1244,6 +1286,12 @@ def create_app() -> FastAPI:
 
     # ───── 로그 (단순 폴링) ─────────────────────────
 
+    logger.info(
+        "[create_app] step 3.13 (%.3f초): /config + /start/stop/restart/relaunch 등록 OK",
+        _t.monotonic() - t0,
+    )
+    _flush()
+
     @app.get("/logs")
     async def get_logs(limit: int = 100) -> dict[str, Any]:
         """최근 로그 라인 조회 (단순 폴링용 — 실시간은 ``/ws/live``)."""
@@ -1277,6 +1325,12 @@ def create_app() -> FastAPI:
                     _ws_clients.discard(ws)
 
     log_buffer.set_broadcaster(broadcast_log)
+
+    logger.info(
+        "[create_app] step 3.14 (%.3f초): /logs + ws_clients/lock/broadcaster 박힘 — WebSocket 등록 시작",
+        _t.monotonic() - t0,
+    )
+    _flush()
 
     @app.websocket("/ws/live")
     async def ws_live(websocket: WebSocket) -> None:

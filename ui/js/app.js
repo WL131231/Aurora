@@ -824,6 +824,21 @@ function _renderMarketCard(card, t) {
     badge.className = "md-trend-badge " + _trendBadgeClass(t.score, t.direction);
     badge.textContent = _trendBadgeText(t.score, t.direction);
 
+    // v0.1.84: multi-tf trend (단기 15m / 중단기 4h / 중기 1D)
+    const tfMap = [
+        { sel: ".md-trend-short",     score: t.score_short,     dir: t.direction_short },
+        { sel: ".md-trend-mid-short", score: t.score_mid_short, dir: t.direction_mid_short },
+        { sel: ".md-trend-mid",       score: t.score_mid,       dir: t.direction_mid },
+    ];
+    for (const { sel, score, dir } of tfMap) {
+        const el = card.querySelector(sel);
+        if (!el) continue;
+        const text = _trendBadgeText(score ?? 0, dir ?? "neutral");
+        const cls = _trendBadgeClass(score ?? 0, dir ?? "neutral");
+        el.textContent = text;
+        el.className = sel.slice(1) + " md-trend-badge " + cls;
+    }
+
     // 24h 변화율 (가격)
     const c24h = card.querySelector(".md-24h");
     const pctText = _fmtPct(t.price, t.price_24h);

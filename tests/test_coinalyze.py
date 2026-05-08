@@ -91,17 +91,35 @@ def test_interpret_score_neutral() -> None:
 # ============================================================
 
 
-def _trend(score: int) -> MarketTrend:
-    """Helper — score 기반 MarketTrend 생성."""
+def _direction_for(score: int) -> str:
     if score >= 1:
-        direction = "long"
-    elif score <= -1:
-        direction = "short"
-    else:
-        direction = "neutral"
+        return "long"
+    if score <= -1:
+        return "short"
+    return "neutral"
+
+
+def _trend(
+    score: int,
+    *,
+    s_short: int | None = None,
+    s_mid_short: int | None = None,
+    s_mid: int | None = None,
+) -> MarketTrend:
+    """Helper — score 기반 MarketTrend 생성. v0.1.84: multi-tf 박음.
+
+    기본: 셋 다 같은 score (legacy 단일 tf 본질). multi-tf 케이스 측 명시 박음.
+    """
+    sh = s_short if s_short is not None else score
+    msh = s_mid_short if s_mid_short is not None else score
+    md = s_mid if s_mid is not None else score
     return MarketTrend(
-        coin="BTC", score=score, direction=direction,
-        strong=abs(score) >= 2, reasons=["test"], fetched_at_ms=0,
+        coin="BTC", score=md, direction=_direction_for(md),
+        strong=abs(md) >= 2, reasons=["test"], fetched_at_ms=0,
+        score_short=sh, score_mid_short=msh, score_mid=md,
+        direction_short=_direction_for(sh),
+        direction_mid_short=_direction_for(msh),
+        direction_mid=_direction_for(md),
     )
 
 
@@ -156,35 +174,42 @@ def test_trend_filter_none_no_block() -> None:
 # ============================================================
 
 
-def test_trend_multiplier_strong_match() -> None:
-    """강한 추세 일치 → ×1.5."""
-    assert trend_score_multiplier(_trend(2), "long") == 1.5
-    assert trend_score_multiplier(_trend(-2), "short") == 1.5
+def test_trend_multiplier_all_three_match() -> None:
+    """v0.1.84: 셋 다 일치 (단기/중단기/중기 모두 같은 방향) → ×2.0 (강 정렬)."""
+    assert trend_score_multiplier(_trend(2), "long") == 2.0
+    assert trend_score_multiplier(_trend(-2), "short") == 2.0
+    # 약한 추세도 셋 다 일치 시 ×2.0
+    assert trend_score_multiplier(_trend(1), "long") == 2.0
 
 
-def test_trend_multiplier_weak_match() -> None:
-    """약한 추세 일치 → ×1.3."""
-    assert trend_score_multiplier(_trend(1), "long") == 1.3
-    assert trend_score_multiplier(_trend(-1), "short") == 1.3
+def test_trend_multiplier_two_match() -> None:
+    """v0.1.84: 둘 일치 / 한 개 X → ×1.5."""
+    # 단기 long + 중단기 long + 중기 short → long 신호 측 matches=2
+    t = _trend(0, s_short=1, s_mid_short=1, s_mid=-1)
+    assert trend_score_multiplier(t, "long") == 1.5
+
+
+def test_trend_multiplier_one_match() -> None:
+    """v0.1.84: 한 개만 일치 → ×1.0."""
+    # 단기 long + 중단기 short + 중기 short → long 신호 측 matches=1
+    t = _trend(0, s_short=1, s_mid_short=-1, s_mid=-1)
+    assert trend_score_multiplier(t, "long") == 1.0
 
 
 def test_trend_multiplier_neutral() -> None:
-    """중립 → ×1.0."""
+    """셋 다 중립 → ×1.0."""
     assert trend_score_multiplier(_trend(0), "long") == 1.0
     assert trend_score_multiplier(_trend(0), "short") == 1.0
 
 
-def test_trend_multiplier_weak_opposite() -> None:
-    """약한 추세 반대 → ×0.7."""
-    assert trend_score_multiplier(_trend(1), "short") == 0.7
-    assert trend_score_multiplier(_trend(-1), "long") == 0.7
-
-
-def test_trend_multiplier_strong_opposite_fallback() -> None:
-    """강한 추세 반대 — trend_filter 가 차단 처리해야 (여기 도달 X), fallback ×1.0."""
-    # 차단 호출자가 안 했을 경우 fallback. multiplier 자체는 1.0 반환 (안전).
-    assert trend_score_multiplier(_trend(2), "short") == 1.0
-    assert trend_score_multiplier(_trend(-2), "long") == 1.0
+def test_trend_multiplier_strong_opposite() -> None:
+    """v0.1.84: 둘 이상 반대 방향 → ×0.5 (강 반대)."""
+    # 셋 다 반대
+    assert trend_score_multiplier(_trend(1), "short") == 0.5
+    assert trend_score_multiplier(_trend(-1), "long") == 0.5
+    # 둘 반대 + 한 개 중립
+    t = _trend(0, s_short=-1, s_mid_short=-1, s_mid=0)
+    assert trend_score_multiplier(t, "long") == 0.5
 
 
 def test_trend_multiplier_none() -> None:

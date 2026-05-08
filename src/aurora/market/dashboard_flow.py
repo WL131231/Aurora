@@ -170,19 +170,23 @@ def get_aggregator() -> DashboardFlowAggregator:
 
     v0.1.87: Binance
     v0.1.88: + Bybit, OKX
-    v0.1.89: + Bitget, Hyperliquid (예정)
+    v0.1.89: + Bitget, Hyperliquid (5/5 완성)
     """
     global _singleton
     if _singleton is None:
         from aurora.market.exchanges import (
             BinanceMarketData,
+            BitgetMarketData,
             BybitMarketData,
+            HyperliquidMarketData,
             OkxMarketData,
         )
         _singleton = DashboardFlowAggregator([
             BinanceMarketData(),
             BybitMarketData(),
             OkxMarketData(),
+            BitgetMarketData(),
+            HyperliquidMarketData(),
         ])
     return _singleton
 

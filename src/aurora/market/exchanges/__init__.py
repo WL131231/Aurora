@@ -10,18 +10,23 @@ Long-Short Ratio / Top Trader Ratio 분리 표시. Phase 3 dashboard view 측 �
 박힘 순서:
 - v0.1.87: Binance
 - v0.1.88: Bybit, OKX
-- v0.1.89: Bitget, Hyperliquid (예정)
+- v0.1.89: Bitget, Hyperliquid (5/5 완성)
+- v0.1.90: Whale Notional (별도, 거래 stream 본질)
 """
 
 from aurora.market.exchanges.base import ExchangeMarketData, ExchangeSnapshot
 from aurora.market.exchanges.binance import BinanceMarketData
+from aurora.market.exchanges.bitget import BitgetMarketData
 from aurora.market.exchanges.bybit import BybitMarketData
+from aurora.market.exchanges.hyperliquid import HyperliquidMarketData
 from aurora.market.exchanges.okx import OkxMarketData
 
 __all__ = [
     "BinanceMarketData",
+    "BitgetMarketData",
     "BybitMarketData",
     "ExchangeMarketData",
     "ExchangeSnapshot",
+    "HyperliquidMarketData",
     "OkxMarketData",
 ]

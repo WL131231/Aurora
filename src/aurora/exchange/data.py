@@ -166,12 +166,26 @@ class MultiTfCache:
         """주어진 TF 들 새 봉 fetch + cache append (병렬)."""
 
         async def _fetch_and_append(tf: str) -> None:
+            # v0.1.97: 빈 응답 1회 retry — 거래소 일시 장애 시 stale 봉 잔존 차단.
+            # 거래소 측 가끔 빈 OHLCV 응답 (rate limit 임시 / 봉 경계 race).
             new_df = await self._client.fetch_ohlcv(
                 self._symbol, tf, limit=_REFRESH_LIMIT,
             )
             if new_df.empty:
-                logger.warning("MultiTfCache: %s %s fetch 빈 응답", self._symbol, tf)
-                return
+                logger.warning(
+                    "MultiTfCache: %s %s fetch 빈 응답 — 1초 후 1회 retry",
+                    self._symbol, tf,
+                )
+                await asyncio.sleep(1.0)
+                new_df = await self._client.fetch_ohlcv(
+                    self._symbol, tf, limit=_REFRESH_LIMIT,
+                )
+                if new_df.empty:
+                    logger.warning(
+                        "MultiTfCache: %s %s retry 후도 빈 응답 — stale 유지",
+                        self._symbol, tf,
+                    )
+                    return
             old_df = self._cache.get(tf, pd.DataFrame())
             if len(old_df):
                 # 기존 마지막 ts 이후 봉만 골라 append (중복 방지)

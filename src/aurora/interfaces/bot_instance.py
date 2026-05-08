@@ -70,13 +70,43 @@ def register_trade_alert_callback(fn: Callable[[str, dict], None]) -> None:
     _trade_alert_callbacks.append(fn)
 
 
+# v0.1.97: 콜백 별 연속 실패 카운트 — 3회 연속 fail 시 자동 disable + ERROR 로그.
+# id(fn) 키로 박음 (콜백 함수 객체 동일성). 성공 시 카운트 reset.
+_trade_alert_fail_counts: dict[int, int] = {}
+_trade_alert_disabled: set[int] = set()
+_TRADE_ALERT_FAIL_THRESHOLD = 3
+
+
 def _fire_trade_alert(event: str, data: dict) -> None:
-    """등록된 콜백 일괄 호출 (실패 시 silent — 매매 사이클 보호)."""
+    """등록된 콜백 일괄 호출.
+
+    v0.1.97: 실패 시 WARN 로그 박음 + 3회 연속 fail 시 자동 disable + ERROR 로그.
+    이전 silent 패턴 측 텔레그램 토큰 만료 / 네트워크 장애 시 사용자 측 모름 위험.
+    """
     for fn in _trade_alert_callbacks:
+        fn_id = id(fn)
+        if fn_id in _trade_alert_disabled:
+            continue
         try:
             fn(event, data)
-        except Exception:
-            pass
+            # 성공 — 카운트 reset
+            _trade_alert_fail_counts.pop(fn_id, None)
+        except Exception as e:  # noqa: BLE001 — 매매 사이클 보호 + 진단 자료 박음
+            count = _trade_alert_fail_counts.get(fn_id, 0) + 1
+            _trade_alert_fail_counts[fn_id] = count
+            logger.warning(
+                "trade alert callback %s 실패 (%d/%d): %s",
+                getattr(fn, "__qualname__", repr(fn)),
+                count, _TRADE_ALERT_FAIL_THRESHOLD, e,
+            )
+            if count >= _TRADE_ALERT_FAIL_THRESHOLD:
+                _trade_alert_disabled.add(fn_id)
+                logger.error(
+                    "trade alert callback %s 측 %d 회 연속 fail — 자동 disable. "
+                    "원인 점검 후 봇 재시작 필요.",
+                    getattr(fn, "__qualname__", repr(fn)),
+                    _TRADE_ALERT_FAIL_THRESHOLD,
+                )
 
 
 # 매매 사이클 폴링 주기 — 봉 경계 검출은 cache.step 자체가 처리.
@@ -202,9 +232,12 @@ class BotInstance:
         # v0.1.36: InsufficientFunds 무한 루프 fix — place_order 거부 (110007) 발생 시
         # backoff. external_position flag 와 별개 (다른 페어 외부 포지션 케이스 대응 — 본
         # 페어 fetch_position=None 이라 external_position 가 reset 되어도 backoff 유지).
-        # 5분 후 자동 재시도 — 사용자 청산 / 잔고 회복 가정.
+        # v0.1.97: 지수 backoff + jitter 박음 — 매번 5분 고정 대신 5/10/20/40/60분
+        # 측 거래소 친화 (rate limit / DDoS 보호 위험 차단). 잔고 회복 후 1회 진입
+        # 성공 시 카운트 reset.
         self._funds_blocked_until_ms: int = 0
         self._funds_blocked_warned: bool = False
+        self._funds_blocked_attempts: int = 0  # 연속 InsufficientFunds 횟수 (reset 시 0)
 
         # v0.1.42: bar-level 진입 dedup — 같은 봉 안 같은 source 재진입 차단.
         # Why: BB 신호 (또는 다른 stateful 신호) 가 봉 안 살아있으면 청산 후 즉시
@@ -1007,21 +1040,26 @@ class BotInstance:
                 # reduce_only 위반 또는 잔여 위험 노출. 보수적으로 min 으로 갱신.
                 # v0.1.38: 임계 1e-6 → 1e-3 (0.001 BTC) 상향. Bybit step size 라운딩
                 # (~0.0001~0.001) 차이는 silent — 사용자 직접 거래 (>0.001) 만 WARNING.
-                qty_diff = abs(actual.qty - self._executor._remaining_qty)
-                if qty_diff > 1e-3:
-                    logger.warning(
-                        "qty 불일치: 봇 %.4f / 거래소 %.4f (차이 %.4f) → min 보수 갱신",
-                        self._executor._remaining_qty, actual.qty, qty_diff,
-                    )
-                if qty_diff > 1e-6:
-                    # 작은 라운딩 차이 (1e-6~1e-3) 도 min 갱신은 함 (silent)
-                    self._executor._remaining_qty = min(
-                        self._executor._remaining_qty, actual.qty,
-                    )
-                    if self._executor._remaining_qty <= 1e-9:
-                        # 거래소 측 0 (사용자 전량 청산) — reset
-                        self._executor.reset_position()
-                        return
+                # v0.1.97: ccxt 응답 None 방어 — actual.qty None 시 sync skip.
+                act_qty = actual.qty if actual.qty is not None else None
+                if act_qty is None:
+                    logger.warning("fetch_position 응답 측 qty=None — qty sync skip")
+                else:
+                    qty_diff = abs(act_qty - self._executor._remaining_qty)
+                    if qty_diff > 1e-3:
+                        logger.warning(
+                            "qty 불일치: 봇 %.4f / 거래소 %.4f (차이 %.4f) → min 보수 갱신",
+                            self._executor._remaining_qty, act_qty, qty_diff,
+                        )
+                    if qty_diff > 1e-6:
+                        # 작은 라운딩 차이 (1e-6~1e-3) 도 min 갱신은 함 (silent)
+                        self._executor._remaining_qty = min(
+                            self._executor._remaining_qty, act_qty,
+                        )
+                        if self._executor._remaining_qty <= 1e-9:
+                            # 거래소 측 0 (사용자 전량 청산) — reset
+                            self._executor.reset_position()
+                            return
 
             # 3-3. 트레일링 SL 갱신 + tp_hits 카운트
             prev_tp_hits = self._executor._tp_hits
@@ -1180,24 +1218,35 @@ class BotInstance:
                 logger.warning("fetch_position (외부) timeout (5초) — None 가정")
                 external = None
             if external is not None:
+                # v0.1.97: ccxt 응답 측 None 방어 — qty / entry_price 측 None 시
+                # arithmetic crash 방지 (audit P1). 거래소 일시 장애 시 봇 죽음 차단.
+                ext_qty = external.qty if external.qty is not None else 0.0
+                ext_entry = external.entry_price if external.entry_price is not None else 0.0
+                if ext_qty == 0.0 or ext_entry == 0.0:
+                    logger.warning(
+                        "외부 포지션 응답 측 None / 0 필드 (qty=%s entry=%s) — skip",
+                        external.qty, external.entry_price,
+                    )
+                    self._external_position = False
+                    return
                 # v0.1.59: dust 잔여 자동 정리 — 분할 익절 후 0.001 BTC 같은 잔여를
                 # 외부 포지션으로 오인지하지 말고 봇이 reduce_only 로 정리.
                 # notional < DUST_NOTIONAL_USD ($200) 면 dust 로 간주. 사용자가
                 # 직접 그렇게 작은 포지션 박을 가능성 0 (BTC 0.001 = ~$80).
                 # Why: 사용자 보고 v0.1.58 — 분할 익절 후 0.001 BTC 잔여 → 외부 포지션
                 # 인식 → 봇 정지 → 사용자 수동 정리 후 봇 stop/start 필요.
-                notional = abs(external.qty) * external.entry_price
+                notional = abs(ext_qty) * ext_entry
                 if notional < _DUST_NOTIONAL_USD:
                     logger.info(
                         "잔여 dust 자동 정리 (외부 X): %s qty=%.6f notional=$%.2f",
-                        self._symbol, external.qty, notional,
+                        self._symbol, ext_qty, notional,
                     )
                     try:
                         dust_side = "sell" if external.side == "long" else "buy"
                         await self._client.place_order(
                             symbol=self._symbol,
                             side=dust_side,
-                            qty=abs(external.qty),
+                            qty=abs(ext_qty),
                             price=None,
                             reduce_only=True,
                         )
@@ -1215,7 +1264,7 @@ class BotInstance:
                     logger.warning(
                         "외부 포지션 감지: %s %s qty=%.4f entry=%.2f — Aurora 진입 skip "
                         "(사용자가 직접 청산하면 자동 매매 재개)",
-                        self._symbol, external.side, external.qty, external.entry_price,
+                        self._symbol, external.side, ext_qty, ext_entry,
                     )
                     self._external_position_warned = True
                 self._external_position = True
@@ -1411,13 +1460,20 @@ class BotInstance:
             # new order") 명시 catch. 5분 backoff + 1회 WARNING. 잔고 회복 시 자동 재개.
             # v0.1.37: 명시 ccxt.InsufficientFunds catch 로 변경 (이전 string match 보다
             # robust + 가독성 ↑).
-            self._funds_blocked_until_ms = now_ms + 5 * 60 * 1000  # 5분
+            # v0.1.97: 지수 backoff + jitter — 매 5분 고정 → 5/10/20/40/60(cap) 분
+            # + ±10% jitter. 거래소 측 같은 에러 반복 호출 차단 (rate limit 보호).
+            import random
+            self._funds_blocked_attempts += 1
+            base_minutes = min(5 * (2 ** (self._funds_blocked_attempts - 1)), 60)
+            jitter = random.uniform(0.9, 1.1)  # noqa: S311 — 보안 X 단순 jitter
+            backoff_ms = int(base_minutes * 60 * 1000 * jitter)
+            self._funds_blocked_until_ms = now_ms + backoff_ms
             if not self._funds_blocked_warned:
                 logger.warning(
-                    "거래소 진입 거부 (InsufficientFunds: %s) — 5분 backoff. 잔고: "
-                    "total=%.2f free=%.2f USDT / 요청 마진=%.2f USDT. 거래소 외부 "
+                    "거래소 진입 거부 (InsufficientFunds: %s) — %.1f분 backoff (시도 %d회). "
+                    "잔고: total=%.2f free=%.2f USDT / 요청 마진=%.2f USDT. 거래소 외부 "
                     "포지션/마진 점유 확인 권장. 잔고 회복 시 자동 재개.",
-                    str(e)[:120],
+                    str(e)[:120], backoff_ms / 60_000, self._funds_blocked_attempts,
                     balance.total_usd, balance.free_usd, plan.position.margin_usd,
                 )
                 self._funds_blocked_warned = True
@@ -1425,6 +1481,9 @@ class BotInstance:
         # v0.1.42: bar dedup 기록 — 진입 성공 후. 같은 봉 + 같은 source 재진입 차단.
         self._last_entry_bar_ts[primary_tf] = bar_ts
         self._last_entry_sources = decision_sources
+
+        # v0.1.97: 진입 성공 시 backoff 카운트 reset — 잔고 회복 정상 신호
+        self._funds_blocked_attempts = 0
 
         logger.info(
             "BotInstance: 진입 — %s %s qty=%.6f (triggered_by=%s, score=%.2f, sl=%.2f)",

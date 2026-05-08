@@ -631,6 +631,26 @@ body {
 .log-module-btn.active-interfaces  { border-color: rgba(191,192,209,0.2); color: var(--text-2); background: rgba(191,192,209,0.06); }
 .log-module-btn.active-backtest    { border-color: rgba(191,192,209,0.2); color: var(--text-2); background: rgba(191,192,209,0.06); }
 
+/* 로그 퀵 필터 버튼 (ERROR만 / 전체) */
+.log-quick-btn {
+    font-family: var(--font-sans);
+    font-size: 10px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 99px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-4);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    user-select: none;
+}
+.log-quick-btn:hover {
+    border-color: rgba(251, 113, 133, 0.5);
+    color: #fb7185;
+    background: rgba(251, 113, 133, 0.08);
+}
+
 /* ↓ 최신으로 — 사용자가 위로 스크롤 중일 때 나타나는 플로팅 버튼 */
 .log-box-wrap {
     position: relative;

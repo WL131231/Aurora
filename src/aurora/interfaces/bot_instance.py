@@ -213,6 +213,13 @@ class BotInstance:
         self._last_entry_bar_ts: dict[str, int] = {}  # {tf: bar_ts_ms}
         self._last_entry_sources: tuple[str, ...] = ()
 
+        # v0.1.91: priority_swap 같은 봉 안 1회 한정 — 무한 사고팔고 fix.
+        # Why: 사용자 보고 (2026-05-08) — Harmonic 만 켜놓아도 PRIORITY swap 측
+        # EMA/RSI (Fixed 지표) 가 항상 emit → swap 후 dedup reset → 다음 step
+        # harmonic 재진입 → 또 EMA fire → swap → 무한 사고팔고. 같은 1H 봉 안
+        # priority_swap 1회만 박음. 다음 봉 닫힘 후 새 swap 가능.
+        self._last_priority_swap_bar_ts: int = 0  # ms epoch
+
         # v0.1.52: fetch_position 일시 None 보호 — 연속 N회 None 일 때만 reset.
         # Why: Bybit demo API 일시 응답 지연 / 빈 응답 → 봇 자기 진입 포지션을
         # 외부 포지션으로 오인지 (사용자 보고 v0.1.51, "외부 포지션 감지" 경고
@@ -1075,7 +1082,11 @@ class BotInstance:
 
                 # v0.1.51: PRIORITY swap — 더 높은 우선순위 신호 (작은 숫자) 우선 처리.
                 # 가장 높은 우선순위 새 신호 한 개만 처리 (여러 개 동시면 first 우선).
+                # v0.1.91: 같은 봉 안 swap 1회 한정 — 무한 사고팔고 fix.
                 priority_handled = False
+                swap_blocked_same_bar = (
+                    self._last_priority_swap_bar_ts == bar_ts_pos
+                )
                 for new_sig in sorted(rev_signals, key=lambda s: _signal_priority(s.source)):
                     new_priority = _signal_priority(new_sig.source)
                     if new_priority >= cur_priority:
@@ -1095,6 +1106,15 @@ class BotInstance:
                         priority_handled = True
                         break
                     # 반대 방향 → 청산 + 재진입 (다음 step 진입 평가에서 자연 진입)
+                    # v0.1.91: 같은 봉 안 이미 swap 한 번 박힘 = 차단 (무한 사고팔고 방지).
+                    if swap_blocked_same_bar:
+                        logger.info(
+                            "PRIORITY swap 차단 (같은 봉 안 1회 한정 v0.1.91): "
+                            "%s vs %s — 다음 봉부터 재평가",
+                            cur_sources, new_sig.source,
+                        )
+                        priority_handled = True
+                        break
                     logger.info(
                         "PRIORITY swap (%s → %s, 반대 방향): 청산 + 재진입 흐름",
                         cur_sources, new_sig.source,
@@ -1108,6 +1128,8 @@ class BotInstance:
                     # PRIORITY swap = 의도적 반대 방향 진입이라 사고팔고 무한 루프 위험 X.
                     self._last_entry_bar_ts.clear()
                     self._last_entry_sources = ()
+                    # v0.1.91: 같은 봉 안 swap 박힌 시각 박음 — 다음 swap 시도 차단.
+                    self._last_priority_swap_bar_ts = bar_ts_pos
                     priority_handled = True
                     break
 

@@ -312,6 +312,9 @@ async function refreshDashboard() {
         // v0.1.54: Market Data (Coinalyze 추세) — 매 dashboard 폴링마다 호출.
         // 백엔드 5분 cache 박힘 → 사용자 UI 반응성 ↑ + API 한도 영향 X.
         await refreshMarketTrend();
+
+        // v0.1.86: 봇 시점 차트 — 봇 가동 시만 enabled. 폴링 주기 = dashboard 와 동일 (15초).
+        await refreshBotChart();
     } catch (_) {
         connDot.style.background = "#fb7185";
         connDot.style.boxShadow  = "0 0 8px #fb7185";
@@ -906,6 +909,167 @@ async function refreshMarketTrend() {
         _renderMarketCard(card, t);
     }
 }
+
+// ============================================================
+// v0.1.86: 봇 시점 차트 (lightweight-charts) — OHLCV + 지표 라인 + 진입 마커
+// ============================================================
+const Chart = {
+    chart: null,
+    candleSeries: null,
+    lineSeries: {},      // { ema_fast, ema_slow, bb_upper, bb_middle, bb_lower, st_fast, st_slow }
+    timeframe: "1H",
+    overlays: { ema: true, bb: true, st: true },
+    _resizeObserver: null,
+};
+
+function _initBotChart() {
+    if (Chart.chart) return;
+    if (typeof LightweightCharts === "undefined") {
+        // CDN 로드 실패 — 빈 placeholder 유지
+        return;
+    }
+    const container = document.getElementById("bot-chart");
+    if (!container) return;
+    Chart.chart = LightweightCharts.createChart(container, {
+        layout: {
+            background: { type: "solid", color: "transparent" },
+            textColor: "#a1a1aa",
+            fontFamily: "'JetBrains Mono', monospace",
+        },
+        grid: {
+            vertLines: { color: "rgba(96, 81, 155, 0.08)" },
+            horzLines: { color: "rgba(96, 81, 155, 0.08)" },
+        },
+        crosshair: { mode: 1 },
+        rightPriceScale: { borderColor: "rgba(96, 81, 155, 0.18)" },
+        timeScale: {
+            borderColor: "rgba(96, 81, 155, 0.18)",
+            timeVisible: true,
+            secondsVisible: false,
+        },
+        autoSize: true,
+    });
+    Chart.candleSeries = Chart.chart.addCandlestickSeries({
+        upColor: "#34d399",
+        downColor: "#fb7185",
+        borderUpColor: "#34d399",
+        borderDownColor: "#fb7185",
+        wickUpColor: "#34d399",
+        wickDownColor: "#fb7185",
+    });
+    // 지표 라인 — 색 / 두께 차별
+    const lineDefs = {
+        ema_fast:  { color: "#a78bfa", lineWidth: 1, title: "EMA20" },
+        ema_slow:  { color: "#7c3aed", lineWidth: 1, title: "EMA50" },
+        bb_upper:  { color: "rgba(96, 165, 250, 0.6)", lineWidth: 1, title: "BB↑" },
+        bb_middle: { color: "rgba(96, 165, 250, 0.35)", lineWidth: 1, lineStyle: 2, title: "BB·" },
+        bb_lower:  { color: "rgba(96, 165, 250, 0.6)", lineWidth: 1, title: "BB↓" },
+        st_fast:   { color: "#fbbf24", lineWidth: 1, title: "ST(2)" },
+        st_slow:   { color: "#f97316", lineWidth: 1, title: "ST(3)" },
+    };
+    for (const [key, opts] of Object.entries(lineDefs)) {
+        Chart.lineSeries[key] = Chart.chart.addLineSeries({
+            ...opts,
+            lastValueVisible: false,
+            priceLineVisible: false,
+        });
+    }
+}
+
+function _applyChartOverlays() {
+    // 토글 상태에 따라 라인 표시/숨김
+    const map = {
+        ema: ["ema_fast", "ema_slow"],
+        bb:  ["bb_upper", "bb_middle", "bb_lower"],
+        st:  ["st_fast", "st_slow"],
+    };
+    for (const [group, keys] of Object.entries(map)) {
+        const visible = !!Chart.overlays[group];
+        for (const k of keys) {
+            const s = Chart.lineSeries[k];
+            if (s) s.applyOptions({ visible });
+        }
+    }
+}
+
+async function refreshBotChart() {
+    const section = document.getElementById("bot-chart-section");
+    const empty = document.getElementById("chart-empty");
+    const status = document.getElementById("chart-status");
+    const symEl = document.getElementById("chart-symbol");
+    if (!section) return;
+
+    let data;
+    try {
+        data = await Api.getChart(Chart.timeframe, 100);
+    } catch (_) {
+        if (status) status.textContent = "데이터 로드 실패";
+        return;
+    }
+
+    if (!data || !data.enabled) {
+        if (empty) {
+            empty.classList.remove("hidden");
+            empty.textContent = "봇 가동 시 자동으로 표시됨";
+        }
+        if (status) status.textContent = "봇 미가동";
+        if (symEl) symEl.textContent = "—";
+        return;
+    }
+
+    _initBotChart();
+    if (!Chart.chart) {
+        if (status) status.textContent = "차트 라이브러리 로드 실패 (네트워크?)";
+        return;
+    }
+
+    // 캔들 + 지표 박기
+    Chart.candleSeries.setData(data.candles || []);
+    const lineKeys = ["ema_fast", "ema_slow", "bb_upper", "bb_middle", "bb_lower", "st_fast", "st_slow"];
+    for (const k of lineKeys) {
+        const s = Chart.lineSeries[k];
+        if (s) s.setData(data[k] || []);
+    }
+    _applyChartOverlays();
+
+    // 마커 — 진입(▲/▼) + 청산(○) — 캔들 시리즈 위에 박힘
+    Chart.candleSeries.setMarkers(data.markers || []);
+
+    // 메타 갱신
+    if (symEl) symEl.textContent = `${data.symbol || "—"} · ${data.timeframe}`;
+    if (status) {
+        const n = (data.candles || []).length;
+        const m = (data.markers || []).length;
+        status.textContent = `${n} 봉 · 마커 ${m}`;
+    }
+    if (empty) empty.classList.add("hidden");
+}
+
+// 차트 토글 — TF / 오버레이 (DOM ready 후 박힘)
+function _wireChartToggles() {
+    const tfBox = document.getElementById("chart-tf-toggle");
+    if (tfBox) {
+        for (const btn of tfBox.querySelectorAll("button")) {
+            btn.addEventListener("click", () => {
+                tfBox.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                Chart.timeframe = btn.dataset.tf;
+                refreshBotChart();
+            });
+        }
+    }
+    const ovBox = document.getElementById("chart-overlay-toggle");
+    if (ovBox) {
+        for (const btn of ovBox.querySelectorAll("button")) {
+            btn.addEventListener("click", () => {
+                btn.classList.toggle("active");
+                Chart.overlays[btn.dataset.ind] = btn.classList.contains("active");
+                _applyChartOverlays();
+            });
+        }
+    }
+}
+_wireChartToggles();
 
 // 알림 X (닫기) — 해당 tag 만 영구 dismiss
 document.getElementById("release-alert-close")?.addEventListener("click", () => {

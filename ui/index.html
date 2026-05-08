@@ -225,7 +225,7 @@
                         </div>
 
                         <!-- v0.1.114: Market Flow 측 좌측 컬럼 (Market Data 하단) 이동 (사용자 요청) -->
-                        <!-- v0.1.87: Phase 3 Dashboard Flow — 거래소 5개 합본 (60초 cache) -->
+                        <!-- v0.1.115: 5단 L/S segments + 14D 차트 + L/S timeline 측 메인 (사용자 예시 이미지대로) -->
                         <div class="section-title" style="margin-top: 1.5rem">
                             Market Flow <span class="text-xs text-zinc-500">— 5 거래소 합본</span>
                             <span class="dflow-coin-toggle" id="dflow-coin-toggle">
@@ -233,6 +233,57 @@
                                 <button data-coin="ETH">ETH</button>
                             </span>
                         </div>
+
+                        <!-- v0.1.115: 5단 L/S Ratio Segments (5분 snapshot) -->
+                        <div class="dflow-ratios-card" id="dflow-ratios-card">
+                            <div class="dflow-ratios-title">
+                                LONG / SHORT RATIO
+                                <span class="text-xs text-zinc-500" id="dflow-ratios-meta">5분 snapshot</span>
+                            </div>
+                            <div class="dflow-ratios-list" id="dflow-ratios-list">
+                                <div class="dflow-empty">로드 중…</div>
+                            </div>
+                        </div>
+
+                        <!-- v0.1.115: 14D Series Chart (price + CVD + OI + funding + taker delta) -->
+                        <div class="dflow-series-card">
+                            <div class="dflow-series-title">
+                                14D 시계열
+                                <span class="text-xs text-zinc-500" id="dflow-series-meta">5 거래소 합본 (5분 cache)</span>
+                            </div>
+                            <!-- 메인 차트: Price (좌 axis) + OI (우 axis 상부) + Perp CVD (우 axis 하부 별도) -->
+                            <div class="dflow-chart-wrap">
+                                <div id="dflow-chart-price" class="dflow-chart"></div>
+                                <div class="dflow-chart-legend mono">
+                                    <span class="leg-price">Price</span>
+                                    <span class="leg-oi">OI</span>
+                                    <span class="leg-cvd">Perp CVD</span>
+                                </div>
+                            </div>
+                            <!-- 보조 차트: Funding bars + Taker Δvol histogram -->
+                            <div class="dflow-chart-wrap">
+                                <div id="dflow-chart-flow" class="dflow-chart dflow-chart-sm"></div>
+                                <div class="dflow-chart-legend mono">
+                                    <span class="leg-funding">Funding</span>
+                                    <span class="leg-taker">Taker Δ</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- v0.1.115: 14D L/S Timeline (하단 띠 — 봉별 long%/short%) -->
+                        <div class="dflow-timeline-card">
+                            <div class="dflow-timeline-title">
+                                14D LONG/SHORT TIMELINE
+                                <span class="text-xs text-zinc-500">global account ratio (OI 가중)</span>
+                            </div>
+                            <div class="dflow-timeline-bars" id="dflow-timeline-bars">
+                                <div class="dflow-empty">로드 중…</div>
+                            </div>
+                        </div>
+
+                        <!-- 기존 summary / whale / exchange table — 보조 정보 (5분 snapshot) -->
+                        <details class="dflow-details">
+                            <summary>거래소별 상세 (snapshot)</summary>
                         <div class="dflow-summary-grid" id="dflow-summary">
                             <div class="dflow-summary-card">
                                 <div class="dflow-summary-label">합 OI</div>
@@ -286,6 +337,7 @@
                                 </tbody>
                             </table>
                         </div>
+                        </details>
                     </aside>
 
                     <!-- 우측 컬럼: 헤더 + 본문 -->

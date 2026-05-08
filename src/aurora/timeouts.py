@@ -56,6 +56,13 @@ DASHBOARD_FLOW_PROVIDER_TIMEOUT_SEC: float = 8.0
 DASHBOARD_FLOW_SESSION_TIMEOUT_SEC: float = 10.0
 """dashboard_flow 측 aiohttp.ClientSession total timeout. provider × N 합산 envelope."""
 
+# v0.1.115: 14D 시계열 fetch — 거래소별 5 endpoint 병렬 → snapshot 보다 envelope ↑
+DASHBOARD_SERIES_PROVIDER_TIMEOUT_SEC: float = 12.0
+"""dashboard_series 측 per-provider timeout. 5 endpoint 병렬 fetch envelope."""
+
+DASHBOARD_SERIES_SESSION_TIMEOUT_SEC: float = 15.0
+"""dashboard_series 측 ClientSession total timeout. 5 거래소 × 5 endpoint envelope."""
+
 # 거래소별 endpoint 측 client-side timeout (ClientSession 단위).
 EXCHANGE_HTTP_TIMEOUT_SEC: float = 8.0
 """거래소 HTTP 측 ClientSession total timeout (Binance/Bybit/OKX/Bitget/HL 공통)."""
@@ -78,6 +85,11 @@ def make_exchange_timeout() -> aiohttp.ClientTimeout:
 def make_dashboard_session_timeout() -> aiohttp.ClientTimeout:
     """dashboard_flow Aggregator 측 ClientSession timeout."""
     return aiohttp.ClientTimeout(total=DASHBOARD_FLOW_SESSION_TIMEOUT_SEC)
+
+
+def make_dashboard_series_session_timeout() -> aiohttp.ClientTimeout:
+    """dashboard_series Aggregator 측 ClientSession timeout (v0.1.115)."""
+    return aiohttp.ClientTimeout(total=DASHBOARD_SERIES_SESSION_TIMEOUT_SEC)
 
 
 def make_coinalyze_timeout() -> aiohttp.ClientTimeout:

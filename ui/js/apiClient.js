@@ -92,6 +92,14 @@ const getChart = (timeframe = "1H", limit = 100) =>
 const getDashboardFlow = (coin = "BTC") =>
     _request(`/dashboard-flow?coin=${encodeURIComponent(coin)}`);
 
+// ─── Dashboard Series & Ratios (v0.1.115) ────
+// /dashboard-flow/series — 14D 시계열 합본 (price/CVD/OI/funding/taker/LSR), 5분 cache
+// /dashboard-flow/ratios — 5단 L/S ratio (WHALE/TOP/GLOBAL × NOTIONAL/ACCOUNTS), 60초 cache
+const getDashboardSeries = (coin = "BTC", days = 14) =>
+    _request(`/dashboard-flow/series?coin=${encodeURIComponent(coin)}&days=${days}`);
+const getDashboardRatios = (coin = "BTC") =>
+    _request(`/dashboard-flow/ratios?coin=${encodeURIComponent(coin)}`);
+
 // ─── Config ─────────────────────────────────────────
 
 const getConfig = () => _request("/config");
@@ -179,6 +187,8 @@ window.AuroraApi = {
     getMarketTrend,
     getChart,
     getDashboardFlow,
+    getDashboardSeries,
+    getDashboardRatios,
     getConfig,
     updateConfig,
     startBot,

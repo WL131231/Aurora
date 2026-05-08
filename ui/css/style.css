@@ -2302,6 +2302,171 @@ input[type="range"].slider-input:disabled {
     transition: opacity 0.2s;
 }
 
+/* ============================================================
+   v0.1.115: Market Flow 재디자인 (5단 L/S + 14D 차트 + timeline)
+   ============================================================ */
+
+.dflow-ratios-card,
+.dflow-series-card,
+.dflow-timeline-card {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid rgba(96, 81, 155, 0.18);
+    border-radius: 6px;
+    background: rgba(20, 18, 32, 0.4);
+}
+
+.dflow-ratios-title,
+.dflow-series-title,
+.dflow-timeline-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-1);
+    letter-spacing: 0.05em;
+    margin-bottom: 0.6rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid rgba(96, 81, 155, 0.12);
+}
+
+/* 5단 L/S Ratio segments */
+.dflow-ratios-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.dflow-ratio-row {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.62rem;
+}
+.dflow-ratio-label {
+    color: var(--text-2);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    font-size: 0.6rem;
+    text-transform: uppercase;
+}
+.dflow-ratio-bar {
+    position: relative;
+    height: 18px;
+    background: rgba(96, 81, 155, 0.08);
+    border-radius: 3px;
+    overflow: hidden;
+    display: flex;
+}
+.dflow-ratio-bar-long {
+    height: 100%;
+    background: linear-gradient(90deg, rgba(52, 211, 153, 0.85), rgba(52, 211, 153, 0.65));
+    transition: width 0.4s ease-out;
+}
+.dflow-ratio-bar-short {
+    height: 100%;
+    background: linear-gradient(90deg, rgba(251, 113, 133, 0.65), rgba(251, 113, 133, 0.85));
+    transition: width 0.4s ease-out;
+}
+.dflow-ratio-pct {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 0.4rem;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.58rem;
+    font-weight: 600;
+    color: #f4f4f5;
+    text-shadow: 0 0 3px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+}
+.dflow-ratio-pct.empty {
+    justify-content: center;
+    color: var(--text-3);
+    text-shadow: none;
+}
+
+/* 14D Chart wrapper */
+.dflow-chart-wrap {
+    position: relative;
+    margin-top: 0.4rem;
+}
+.dflow-chart {
+    width: 100%;
+    height: 180px;
+}
+.dflow-chart-sm {
+    height: 90px;
+}
+.dflow-chart-legend {
+    display: flex;
+    gap: 0.8rem;
+    font-size: 0.55rem;
+    margin-top: 0.25rem;
+    color: var(--text-3);
+}
+.dflow-chart-legend span::before {
+    content: "■";
+    margin-right: 0.2rem;
+}
+.leg-price::before { color: #f4f4f5; }
+.leg-oi::before { color: #a78bfa; }
+.leg-cvd::before { color: #fbbf24; }
+.leg-funding::before { color: rgba(96, 165, 250, 0.85); }
+.leg-taker::before { color: #34d399; }
+
+/* 14D L/S Timeline */
+.dflow-timeline-bars {
+    display: flex;
+    height: 28px;
+    gap: 1px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: rgba(96, 81, 155, 0.08);
+}
+.dflow-timeline-bar {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+.dflow-timeline-bar-long {
+    background: rgba(52, 211, 153, 0.7);
+    transition: height 0.4s ease-out;
+}
+.dflow-timeline-bar-short {
+    background: rgba(251, 113, 133, 0.7);
+    transition: height 0.4s ease-out;
+}
+.dflow-timeline-bar.empty {
+    background: rgba(96, 81, 155, 0.04);
+}
+
+/* details (보조 정보 토글) */
+.dflow-details {
+    margin-top: 0.75rem;
+    border-top: 1px dashed rgba(96, 81, 155, 0.12);
+    padding-top: 0.75rem;
+}
+.dflow-details > summary {
+    cursor: pointer;
+    font-size: 0.62rem;
+    color: var(--text-3);
+    letter-spacing: 0.05em;
+    padding: 0.3rem 0;
+    user-select: none;
+}
+.dflow-details > summary:hover {
+    color: var(--text-2);
+}
+.dflow-details[open] > summary {
+    margin-bottom: 0.5rem;
+    color: var(--text-2);
+}
+
 /* 오버레이 — 기본 숨김 */
 .sidebar-overlay {
     display: none;

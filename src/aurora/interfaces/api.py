@@ -376,6 +376,78 @@ class DashboardFlowDTO(BaseModel):
 
 
 # ============================================================
+# v0.1.115: Dashboard Series (14D) + Ratios (5단 L/S) DTO
+# ============================================================
+
+
+class SeriesPointDTO(BaseModel):
+    """시계열 1점."""
+
+    ts_ms: int
+    value: float | None = None
+
+
+class SeriesBarDTO(BaseModel):
+    """거래소별 14D 봉 1개 (per_exchange 측 표기용)."""
+
+    ts_ms: int
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    close: float | None = None
+    volume_usd: float | None = None
+    taker_buy_usd: float | None = None
+    taker_sell_usd: float | None = None
+    oi_usd: float | None = None
+    funding_rate_avg: float | None = None
+    ls_ratio_global: float | None = None
+
+
+class ExchangeSeriesDTO(BaseModel):
+    exchange: str
+    symbol: str
+    coin: str
+    days: int
+    bars: list[SeriesBarDTO] = []
+    errors: list[str] = []
+
+
+class DashboardSeriesDTO(BaseModel):
+    """``GET /dashboard-flow/series`` — 5 거래소 14D 합본 + per-exchange."""
+
+    coin: str
+    days: int
+    fetched_at_ms: int
+    exchanges: list[str] = []
+    price_close: list[SeriesPointDTO] = []
+    perp_cvd: list[SeriesPointDTO] = []
+    spot_cvd: list[SeriesPointDTO] = []   # v0.1.116+ 박힘 (현 빈)
+    oi_usd: list[SeriesPointDTO] = []
+    funding_rate: list[SeriesPointDTO] = []
+    taker_delta_usd: list[SeriesPointDTO] = []
+    ls_global_timeline: list[SeriesPointDTO] = []
+    per_exchange: dict[str, ExchangeSeriesDTO] = {}
+
+
+class LSRSegmentDTO(BaseModel):
+    """5단 L/S ratio 1개 segment."""
+
+    label: str
+    long_pct: float | None = None
+    short_pct: float | None = None
+    source_exchanges: list[str] = []
+    sample_size: int | None = None
+
+
+class DashboardRatiosDTO(BaseModel):
+    """``GET /dashboard-flow/ratios`` — 5단 L/S ratio 합본."""
+
+    coin: str
+    fetched_at_ms: int
+    segments: list[LSRSegmentDTO] = []
+
+
+# ============================================================
 # v0.1.65: 거래내역 dedup helper — 봇 record 와 거래소 record 매칭
 # ============================================================
 
@@ -1172,6 +1244,106 @@ def create_app() -> FastAPI:
             total_whale_buy_5m_usd=flow.total_whale_buy_5m_usd,
             total_whale_sell_5m_usd=flow.total_whale_sell_5m_usd,
             total_whale_count_5m=flow.total_whale_count_5m,
+        )
+
+    # ───── v0.1.115: Dashboard Series + Ratios ─────
+
+    @app.get("/dashboard-flow/series", response_model=DashboardSeriesDTO)
+    async def dashboard_series_endpoint(
+        coin: str = "BTC", days: int = 14,
+    ) -> DashboardSeriesDTO:
+        """5 거래소 14D 시계열 합본 — price/CVD/OI/funding/taker/LSR (v0.1.115).
+
+        TTL = 5분 (daily 봉 측 빨리 안 변함). UI 측 BTC + ETH 측 두 번 호출 박음.
+
+        Args:
+            coin: ``"BTC"`` / ``"ETH"`` (기본 BTC).
+            days: 봉 개수 (기본 14, 7~30 권장).
+        """
+        from aurora.market.series_aggregator import get_series_aggregator
+
+        days_clamped = max(1, min(60, days))
+        agg = get_series_aggregator()
+        try:
+            ds = await agg.fetch(coin, days_clamped)
+        except Exception as e:  # noqa: BLE001 — UI 안전
+            logger.warning("/dashboard-flow/series fetch 실패: %s", e)
+            return DashboardSeriesDTO(
+                coin=coin, days=days_clamped,
+                fetched_at_ms=int(time.time() * 1000),
+                exchanges=agg.exchange_names,
+            )
+
+        per_ex = {}
+        for ex_name, es in ds.per_exchange.items():
+            per_ex[ex_name] = ExchangeSeriesDTO(
+                exchange=es.exchange,
+                symbol=es.symbol,
+                coin=es.coin,
+                days=es.days,
+                bars=[
+                    SeriesBarDTO(
+                        ts_ms=b.ts_ms, open=b.open, high=b.high, low=b.low,
+                        close=b.close, volume_usd=b.volume_usd,
+                        taker_buy_usd=b.taker_buy_usd,
+                        taker_sell_usd=b.taker_sell_usd,
+                        oi_usd=b.oi_usd, funding_rate_avg=b.funding_rate_avg,
+                        ls_ratio_global=b.ls_ratio_global,
+                    ) for b in es.bars
+                ],
+                errors=es.errors,
+            )
+
+        def _pts(items):
+            return [SeriesPointDTO(ts_ms=p.ts_ms, value=p.value) for p in items]
+
+        return DashboardSeriesDTO(
+            coin=ds.coin, days=ds.days, fetched_at_ms=ds.fetched_at_ms,
+            exchanges=ds.exchanges,
+            price_close=_pts(ds.price_close),
+            perp_cvd=_pts(ds.perp_cvd),
+            spot_cvd=_pts(ds.spot_cvd),
+            oi_usd=_pts(ds.oi_usd),
+            funding_rate=_pts(ds.funding_rate),
+            taker_delta_usd=_pts(ds.taker_delta_usd),
+            ls_global_timeline=_pts(ds.ls_global_timeline),
+            per_exchange=per_ex,
+        )
+
+    @app.get("/dashboard-flow/ratios", response_model=DashboardRatiosDTO)
+    async def dashboard_ratios_endpoint(
+        coin: str = "BTC",
+    ) -> DashboardRatiosDTO:
+        """5단 L/S ratio 합본 — WHALE/TOP/GLOBAL × NOTIONAL/ACCOUNTS (v0.1.115).
+
+        snapshot ``DashboardFlow`` derivation — 별도 fetch X (cache 60초).
+        """
+        from aurora.market.dashboard_flow import get_aggregator
+        from aurora.market.ratios_aggregator import compute_ratios
+
+        agg = get_aggregator()
+        try:
+            flow = await agg.fetch(coin)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("/dashboard-flow/ratios fetch 실패: %s", e)
+            return DashboardRatiosDTO(
+                coin=coin, fetched_at_ms=int(time.time() * 1000),
+                segments=[],
+            )
+
+        ratios = compute_ratios(flow)
+        return DashboardRatiosDTO(
+            coin=ratios.coin,
+            fetched_at_ms=ratios.fetched_at_ms,
+            segments=[
+                LSRSegmentDTO(
+                    label=s.label,
+                    long_pct=s.long_pct,
+                    short_pct=s.short_pct,
+                    source_exchanges=s.source_exchanges,
+                    sample_size=s.sample_size,
+                ) for s in ratios.segments
+            ],
         )
 
     # ───── Config ───────────────────────────────────

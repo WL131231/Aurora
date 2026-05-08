@@ -82,6 +82,9 @@ class StrategyConfig:
     use_ma_cross: bool = False
     use_harmonic: bool = False
     use_ichimoku: bool = False
+    # v0.1.81: Twin Trend (Tako DualST 본질) — 두 SuperTrend AND 컨펌 진입 + booster.
+    # OFF default — 사용자 선택 (Selectable). ON 시 별도 진입 신호 + 다른 지표 신호 score booster.
+    use_twin_trend: bool = False
 
     # 진입 파라미터
     ema_touch_tolerance: float = 0.003  # ±0.3% — 노이즈는 통과시키고 의미있는 터치만 잡는 출발값
@@ -1052,6 +1055,89 @@ def detect_2468_signal(
 # ============================================================
 
 
+def detect_twin_trend(
+    df_by_tf: dict[str, pd.DataFrame],
+    config: StrategyConfig,
+) -> list[EntrySignal]:
+    """v0.1.81: Twin Trend (Tako DualST 본질) — 두 SuperTrend AND 컨펌 break 진입.
+
+    Tako 봇 (DualST Ichi DMI Cornix) 의 핵심 진입 패턴 차용:
+        ``stBull = source > Ichi-ST AND source > DMI-ST``
+        ``bullBreak = stBull AND not stBull[-1]``  # 새 bull 시작
+
+    두 SuperTrend (Ichi-tone 14/2.0 + DMI-tone 14/3.0) 가 동시 같은 방향으로
+    break 한 봉 (state change) 에서만 진입. AND 컨펌 = 거짓 신호 ↓ + 강한 진입.
+
+    booster 역할 (별도) — bot_instance 측 진입 평가에서 다른 지표 신호 + Twin
+    Trend alignment 일치 시 score × 1.5. 본 함수는 별도 진입 신호 자체.
+
+    TF: primary_tf (15m default) 사용. HTF 가중치 = 15m 1.
+
+    Args:
+        df_by_tf: TF 별 OHLC DataFrame.
+        config: 전략 설정 — config.use_twin_trend OFF 시 빈 리스트.
+
+    Returns:
+        EntrySignal 리스트 (0 또는 1 개) — break 봉에서만.
+    """
+    if not config.use_twin_trend:
+        return []
+    # primary_tf 우선순위 — 가장 빠른 TF (Aurora default 15m)
+    for tf in ("15m", "5m", "1H", "30m", "1H"):
+        df = df_by_tf.get(tf)
+        if df is not None and not df.empty and len(df) >= 30:
+            break
+    else:
+        return []  # 데이터 부족
+
+    from aurora.core.indicators import supertrend
+
+    try:
+        st_ichi = supertrend(df, period=14, multiplier=2.0)
+        st_dmi = supertrend(df, period=14, multiplier=3.0)
+    except (ValueError, KeyError):
+        return []
+    if len(st_ichi) < 2 or len(st_dmi) < 2:
+        return []
+
+    # 마지막 두 봉 측 trend state — bull/bear AND 컨펌 + 직전 봉과 변화 (break)
+    last_close = float(df["close"].iloc[-1])
+    prev_close = float(df["close"].iloc[-2])
+    last_ichi_line = float(st_ichi["line"].iloc[-1])
+    last_dmi_line = float(st_dmi["line"].iloc[-1])
+    prev_ichi_line = float(st_ichi["line"].iloc[-2])
+    prev_dmi_line = float(st_dmi["line"].iloc[-2])
+
+    cur_bull = last_close > last_ichi_line and last_close > last_dmi_line
+    cur_bear = last_close < last_ichi_line and last_close < last_dmi_line
+    prev_bull = prev_close > prev_ichi_line and prev_close > prev_dmi_line
+    prev_bear = prev_close < prev_ichi_line and prev_close < prev_dmi_line
+
+    # break 봉 = 직전 봉 NOT bull → 현재 봉 bull (state change)
+    bull_break = cur_bull and not prev_bull
+    bear_break = cur_bear and not prev_bear
+
+    if bull_break:
+        return [EntrySignal(
+            source="twin_trend",
+            timeframe=tf,
+            direction=Direction.LONG,
+            strength=1.0,
+            note=f"Twin Trend bull break (Ichi {last_ichi_line:.4f} / DMI {last_dmi_line:.4f})",
+            meta={"sl_price": last_dmi_line},  # DMI-ST line = SL (보수적)
+        )]
+    if bear_break:
+        return [EntrySignal(
+            source="twin_trend",
+            timeframe=tf,
+            direction=Direction.SHORT,
+            strength=1.0,
+            note=f"Twin Trend bear break (Ichi {last_ichi_line:.4f} / DMI {last_dmi_line:.4f})",
+            meta={"sl_price": last_dmi_line},
+        )]
+    return []
+
+
 def evaluate_selectable(
     df_by_tf: dict[str, pd.DataFrame],
     config: StrategyConfig,
@@ -1090,6 +1176,10 @@ def evaluate_selectable(
 
     if config.use_harmonic:
         signals.extend(detect_harmonic_signal(df_by_tf, config))
+
+    # v0.1.81: Twin Trend (Tako DualST 본질) — Selectable 토글, AND 컨펌 진입
+    if config.use_twin_trend:
+        signals.extend(detect_twin_trend(df_by_tf, config))
 
     # 2,4,6,8 — 항상 ON, BTC 전용 (GUI 토글 X)
     signals.extend(detect_2468_signal(df_by_tf, config, symbol=symbol))

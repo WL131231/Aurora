@@ -96,6 +96,8 @@ class ConfigDTO(BaseModel):
     use_ma_cross: bool = False
     use_harmonic: bool = False
     use_ichimoku: bool = False
+    # v0.1.81: Twin Trend (Tako DualST 본질) — 두 SuperTrend AND 컨펌 진입 + booster
+    use_twin_trend: bool = False
 
     # ===== 시드 / 리스크 =====
     leverage: int = 10

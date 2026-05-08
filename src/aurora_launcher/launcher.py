@@ -628,22 +628,27 @@ def _kill_existing_aurora_on_port(port: int = 8765) -> None:
         logger.warning("port %d 점유 검사 실패: %s", port, e)
 
 
-def launch_aurora() -> bool:
+def launch_aurora() -> subprocess.Popen | None:
     """본체 실행 — env 마커 전달로 본체 자기-swap 중복 방지. 플랫폼별 흐름 (v0.1.67).
 
     Windows: ``Aurora.exe`` 직접 Popen (DETACHED_PROCESS).
     macOS:   ``open Aurora.app`` 명령 (Finder 등록된 앱처럼 실행).
 
-    ChoYoon Claude #133 fix F — macOS .app 번들은 직접 Popen 시 .app/Contents/MacOS/
-    내부 binary 박힘 의무 + Info.plist 처리 누락 → `open` 명령 박음 정합.
+    v0.1.80: Popen 객체 반환 (이전 bool) — LauncherApi 측 본체 process 보관 →
+    polling 으로 본체 종료 감지 → launcher webview show 본질. 사용자 제안 패러다임:
+    "launcher 가 항상 살아있음 + 본체 spawn 시 hide + 본체 종료 시 show" 본질.
+
+    macOS = `open` 명령 자체가 detach 라 Popen 객체 반환해도 실제 본체 PID X.
+    Windows = DETACHED_PROCESS Popen 의 PID 보관 가능 — polling 정합.
 
     Returns:
-        ``True`` 실행 시작 성공, ``False`` 본체 미존재.
+        Popen 객체 (Windows 정상 / macOS = open wrapper Popen) /
+        None (본체 미존재 또는 실패).
     """
     target = _body_local_target()
     if not target.exists():
         logger.error("본체 미존재: %s", target)
-        return False
+        return None
 
     # v0.1.64: 옛 본체 (port 점유) 자동 정리 — 사용자 시각 "재시작 = launcher GUI"
     # 흐름. 본체 자기 죽이기 의무 X. 본체 /relaunch 가 launcher 새로 spawn 시
@@ -684,12 +689,12 @@ def launch_aurora() -> bool:
                     logger.error(
                         "open 명령 fail (rc=%d): %s", proc.returncode, err,
                     )
-                    return False
+                    return None
                 logger.info("open 명령 성공 (rc=0)")
             except subprocess.TimeoutExpired:
                 # 정상 — open 이 .app 비동기 spawn 후 자체 종료 (보통 빠름)
                 logger.info("본체 시작 명령 박힘 (비동기 detach)")
-            return True
+            return proc
 
         # Windows / 기타 — 직접 Popen (DETACHED_PROCESS)
         DETACHED_PROCESS = 0x00000008  # noqa: N806
@@ -699,7 +704,7 @@ def launch_aurora() -> bool:
             if sys_name == "Windows"
             else 0
         )
-        subprocess.Popen(  # noqa: S603 — 본체 실행, 신뢰 가능
+        proc = subprocess.Popen(  # noqa: S603 — 본체 실행, 신뢰 가능
             [str(target)],
             env=env,
             creationflags=flags,
@@ -708,10 +713,10 @@ def launch_aurora() -> bool:
             # 옆에서 찾게 → 사용자가 .env 를 launcher 옆에 두면 인식 OK.
             cwd=str(_launcher_dir()),
         )
-        return True
+        return proc
     except OSError as e:
         logger.error("본체 실행 실패: %s", e)
-        return False
+        return None
 
 
 # ============================================================
@@ -726,6 +731,10 @@ class LauncherApi:
         # v0.1.43: 본체 /relaunch 가 자식 launcher spawn 시 env 박음.
         # UI 가 ``is_auto_start()`` 로 확인 후 START 자동 클릭.
         self._auto_start = auto_start
+        # v0.1.80: 본체 process 보관 + polling thread 측 본체 종료 감지.
+        # 사용자 제안 패러다임 — launcher 항상 살아있음 + 본체 spawn 시 hide
+        # + 본체 종료 시 show. 본체 자기 죽이기 의무 자체 X.
+        self._aurora_proc: subprocess.Popen | None = None
 
     def is_auto_start(self) -> bool:
         """v0.1.43: auto-start 모드 여부 — 본체 재시작 흐름에서 launcher 가
@@ -814,10 +823,72 @@ class LauncherApi:
         return {"success": True, "message": "업데이트 적용 완료"}
 
     def launch(self) -> dict:
-        """본체 실행."""
-        if launch_aurora():
-            return {"success": True, "message": "Aurora 시작됨"}
-        return {"success": False, "message": "본체 .exe 미존재 — 먼저 업데이트"}
+        """본체 실행 — v0.1.80 사용자 제안 패러다임:
+        launcher 항상 살아있음 + 본체 spawn 시 webview hide + 본체 종료 시 show.
+        본체 자기 죽이기 / launcher 가 본체 죽이기 의무 자체 X.
+        """
+        proc = launch_aurora()
+        if proc is None:
+            return {"success": False, "message": "본체 .exe 미존재 — 먼저 업데이트"}
+        # 본체 process 보관 + polling thread 시작
+        self._aurora_proc = proc
+        self._start_aurora_polling()
+        # launcher webview hide — 본체 GUI 가 사용자 화면 차지
+        self._hide_launcher_window()
+        return {"success": True, "message": "Aurora 시작됨"}
+
+    def _hide_launcher_window(self) -> None:
+        """v0.1.80: launcher webview hide — 백그라운드 살아있음."""
+        try:
+            import webview  # type: ignore[import-not-found]
+            if webview.windows:
+                webview.windows[0].hide()
+                logger.info("launcher webview hide — 본체 GUI 차지")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("launcher hide 실패: %s", e)
+
+    def _show_launcher_window(self) -> None:
+        """v0.1.80: launcher webview show — 본체 종료 후 사용자 화면 등장."""
+        try:
+            import webview  # type: ignore[import-not-found]
+            if webview.windows:
+                webview.windows[0].show()
+                logger.info("launcher webview show — 본체 종료 감지 + 등장")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("launcher show 실패: %s", e)
+
+    def _start_aurora_polling(self) -> None:
+        """v0.1.80: 본체 process 종료 감지 polling thread.
+
+        본체 종료 시 launcher webview show + START 버튼 활성. 사용자 측
+        "본체 X 클릭 → launcher 등장" 흐름 자연 본질.
+        """
+        def _poll() -> None:
+            while True:
+                proc = self._aurora_proc
+                if proc is None:
+                    break
+                rc = proc.poll()
+                if rc is not None:
+                    # 본체 종료 감지
+                    logger.info(
+                        "본체 종료 감지 (rc=%s) → launcher show + START 활성", rc,
+                    )
+                    self._aurora_proc = None
+                    self._show_launcher_window()
+                    # JS 측 START 버튼 활성 — webview eval
+                    try:
+                        import webview  # type: ignore[import-not-found]
+                        if webview.windows:
+                            webview.windows[0].evaluate_js(
+                                "document.getElementById('btn-start').disabled = false;"
+                                "if (window.setStatus) setStatus('본체 종료됨 — 다시 시작 가능', 'var(--text-2)');",
+                            )
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("UI START 활성 fail: %s", e)
+                    break
+                time.sleep(2.0)
+        threading.Thread(target=_poll, daemon=True).start()
 
     def quit(self) -> None:
         """launcher 종료 — pywebview 윈도우 destroy + os._exit (v0.1.18 fix).

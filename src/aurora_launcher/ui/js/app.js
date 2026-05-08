@@ -88,9 +88,10 @@ async function launchOnly() {
     try {
         const r = await Api.launch();
         if (r.success) {
-            log("Aurora 시작 — Launcher 종료");
-            setStatus("✓ Aurora 시작됨", "#34d399");
-            setTimeout(() => Api.quit(), 1200);
+            // v0.1.80: launcher 항상 살아있음 + 본체 spawn 시 hide. 본체 종료 시
+            // 자동 등장 (LauncherApi 측 polling thread). Api.quit() 호출 X.
+            log("Aurora 시작 — Launcher 백그라운드 대기");
+            setStatus("✓ Aurora 시작됨 — 봇 종료 시 Launcher 자동 등장", "#34d399");
         } else {
             setStatus(`✗ ${r.message}`, "#fb7185");
             log(`시작 실패: ${r.message}`);
@@ -102,6 +103,10 @@ async function launchOnly() {
         btnStart.disabled = false;
     }
 }
+
+// v0.1.80: launcher webview show 시점 (polling 측 evaluate_js) 호출 가능하도록
+// setStatus 를 window 측에 박음.
+window.setStatus = setStatus;
 
 btnStart.addEventListener("click", startFlow);
 

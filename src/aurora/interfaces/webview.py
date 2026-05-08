@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 import threading
 from pathlib import Path
@@ -16,6 +17,53 @@ import uvicorn
 
 from aurora.config import settings
 from aurora.interfaces.api import create_app
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# v0.1.92: Single-instance mutex — Aurora.exe 중복 실행 차단
+# ============================================================
+# Why: 사용자 보고 (2026-05-08) — .exe 실행하면 Aurora 가 두 개 실행되는 버그.
+# launcher 가 살아있는 상태에서 Aurora.exe 직접 클릭 / Aurora.exe 두 번 클릭 시
+# 두 process 동시 실행 가능. 두 번째 process 측 port 8765 bind fail → API 죽고
+# GUI 만 표시 → 사용자 혼란. Windows named mutex 박아 즉시 exit.
+#
+# Mutex 측 process 종료 시 자동 release (named mutex 본질) → stale lock 위험 X.
+# launcher 가 body 측 terminate 한 후 새 body spawn 시 mutex 자연 해제 + 새 body
+# 측 정상 acquire 가능. 0.5초 race window 도 mutex 자체 atomic 이라 안전.
+
+_MUTEX_HANDLE = None  # noqa: N816 — 모듈 글로벌, GC 방지 (mutex handle 보유)
+_MUTEX_NAME = "Aurora-SingleInstance-v0.1.92"
+_ERROR_ALREADY_EXISTS = 183
+
+
+def _acquire_single_instance_mutex() -> bool:
+    """Windows named mutex 측 single instance 보장.
+
+    Returns:
+        ``True`` — primary process (mutex 획득 성공, GUI 시작 가능).
+        ``False`` — duplicate (이미 다른 Aurora 실행 중, exit 권장).
+
+    Note:
+        non-Windows / ctypes 미지원 환경 → 항상 True (mutex skip).
+    """
+    global _MUTEX_HANDLE  # noqa: PLW0603 — 모듈 lifetime handle 보유
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+    except (AttributeError, OSError, ImportError):
+        return True  # ctypes 미지원 — fallback OK (skip mutex)
+
+    # CreateMutexW(security_attrs=None, initial_owner=True, name)
+    _MUTEX_HANDLE = kernel32.CreateMutexW(None, True, _MUTEX_NAME)
+    last_error = kernel32.GetLastError()
+    if last_error == _ERROR_ALREADY_EXISTS:
+        # 이미 mutex 박힘 — 다른 Aurora 살아있음
+        return False
+    return True
 
 
 def _exe_dir() -> Path | None:
@@ -96,6 +144,14 @@ def launch() -> None:
     from aurora.interfaces import log_buffer
     log_buffer.install()
 
+    # v0.1.92: 중복 실행 차단 — 이미 Aurora 살아있으면 즉시 exit
+    if not _acquire_single_instance_mutex():
+        logger.warning(
+            "Aurora 이미 실행 중 (Windows named mutex %s) — 중복 실행 차단",
+            _MUTEX_NAME,
+        )
+        sys.exit(0)
+
     api_thread = threading.Thread(target=_start_api_server, daemon=True)
     api_thread.start()
 
@@ -126,6 +182,14 @@ def launch_headless(host: str | None = None, port: int | None = None) -> None:
     """
     from aurora.interfaces import log_buffer
     log_buffer.install()
+
+    # v0.1.92: 중복 실행 차단 — headless 도 같은 mutex 적용
+    if not _acquire_single_instance_mutex():
+        logger.warning(
+            "Aurora 이미 실행 중 (Windows named mutex %s) — 중복 실행 차단",
+            _MUTEX_NAME,
+        )
+        sys.exit(0)
 
     app = create_app()
     uvicorn.run(

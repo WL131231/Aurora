@@ -861,9 +861,12 @@ class LauncherApi:
         """v0.1.80: 본체 process 종료 감지 polling thread.
         v0.1.83: marker file 검사 추가 — 본체 측 /relaunch 시 marker 박음
         → launcher 가 본체 process.terminate() 호출 (본체 자체 종료 의무 X).
+        v0.1.92: marker 발동 종료면 새 본체 자동 spawn — 사용자 시각 \"재시작\"
+        한 번 클릭 흐름 (이전 v0.1.83 측 사용자가 START 다시 클릭 본질 X).
 
-        본체 종료 시 launcher webview show + START 버튼 활성. 사용자 측
-        "본체 X 클릭 또는 재시작하기 → launcher 등장" 흐름 자연 본질.
+        흐름:
+            - 본체 정상 종료 (X 클릭 / crash) → launcher show + START 활성
+            - 본체 marker 종료 (재시작 요청) → 새 본체 자동 spawn (launcher 그대로 hide)
         """
         marker_path = _aurora_data_dir() / ".relaunch_request"
 
@@ -873,6 +876,7 @@ class LauncherApi:
                 if proc is None:
                     break
                 # v0.1.83: marker 검사 — 본체 측 /relaunch 호출 시 박음
+                triggered_by_marker = False
                 if marker_path.exists():
                     logger.info(
                         "marker 발견 (%s) → 본체 process.terminate() 호출",
@@ -893,9 +897,23 @@ class LauncherApi:
                         marker_path.unlink()
                     except OSError:
                         pass
+                    triggered_by_marker = True
                 rc = proc.poll()
                 if rc is not None:
-                    # 본체 종료 감지
+                    # v0.1.92: marker 발동 종료 = 재시작 요청 → 새 본체 자동 spawn
+                    if triggered_by_marker:
+                        logger.info(
+                            "재시작 요청 (marker) — 새 본체 자동 spawn (rc=%s)", rc,
+                        )
+                        new_proc = launch_aurora()
+                        if new_proc is not None:
+                            self._aurora_proc = new_proc
+                            logger.info("새 본체 spawn OK — polling 계속")
+                            continue  # 새 process 측 polling 계속
+                        logger.warning(
+                            "새 본체 spawn 실패 — launcher show fallback",
+                        )
+                    # 본체 정상 종료 (사용자 X 클릭 / crash) 또는 auto-spawn 실패
                     logger.info(
                         "본체 종료 감지 (rc=%s) → launcher show + START 활성", rc,
                     )

@@ -339,6 +339,79 @@ def test_relaunch_marker_pattern_v0_1_83(monkeypatch, tmp_path) -> None:
 
 
 # ============================================================
+# Chart (v0.1.86) — 봇 시점 차트
+# ============================================================
+
+
+def test_chart_returns_disabled_without_cache() -> None:
+    """봇 미가동 (cache None) → enabled=False 반환. UI 가 placeholder 표시."""
+    client = _client()
+    # default 상태 — bot._cache is None
+    r = client.get("/chart")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["enabled"] is False
+    assert body["timeframe"] == "1H"
+    assert body["candles"] == []
+    assert body["markers"] == []
+
+
+def test_chart_returns_disabled_unknown_tf() -> None:
+    """cache 에 없는 TF 요청 → enabled=False (KeyError 안전 처리)."""
+    client = _client()
+    r = client.get("/chart?timeframe=99h")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["enabled"] is False
+
+
+def test_chart_with_cache_returns_candles_and_indicators() -> None:
+    """cache 박힘 + DataFrame 채워짐 → candles + 지표 라인 + markers 반환."""
+    import pandas as pd
+
+    client = _client()
+    bot = bot_instance.get_instance()
+
+    # Fake cache — 60 봉 OHLCV (1H) 박음. 지표 계산용 충분 길이.
+    idx = pd.date_range("2026-01-01", periods=60, freq="1h", tz="UTC")
+    df = pd.DataFrame({
+        "open":   [100.0 + i * 0.1 for i in range(60)],
+        "high":   [101.0 + i * 0.1 for i in range(60)],
+        "low":    [ 99.0 + i * 0.1 for i in range(60)],
+        "close":  [100.5 + i * 0.1 for i in range(60)],
+        "volume": [1000.0] * 60,
+    }, index=idx)
+
+    class _FakeCache:
+        def get(self, tf: str) -> pd.DataFrame:
+            if tf != "1H":
+                raise KeyError(tf)
+            return df
+
+    bot._cache = _FakeCache()  # type: ignore[assignment]
+    bot._symbol = "BTC/USDT:USDT"
+
+    r = client.get("/chart?timeframe=1H&limit=50")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["enabled"] is True
+    assert body["symbol"] == "BTC/USDT:USDT"
+    assert body["timeframe"] == "1H"
+    assert len(body["candles"]) == 50
+    # 첫 캔들 검증 — Unix sec + OHLC float
+    c0 = body["candles"][0]
+    assert isinstance(c0["time"], int)
+    assert isinstance(c0["open"], float)
+    # 지표 라인 박힘 (워밍업 NaN 빠진 후 일부 봉)
+    assert len(body["ema_fast"]) > 0
+    assert len(body["ema_slow"]) > 0
+    assert len(body["bb_upper"]) > 0
+    assert len(body["st_fast"]) > 0
+    # 마커 — closed_trades 없음 + executor 없음 → 빈 list
+    assert body["markers"] == []
+
+
+# ============================================================
 # Logs
 # ============================================================
 

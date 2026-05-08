@@ -8,6 +8,8 @@
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
 
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- v0.1.86: lightweight-charts (TradingView 오픈소스, ~50KB) — 봇 시점 차트 렌더링 -->
+    <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -276,6 +278,31 @@
                                 <tr><td colspan="7" class="pos-empty">열린 포지션 없음</td></tr>
                             </tbody>
                         </table>
+                    </div>
+
+                    <!-- v0.1.86: 봇 시점 차트 — OHLCV + 지표 라인 + 진입 마커 (열린 포지션 아래) -->
+                    <div class="section-title">
+                        봇 시점 차트
+                        <span class="chart-tf-toggle" id="chart-tf-toggle">
+                            <button data-tf="15m">15m</button>
+                            <button data-tf="1H" class="active">1H</button>
+                            <button data-tf="4H">4H</button>
+                        </span>
+                        <span class="chart-overlay-toggle" id="chart-overlay-toggle">
+                            <button data-ind="ema" class="active">EMA</button>
+                            <button data-ind="bb" class="active">BB</button>
+                            <button data-ind="st" class="active">ST</button>
+                        </span>
+                    </div>
+                    <div class="metric-card chart-card" id="bot-chart-section">
+                        <div class="chart-meta">
+                            <span class="chart-symbol mono" id="chart-symbol">—</span>
+                            <span class="chart-status" id="chart-status">봇 시작 시 표시</span>
+                        </div>
+                        <div class="chart-wrap">
+                            <div id="bot-chart"></div>
+                            <div class="chart-empty" id="chart-empty">봇 가동 시 자동으로 표시됨</div>
+                        </div>
                     </div>
 
                     <div class="section-title">결과 통계</div>

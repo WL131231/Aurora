@@ -268,6 +268,59 @@ class UiUpdateResponse(BaseModel):
 
 
 # ============================================================
+# v0.1.86: Chart DTO — 봇 시점 차트 (OHLCV + 지표 라인 + 진입 마커)
+# ============================================================
+
+
+class ChartCandle(BaseModel):
+    """lightweight-charts ``CandlestickSeries`` 입력 1건 (Unix sec)."""
+
+    time: int  # Unix seconds (UTC)
+    open: float
+    high: float
+    low: float
+    close: float
+
+
+class ChartLinePoint(BaseModel):
+    """lightweight-charts ``LineSeries`` 입력 1건. NaN 봉은 omit."""
+
+    time: int
+    value: float
+
+
+class ChartMarker(BaseModel):
+    """lightweight-charts ``setMarkers`` 입력 1건 — 진입/청산 시각."""
+
+    time: int
+    position: str  # "aboveBar" / "belowBar"
+    color: str
+    shape: str    # "arrowUp" / "arrowDown" / "circle"
+    text: str
+
+
+class ChartDTO(BaseModel):
+    """``GET /chart`` — 봇 시점 차트 데이터 (v0.1.86).
+
+    봇이 보는 그대로의 OHLCV + 지표 라인 + 진입/청산 마커. 봇 미가동 시
+    ``enabled=False`` 로 카드 숨김 (Market Data 패턴 정합).
+    """
+
+    enabled: bool
+    symbol: str = ""
+    timeframe: str = ""
+    candles: list[ChartCandle] = []
+    ema_fast: list[ChartLinePoint] = []   # EMA 20
+    ema_slow: list[ChartLinePoint] = []   # EMA 50
+    bb_upper: list[ChartLinePoint] = []
+    bb_middle: list[ChartLinePoint] = []
+    bb_lower: list[ChartLinePoint] = []
+    st_fast: list[ChartLinePoint] = []    # SuperTrend (period 14, mult 2.0)
+    st_slow: list[ChartLinePoint] = []    # SuperTrend (period 14, mult 3.0)
+    markers: list[ChartMarker] = []
+
+
+# ============================================================
 # v0.1.65: 거래내역 dedup helper — 봇 record 와 거래소 record 매칭
 # ============================================================
 
@@ -731,6 +784,142 @@ def create_app() -> FastAPI:
             max_drawdown_pct=s.max_drawdown_pct,
             sharpe_ratio=s.sharpe_ratio,
             avg_hold_minutes=s.avg_hold_minutes,
+        )
+
+    # ───── Chart (봇 시점 차트, v0.1.86) ───────────────
+
+    @app.get("/chart", response_model=ChartDTO)
+    async def chart_endpoint(timeframe: str = "1H", limit: int = 100) -> ChartDTO:
+        """봇이 현재 보고 있는 차트 데이터 — OHLCV + 지표 라인 + 진입 마커.
+
+        Args:
+            timeframe: ``"15m"`` / ``"1H"`` / ``"4H"`` (봇 cache 의 TF 만 허용).
+            limit: 마지막 N 봉 (기본 100, 최대 500).
+
+        ``enabled=False`` 케이스:
+            - 봇 미가동 (cache None)
+            - 요청 TF 가 cache 에 없음
+            - cache 빈 DataFrame
+        """
+        import math
+
+        from aurora.core.indicators import bollinger_bands, ema, supertrend
+
+        bot = bot_instance.get_instance()
+        cache = bot._cache  # noqa: SLF001 — 내부 cache 직접 read (Phase 1 패턴)
+        if cache is None:
+            return ChartDTO(enabled=False, timeframe=timeframe)
+
+        try:
+            df = cache.get(timeframe)
+        except KeyError:
+            return ChartDTO(enabled=False, timeframe=timeframe)
+        if df.empty:
+            return ChartDTO(enabled=False, timeframe=timeframe)
+
+        # tail(limit) — UI 표시 영역만 + 지표 계산은 full df 로 한 후 tail
+        limit = max(10, min(limit, 500))
+        tail = df.tail(limit)
+
+        # 캔들 — Unix sec
+        candles = [
+            ChartCandle(
+                time=int(ts.timestamp()),
+                open=float(row["open"]),
+                high=float(row["high"]),
+                low=float(row["low"]),
+                close=float(row["close"]),
+            )
+            for ts, row in tail.iterrows()
+        ]
+
+        def _series_to_points(series) -> list[ChartLinePoint]:
+            pts: list[ChartLinePoint] = []
+            for ts, val in series.items():
+                if val is None or (isinstance(val, float) and math.isnan(val)):
+                    continue
+                pts.append(ChartLinePoint(time=int(ts.timestamp()), value=float(val)))
+            return pts
+
+        # 지표 — full df 에 계산 후 tail 만 추출 (워밍업 NaN 회피)
+        try:
+            ema20 = ema(df["close"], 20).reindex(tail.index)
+            ema50 = ema(df["close"], 50).reindex(tail.index)
+            bb = bollinger_bands(df["close"], 20, 2.0).reindex(tail.index)
+            st_f = supertrend(df, 14, 2.0).reindex(tail.index)
+            st_s = supertrend(df, 14, 3.0).reindex(tail.index)
+        except Exception as e:  # noqa: BLE001 — UI 안전 (지표 실패해도 캔들은 노출)
+            logger.warning("/chart 지표 계산 실패: %s", e)
+            return ChartDTO(
+                enabled=True, symbol=bot._symbol, timeframe=timeframe,  # noqa: SLF001
+                candles=candles,
+            )
+
+        # 진입 마커 — closed_trades + 현재 열린 포지션 (둘 다 BTC/symbol 한정)
+        earliest_sec = int(tail.index[0].timestamp())
+        markers: list[ChartMarker] = []
+        for t in bot.closed_trades:
+            if t.symbol != bot._symbol:  # noqa: SLF001
+                continue
+            entry_sec = int(t.opened_at_ts // 1000)
+            if entry_sec < earliest_sec:
+                continue
+            is_long = t.direction == "long"
+            markers.append(ChartMarker(
+                time=entry_sec,
+                position="belowBar" if is_long else "aboveBar",
+                color="#34d399" if is_long else "#fb7185",
+                shape="arrowUp" if is_long else "arrowDown",
+                text=("L " if is_long else "S ") + ",".join(t.triggered_by[:2]),
+            ))
+            # 청산 마커 (회색 동그라미)
+            close_sec = int(t.closed_at_ts // 1000)
+            if close_sec >= earliest_sec:
+                markers.append(ChartMarker(
+                    time=close_sec,
+                    position="aboveBar" if is_long else "belowBar",
+                    color="#a1a1aa",
+                    shape="circle",
+                    text=f"X {t.reason}" if t.reason else "X",
+                ))
+
+        # 현재 열린 포지션 — Executor 기준
+        if (
+            bot._executor is not None  # noqa: SLF001
+            and bot._executor.has_position  # noqa: SLF001
+            and bot._executor._plan is not None  # noqa: SLF001
+        ):
+            opened_ts = bot._executor._opened_at_ts  # noqa: SLF001
+            if opened_ts > 0:
+                entry_sec = int(opened_ts // 1000)
+                if entry_sec >= earliest_sec:
+                    plan = bot._executor._plan  # noqa: SLF001
+                    is_long = plan.direction == "long"
+                    triggered = bot._executor.triggered_by[:2]  # noqa: SLF001
+                    markers.append(ChartMarker(
+                        time=entry_sec,
+                        position="belowBar" if is_long else "aboveBar",
+                        color="#34d399" if is_long else "#fb7185",
+                        shape="arrowUp" if is_long else "arrowDown",
+                        text=("L " if is_long else "S ") + ",".join(triggered),
+                    ))
+
+        # lightweight-charts setMarkers 는 time 오름차순 필요
+        markers.sort(key=lambda m: m.time)
+
+        return ChartDTO(
+            enabled=True,
+            symbol=bot._symbol,  # noqa: SLF001
+            timeframe=timeframe,
+            candles=candles,
+            ema_fast=_series_to_points(ema20),
+            ema_slow=_series_to_points(ema50),
+            bb_upper=_series_to_points(bb["upper"]),
+            bb_middle=_series_to_points(bb["middle"]),
+            bb_lower=_series_to_points(bb["lower"]),
+            st_fast=_series_to_points(st_f["line"]),
+            st_slow=_series_to_points(st_s["line"]),
+            markers=markers,
         )
 
     # ───── Config ───────────────────────────────────

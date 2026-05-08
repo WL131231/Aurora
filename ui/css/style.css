@@ -1196,9 +1196,12 @@ input[type="range"].slider-input:disabled {
 
 /* 기간 토글 (7D / 30D / 180D) — section-title 우측 (v0.1.23) */
 /* + source 토글 (전체/Aurora/외부) + 페어 chip (v0.1.30) */
+/* + 차트 TF / 지표 오버레이 토글 (v0.1.86) */
 .trades-period-toggle,
 .trades-source-toggle,
-.trades-pair-filter {
+.trades-pair-filter,
+.chart-tf-toggle,
+.chart-overlay-toggle {
     display: inline-flex;
     gap: 4px;
     margin-left: 0.75rem;
@@ -1207,7 +1210,9 @@ input[type="range"].slider-input:disabled {
 }
 .trades-period-toggle button,
 .trades-source-toggle button,
-.trades-pair-filter button {
+.trades-pair-filter button,
+.chart-tf-toggle button,
+.chart-overlay-toggle button {
     background: transparent;
     border: 1px solid var(--border-soft);
     color: var(--text-3);
@@ -1221,16 +1226,73 @@ input[type="range"].slider-input:disabled {
 }
 .trades-period-toggle button:hover,
 .trades-source-toggle button:hover,
-.trades-pair-filter button:hover {
+.trades-pair-filter button:hover,
+.chart-tf-toggle button:hover,
+.chart-overlay-toggle button:hover {
     color: var(--text-1);
     border-color: var(--text-3);
 }
 .trades-period-toggle button.active,
 .trades-source-toggle button.active,
-.trades-pair-filter button.active {
+.trades-pair-filter button.active,
+.chart-tf-toggle button.active,
+.chart-overlay-toggle button.active {
     color: var(--text-1);
     border-color: var(--aurora-purple);
     background: rgba(96, 81, 155, 0.18);
+}
+
+/* ============================================================
+   v0.1.86: 봇 시점 차트 카드 (lightweight-charts)
+   ============================================================ */
+.chart-card {
+    padding: 0.85rem 1rem;
+}
+.chart-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.7rem;
+    color: var(--text-3);
+    margin-bottom: 0.5rem;
+    letter-spacing: 0.04em;
+}
+.chart-symbol {
+    color: var(--text-1);
+    font-weight: 500;
+    font-size: 0.78rem;
+}
+.chart-status {
+    color: var(--text-3);
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.chart-wrap {
+    position: relative;
+    width: 100%;
+    height: 380px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: rgba(8, 9, 14, 0.6);
+}
+#bot-chart {
+    width: 100%;
+    height: 100%;
+}
+.chart-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-3);
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    pointer-events: none;
+}
+.chart-empty.hidden {
+    display: none;
 }
 
 /* Trade Type chip — reason 별 색 구분 (v0.1.27) */

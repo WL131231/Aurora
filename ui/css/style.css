@@ -1297,24 +1297,26 @@ input[type="range"].slider-input:disabled {
 .dflow-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.7rem;
+    font-size: 0.62rem;  /* v0.1.114: 좌측 컬럼 480px 측 정합 — 작게 */
 }
 .dflow-table th {
     background: rgba(96, 81, 155, 0.08);
     color: var(--text-3);
     font-weight: 500;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.02em;
     text-transform: uppercase;
-    font-size: 0.6rem;
-    padding: 0.5rem 0.6rem;
+    font-size: 0.55rem;
+    padding: 0.4rem 0.35rem;
     text-align: left;
     border-bottom: 1px solid rgba(96, 81, 155, 0.18);
+    white-space: nowrap;
 }
 .dflow-table td {
-    padding: 0.5rem 0.6rem;
+    padding: 0.4rem 0.35rem;
     border-bottom: 1px solid rgba(96, 81, 155, 0.08);
     font-family: var(--font-mono);
     color: var(--text-2);
+    white-space: nowrap;
 }
 .dflow-table tr:last-child td {
     border-bottom: none;
@@ -1538,10 +1540,10 @@ input[type="range"].slider-input:disabled {
     gap: 1.5rem;
 }
 .market-data-section {
-    flex: 0 0 280px;
+    /* v0.1.114: Market Flow 측 좌측 컬럼 합쳐 기존 sticky 측 길어 본질 X. 제거.
+       너비 측 480px 측 박음 (Market Flow 측 9-col table 측 fit + Market Data 카드 측 정합). */
+    flex: 0 0 480px;
     min-width: 0;
-    position: sticky;
-    top: 0;
 }
 .dashboard-main {
     flex: 1 1 auto;

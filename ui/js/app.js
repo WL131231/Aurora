@@ -315,6 +315,10 @@ async function refreshDashboard() {
 
         // v0.1.86: 봇 시점 차트 — 봇 가동 시만 enabled. 폴링 주기 = dashboard 와 동일 (15초).
         await refreshBotChart();
+
+        // v0.1.87: Phase 3 Dashboard Flow — 5 거래소 합본 (Binance 박힘 / 추후 4개 추가).
+        // 백엔드 60초 cache 박힘 → 사용자 UI 폴링 부담 X.
+        await refreshDashboardFlow();
     } catch (_) {
         connDot.style.background = "#fb7185";
         connDot.style.boxShadow  = "0 0 8px #fb7185";
@@ -1044,6 +1048,102 @@ async function refreshBotChart() {
     }
     if (empty) empty.classList.add("hidden");
 }
+
+// ============================================================
+// v0.1.87: Phase 3 Dashboard Flow — 5 거래소 합본 (Market Flow + L/S Ratio)
+// ============================================================
+const Dflow = {
+    coin: "BTC",
+};
+
+function _fmtUsd(v) {
+    if (v == null) return "—";
+    const abs = Math.abs(v);
+    if (abs >= 1e9) return (v / 1e9).toFixed(2) + "B";
+    if (abs >= 1e6) return (v / 1e6).toFixed(1) + "M";
+    if (abs >= 1e3) return (v / 1e3).toFixed(1) + "K";
+    return v.toFixed(0);
+}
+function _fmtPct(v, digits = 2) {
+    if (v == null) return "—";
+    return v.toFixed(digits) + "%";
+}
+function _fmtRatio(v) {
+    if (v == null) return "—";
+    return v.toFixed(2);
+}
+function _fmtFunding(v) {
+    if (v == null) return "—";
+    return (v * 100).toFixed(4) + "%";
+}
+function _signClass(v) {
+    if (v == null) return "";
+    return v > 0 ? "pos" : v < 0 ? "neg" : "";
+}
+
+async function refreshDashboardFlow() {
+    const tbody = document.getElementById("dflow-tbody");
+    if (!tbody) return;
+
+    let data;
+    try {
+        data = await Api.getDashboardFlow(Dflow.coin);
+    } catch (_) {
+        tbody.innerHTML = `<tr><td colspan="8" class="dflow-empty">로드 실패 (네트워크?)</td></tr>`;
+        return;
+    }
+
+    // 합계 카드
+    const set = (id, txt) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = txt;
+    };
+    set("dflow-total-oi", data.total_oi_usd != null ? "$" + _fmtUsd(data.total_oi_usd) : "—");
+    set("dflow-total-vol", data.total_volume_24h_usd != null ? "$" + _fmtUsd(data.total_volume_24h_usd) : "—");
+    set("dflow-avg-funding", _fmtFunding(data.avg_funding_rate));
+    set("dflow-avg-ls", _fmtRatio(data.avg_ls_ratio_global));
+
+    // 거래소별 row — 등록된 exchanges 순서대로 (snapshot 미존재 시 placeholder)
+    const snapsByEx = {};
+    for (const s of (data.snapshots || [])) {
+        snapsByEx[s.exchange] = s;
+    }
+    const rows = (data.exchanges || []).map(ex => {
+        const s = snapsByEx[ex];
+        if (!s) {
+            return `<tr><td class="dflow-exchange">${ex}</td>` +
+                   `<td colspan="7" class="dflow-empty">데이터 없음</td></tr>`;
+        }
+        const chgCls = _signClass(s.price_24h_change_pct);
+        const fundingCls = _signClass(s.funding_rate);
+        return `<tr>
+            <td class="dflow-exchange">${ex}</td>
+            <td>${s.price != null ? "$" + s.price.toLocaleString(undefined, {maximumFractionDigits: 2}) : "—"}</td>
+            <td class="${chgCls}">${_fmtPct(s.price_24h_change_pct)}</td>
+            <td>${s.oi_usd != null ? "$" + _fmtUsd(s.oi_usd) : "—"}</td>
+            <td class="${fundingCls}">${_fmtFunding(s.funding_rate)}</td>
+            <td>${_fmtRatio(s.ls_ratio_global)}</td>
+            <td>${_fmtRatio(s.ls_ratio_top_position)}</td>
+            <td>${_fmtRatio(s.ls_ratio_top_account)}</td>
+        </tr>`;
+    }).join("");
+
+    tbody.innerHTML = rows || `<tr><td colspan="8" class="dflow-empty">등록된 거래소 없음</td></tr>`;
+}
+
+function _wireDflowToggles() {
+    const box = document.getElementById("dflow-coin-toggle");
+    if (!box) return;
+    for (const btn of box.querySelectorAll("button")) {
+        btn.addEventListener("click", () => {
+            box.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            Dflow.coin = btn.dataset.coin;
+            refreshDashboardFlow();
+        });
+    }
+}
+_wireDflowToggles();
 
 // 차트 토글 — TF / 오버레이 (DOM ready 후 박힘)
 function _wireChartToggles() {

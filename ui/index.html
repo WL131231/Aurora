@@ -305,6 +305,52 @@
                         </div>
                     </div>
 
+                    <!-- v0.1.87: Phase 3 Dashboard Flow — 거래소 5개 합본 (Binance 박힘 / Bybit·OKX·Bitget·Hyperliquid 추후) -->
+                    <div class="section-title">
+                        Market Flow <span class="text-xs text-zinc-500">— 5 거래소 합본 (60초 cache)</span>
+                        <span class="dflow-coin-toggle" id="dflow-coin-toggle">
+                            <button data-coin="BTC" class="active">BTC</button>
+                            <button data-coin="ETH">ETH</button>
+                        </span>
+                    </div>
+                    <div class="dflow-summary-grid" id="dflow-summary">
+                        <div class="dflow-summary-card">
+                            <div class="dflow-summary-label">합 OI</div>
+                            <div class="dflow-summary-value mono" id="dflow-total-oi">—</div>
+                        </div>
+                        <div class="dflow-summary-card">
+                            <div class="dflow-summary-label">합 24h Volume</div>
+                            <div class="dflow-summary-value mono" id="dflow-total-vol">—</div>
+                        </div>
+                        <div class="dflow-summary-card">
+                            <div class="dflow-summary-label">평균 Funding</div>
+                            <div class="dflow-summary-value mono" id="dflow-avg-funding">—</div>
+                        </div>
+                        <div class="dflow-summary-card">
+                            <div class="dflow-summary-label">평균 L/S Global</div>
+                            <div class="dflow-summary-value mono" id="dflow-avg-ls">—</div>
+                        </div>
+                    </div>
+                    <div class="metric-card dflow-table-card" style="padding: 0">
+                        <table class="dflow-table">
+                            <thead>
+                                <tr>
+                                    <th>거래소</th>
+                                    <th>Price</th>
+                                    <th>24h%</th>
+                                    <th>OI (USD)</th>
+                                    <th>Funding</th>
+                                    <th>L/S Global</th>
+                                    <th>L/S Top (Pos)</th>
+                                    <th>L/S Top (Acc)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dflow-tbody">
+                                <tr><td colspan="8" class="dflow-empty">로드 중…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
                     <div class="section-title">결과 통계</div>
                     <div class="stat-grid">
                         <div class="stat-card">

@@ -321,6 +321,51 @@ class ChartDTO(BaseModel):
 
 
 # ============================================================
+# v0.1.87: Dashboard Flow DTO — 거래소 5개 시장 자료 합본
+# ============================================================
+
+
+class ExchangeSnapshotDTO(BaseModel):
+    """거래소별 1 시점 snapshot — UI dashboard view 측 segment row.
+
+    None = 미지원 / fetch 실패. UI 측 "—" 표시.
+    """
+
+    exchange: str
+    symbol: str
+    fetched_at_ms: int
+    oi_usd: float | None = None
+    funding_rate: float | None = None
+    price: float | None = None
+    price_24h_change_pct: float | None = None
+    volume_24h_usd: float | None = None
+    ls_ratio_global: float | None = None
+    long_account_pct: float | None = None
+    short_account_pct: float | None = None
+    ls_ratio_top_position: float | None = None
+    ls_ratio_top_account: float | None = None
+    errors: list[str] = []
+
+
+class DashboardFlowDTO(BaseModel):
+    """``GET /dashboard-flow`` — 5 거래소 합본 + 거래소별 segment.
+
+    v0.1.87: Binance 1개. v0.1.88+ 추가 거래소 박음.
+    """
+
+    coin: str
+    fetched_at_ms: int
+    exchanges: list[str] = []                      # 등록된 거래소 이름 리스트
+    snapshots: list[ExchangeSnapshotDTO] = []
+    total_oi_usd: float | None = None
+    total_volume_24h_usd: float | None = None
+    avg_funding_rate: float | None = None
+    avg_ls_ratio_global: float | None = None
+    avg_ls_ratio_top_position: float | None = None
+    avg_ls_ratio_top_account: float | None = None
+
+
+# ============================================================
 # v0.1.65: 거래내역 dedup helper — 봇 record 와 거래소 record 매칭
 # ============================================================
 
@@ -920,6 +965,61 @@ def create_app() -> FastAPI:
             st_fast=_series_to_points(st_f["line"]),
             st_slow=_series_to_points(st_s["line"]),
             markers=markers,
+        )
+
+    # ───── Dashboard Flow (Phase 3, v0.1.87+) ─────────
+
+    @app.get("/dashboard-flow", response_model=DashboardFlowDTO)
+    async def dashboard_flow_endpoint(coin: str = "BTC") -> DashboardFlowDTO:
+        """5 거래소 합본 시장 자료 — OI / Funding / L-S Ratio / Top Trader Ratio.
+
+        v0.1.87: Binance 1개 박힘. v0.1.88 (+Bybit, +OKX) / v0.1.89 (+Bitget,
+        +Hyperliquid) 순차 박음. cache TTL 60초 (UI 폴링 부담 완화).
+
+        Args:
+            coin: ``"BTC"`` / ``"ETH"`` (기본 BTC).
+        """
+        from aurora.market.dashboard_flow import get_aggregator
+
+        agg = get_aggregator()
+        try:
+            flow = await agg.fetch(coin)
+        except Exception as e:  # noqa: BLE001 — UI 안전 (빈 응답)
+            logger.warning("/dashboard-flow fetch 실패: %s", e)
+            return DashboardFlowDTO(
+                coin=coin, fetched_at_ms=int(time.time() * 1000),
+                exchanges=agg.exchange_names,
+            )
+
+        return DashboardFlowDTO(
+            coin=flow.coin,
+            fetched_at_ms=flow.fetched_at_ms,
+            exchanges=agg.exchange_names,
+            snapshots=[
+                ExchangeSnapshotDTO(
+                    exchange=s.exchange,
+                    symbol=s.symbol,
+                    fetched_at_ms=s.fetched_at_ms,
+                    oi_usd=s.oi_usd,
+                    funding_rate=s.funding_rate,
+                    price=s.price,
+                    price_24h_change_pct=s.price_24h_change_pct,
+                    volume_24h_usd=s.volume_24h_usd,
+                    ls_ratio_global=s.ls_ratio_global,
+                    long_account_pct=s.long_account_pct,
+                    short_account_pct=s.short_account_pct,
+                    ls_ratio_top_position=s.ls_ratio_top_position,
+                    ls_ratio_top_account=s.ls_ratio_top_account,
+                    errors=s.errors,
+                )
+                for s in flow.snapshots
+            ],
+            total_oi_usd=flow.total_oi_usd,
+            total_volume_24h_usd=flow.total_volume_24h_usd,
+            avg_funding_rate=flow.avg_funding_rate,
+            avg_ls_ratio_global=flow.avg_ls_ratio_global,
+            avg_ls_ratio_top_position=flow.avg_ls_ratio_top_position,
+            avg_ls_ratio_top_account=flow.avg_ls_ratio_top_account,
         )
 
     # ───── Config ───────────────────────────────────

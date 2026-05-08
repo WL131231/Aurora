@@ -36,30 +36,29 @@ def test_buffer_caps_at_1000() -> None:
     assert len(log_buffer.get_recent(2000)) == 1000
 
 
-def test_emit_no_running_loop_warns_once_to_stderr(capsys) -> None:
-    """v0.1.34 — running event loop 없을 때 첫 emit 만 stderr 명시, 이후 silent.
+def test_emit_without_event_loop_silent_skip() -> None:
+    """v0.1.106: event loop 박지 X 면 broadcast skip — emit 자체 측 raise X.
 
-    sync 컨텍스트 (테스트) + broadcaster 등록된 상태 → asyncio.get_running_loop
-    RuntimeError → 첫 1회만 print(stderr), 이후 silent (폭주 방지).
+    이전 (v0.1.34~v0.1.105) 측 stderr 측 첫 1회 print 박았는데 PyInstaller
+    --windowed + frozen 측 stderr None / asyncio.get_running_loop 측 hang 가능성.
+    v0.1.106 측 emit 안 측 set_event_loop() 박혀있을 때만 broadcast — 안 박혀있으면
+    silent skip. 더 안전 박힘.
     """
-    # broadcaster 가짜 등록 — 본 테스트는 실 push X (event loop 없음)
+    # broadcaster 가짜 등록 — 본 테스트 측 실 push X (event loop 측 set 안 박음)
     async def _fake_broadcaster(_item):
         pass
     log_buffer.set_broadcaster(_fake_broadcaster)
-    # 이전 테스트로 이미 warned 됐을 수 있음 → 모듈 flag reset
-    log_buffer._no_loop_warned = False
+    # event_loop 측 None 박음 (lifespan 측 X — 즉 broadcast 비활성)
+    log_buffer.set_event_loop(None)
 
     log_buffer.install()
     try:
-        # 첫 호출 — stderr 메시지 1줄
+        # 여러 번 호출해도 raise X — 매 호출 측 buffer 만 append, broadcast skip
         logging.getLogger("test.noloop").info("first emit")
-        # 두 번째 호출 — silent (warned 후 폭주 X)
         logging.getLogger("test.noloop").info("second emit")
+        logging.getLogger("test.noloop").info("third emit")
     finally:
-        log_buffer.set_broadcaster(None)  # type: ignore[arg-type]
+        log_buffer.set_broadcaster(None)
 
-    captured = capsys.readouterr()
-    # stderr 에 "running event loop 없음" 정확히 1번만 출현
-    assert captured.err.count("running event loop 없음") == 1
-    # _no_loop_warned 플래그 set 됨
-    assert log_buffer._no_loop_warned is True
+    # buffer 측 새 record 박힘 (3 entries)
+    assert len(log_buffer.get_recent(10)) >= 3

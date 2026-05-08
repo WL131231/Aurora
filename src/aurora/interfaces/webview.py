@@ -67,6 +67,51 @@ def _acquire_single_instance_mutex() -> bool:
 
 
 # ============================================================
+# v0.1.101: window auto-front — 사용자 측 작업표시줄 클릭 마찰 X
+# ============================================================
+# Why: Windows 측 detached process 측 spawn 시 OS auto-focus 안 함 (Vista+
+# 측 focus stealing prevention 정책). 사용자 측 launcher Trading Start 클릭
+# → body window 뒤에 박힘 → 작업표시줄 클릭 필요. SetForegroundWindow 박아
+# 자동 front + 포커스 박음.
+
+
+def _bring_window_to_front_async() -> None:
+    """body window 측 자동 front + focus. 별도 thread 측 박음.
+
+    pywebview create_window 측 동기 호출이지만 실제 OS window 생성 측
+    webview.start() 측 시작. start() 측 main thread 박힘 (block) → window
+    생성 시점 측 비동기 검출 본질. 1.5초 대기 후 FindWindow 박음.
+
+    non-Windows / FindWindow fail / SetForegroundWindow fail 측 silent skip.
+    """
+    if sys.platform != "win32":
+        return
+    import time
+
+    # window 생성 측 시간 — webview.start() 측 backend 측 (WebView2) 초기화
+    # 측 보통 0.5~1.5초. 1.5초 대기 박음.
+    time.sleep(1.5)
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        # title "Aurora" 찾기. body 측 webview.create_window("Aurora", ...) 본질.
+        hwnd = user32.FindWindowW(None, "Aurora")
+        if not hwnd:
+            logger.debug("Aurora window 측 hwnd 측 발견 X (1.5초 후) — skip")
+            return
+        # SW_RESTORE = 9 (minimized 상태 복원), SW_SHOWNORMAL = 1
+        user32.ShowWindow(hwnd, 9)
+        # SetForegroundWindow 측 다른 process 측 focus 뺏는 케이스 측 OS 거부 가능.
+        # 우회: AttachThreadInput 박아 본 process 측 thread 측 attach.
+        # 단순화 — 일단 SetForegroundWindow 박고 fail 시 BringWindowToTop fallback.
+        if not user32.SetForegroundWindow(hwnd):
+            user32.BringWindowToTop(hwnd)
+        logger.info("body window 측 front + focus 박음 (hwnd=%s)", hwnd)
+    except Exception as e:  # noqa: BLE001 — front 측 실패해도 main 흐름 영향 X
+        logger.debug("window front 박기 실패 (계속 진행): %s", e)
+
+
+# ============================================================
 # v0.1.100: 다른 Aurora.exe process 강제 정리 — mutex race 보강
 # ============================================================
 # Why: 사용자 보고 (2026-05-08) Aurora.exe (3) + Aurora-launcher.exe (2) 동시
@@ -366,6 +411,13 @@ def launch() -> None:
         resizable=True,
         background_color="#06060a",  # 웹사이트 배경과 동일 (로딩 깜빡임 방지)
     )
+
+    # v0.1.101: 본체 window 자동 front + focus — 사용자 보고 (2026-05-08)
+    # "처음에 시작 누르면 작업표시줄에서 클릭해야 창 뜸" 본질. Windows 측 detached
+    # process 측 spawn 시 OS 가 auto-focus 안 함 (뺏기 방지 정책). pywebview
+    # window 생성 후 짧게 대기 → ctypes 측 SetForegroundWindow 박음.
+    threading.Thread(target=_bring_window_to_front_async, daemon=True).start()
+
     webview.start()
 
 

@@ -804,6 +804,20 @@ def launch_aurora() -> subprocess.Popen | None:
             # 옆에서 찾게 → 사용자가 .env 를 launcher 옆에 두면 인식 OK.
             cwd=str(_launcher_dir()),
         )
+        # v0.1.101: body 측 SetForegroundWindow 권한 박음 — Windows Vista+ 측
+        # focus stealing prevention 정책 측 다른 process 측 focus 뺏을 때 OS
+        # 측 거부. launcher (현재 focus 보유 process) 측 AllowSetForegroundWindow
+        # 박아 body PID 측 권한 양도 → body 측 SetForegroundWindow 측 성공.
+        if sys_name == "Windows":
+            try:
+                import ctypes
+                if not ctypes.windll.user32.AllowSetForegroundWindow(proc.pid):
+                    logger.debug(
+                        "AllowSetForegroundWindow PID=%d 측 fail (계속 진행)",
+                        proc.pid,
+                    )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("AllowSetForegroundWindow 측 예외 (무시): %s", e)
         return proc
     except OSError as e:
         logger.error("본체 실행 실패: %s", e)

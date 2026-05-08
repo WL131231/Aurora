@@ -78,42 +78,67 @@ def _acquire_single_instance_mutex() -> bool:
 def _setup_body_file_logging() -> Path | None:
     """본체 진단용 file logging — `%LOCALAPPDATA%\\Aurora\\aurora.log` (Windows).
 
+    v0.1.99: fallback 경로 박음 — primary 디렉토리 권한 fail 시 ``%TEMP%\\Aurora`` /
+    ``/tmp/aurora-{user}`` 측 시도. \"로그 자체 안 박힘\" 증상 차단.
+
     Returns:
-        log 파일 절대 경로 (성공 시) / None (디렉토리 권한 등 실패 시).
+        log 파일 절대 경로 (성공 시) / None (모든 fallback 실패 시).
     """
     import logging.handlers
     import os
     import platform as _plat
+    import tempfile
 
-    try:
-        if _plat.system() == "Windows":
-            local_app = os.environ.get("LOCALAPPDATA")
-            log_dir = Path(local_app) / "Aurora" if local_app else Path.home() / ".aurora"
-        elif _plat.system() == "Darwin":
-            log_dir = Path.home() / "Library" / "Application Support" / "Aurora"
-        else:
-            log_dir = Path.home() / ".aurora"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = log_dir / "aurora.log"
-        file_handler = logging.handlers.RotatingFileHandler(
-            log_file,
-            maxBytes=2_000_000,  # 2 MB (launcher 1MB 보다 큼 — 매매 사이클 로그 많음)
-            backupCount=3,
-            encoding="utf-8",
-        )
-        file_handler.setFormatter(logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        ))
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)
-        # self-update swap 등 main 재진입 시 중복 handler 박힘 방지
-        for existing in list(root_logger.handlers):
-            if isinstance(existing, logging.handlers.RotatingFileHandler):
-                root_logger.removeHandler(existing)
-        root_logger.addHandler(file_handler)
-        return log_file
-    except OSError:
-        return None
+    candidates: list[Path] = []
+    if _plat.system() == "Windows":
+        local_app = os.environ.get("LOCALAPPDATA")
+        if local_app:
+            candidates.append(Path(local_app) / "Aurora")
+        candidates.append(Path(tempfile.gettempdir()) / "Aurora")
+        candidates.append(Path.home() / ".aurora")
+    elif _plat.system() == "Darwin":
+        candidates.append(Path.home() / "Library" / "Application Support" / "Aurora")
+        candidates.append(Path(tempfile.gettempdir()) / "Aurora")
+        candidates.append(Path.home() / ".aurora")
+    else:
+        candidates.append(Path.home() / ".aurora")
+        candidates.append(Path(tempfile.gettempdir()) / "Aurora")
+
+    last_error: Exception | None = None
+    for log_dir in candidates:
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = log_dir / "aurora.log"
+            file_handler = logging.handlers.RotatingFileHandler(
+                log_file,
+                maxBytes=2_000_000,  # 2 MB (launcher 1MB 보다 큼 — 매매 사이클 로그 많음)
+                backupCount=3,
+                encoding="utf-8",
+            )
+            file_handler.setFormatter(logging.Formatter(
+                "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            ))
+            root_logger = logging.getLogger()
+            root_logger.setLevel(logging.INFO)
+            # self-update swap 등 main 재진입 시 중복 handler 박힘 방지
+            for existing in list(root_logger.handlers):
+                if isinstance(existing, logging.handlers.RotatingFileHandler):
+                    root_logger.removeHandler(existing)
+            root_logger.addHandler(file_handler)
+            return log_file
+        except OSError as e:
+            last_error = e
+            continue
+
+    # 모든 candidate fail — stderr 로 fallback 정보 출력 (frozen 환경에선 X 표시)
+    if last_error is not None:
+        try:
+            sys.stderr.write(
+                f"[Aurora] body file logging 모든 위치 fail: {last_error}\n",
+            )
+        except OSError:
+            pass
+    return None
 
 
 def _exe_dir() -> Path | None:
@@ -161,14 +186,26 @@ def _start_api_server() -> None:
 
     daemon=True 이므로 메인(Pywebview) 가 종료되면 자동 정리.
     프로덕션 빌드 시 ``log_level`` 은 ``warning`` 이상 권장 (성능).
+
+    v0.1.99: thread 측 예외 catch 박음 — uvicorn fail 시 silent 종료 차단 (로그
+    남게). 정상 흐름엔 영향 X.
     """
-    app = create_app()
-    uvicorn.run(
-        app,
-        host=settings.api_host,
-        port=settings.api_port,
-        log_level=settings.log_level.lower(),
-    )
+    try:
+        app = create_app()
+        logger.info(
+            "uvicorn 시작 시도: host=%s port=%s",
+            settings.api_host, settings.api_port,
+        )
+        uvicorn.run(
+            app,
+            host=settings.api_host,
+            port=settings.api_port,
+            log_level=settings.log_level.lower(),
+        )
+    except Exception as e:
+        logger.exception("uvicorn fail (api 서버 죽음): %s", e)
+        # daemon thread 라 main 종료 안 시도. 하지만 frontend 측 영구 disconnect.
+        raise
 
 
 def launch() -> None:
@@ -196,12 +233,24 @@ def launch() -> None:
 
     # v0.1.94: file logging — disconnect / crash 진단 자료. mutex 박기 전에 박음
     # (mutex 측 sys.exit(0) 도 로그에 남음).
+    # v0.1.99: 환경 정보 로깅 박음 (Python / platform / frozen / mode) — 진단 자료.
+    import platform as _plat
+
+    from aurora import __version__ as _av
     body_log_file = _setup_body_file_logging()
     if body_log_file is not None:
         logger.info("=" * 60)
-        logger.info("Aurora body 시작 — file log: %s", body_log_file)
+        logger.info("Aurora body v%s 시작 — file log: %s", _av, body_log_file)
+        logger.info("Python: %s", sys.version.replace("\n", " "))
+        logger.info("Platform: %s", _plat.platform())
+        logger.info(
+            "frozen=%s _MEIPASS=%s",
+            getattr(sys, "frozen", False),
+            getattr(sys, "_MEIPASS", "-"),
+        )
+        logger.info("run_mode=%s", settings.run_mode)
     else:
-        logger.warning("body file logging 활성 실패 (디렉토리 권한 등)")
+        logger.warning("body file logging 활성 실패 (모든 fallback 위치 권한 X)")
 
     # v0.1.92: 중복 실행 차단 — 이미 Aurora 살아있으면 즉시 exit
     if not _acquire_single_instance_mutex():

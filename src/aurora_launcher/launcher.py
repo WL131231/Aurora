@@ -773,6 +773,10 @@ class LauncherApi:
         # 사용자 제안 패러다임 — launcher 항상 살아있음 + 본체 spawn 시 hide
         # + 본체 종료 시 show. 본체 자기 죽이기 의무 자체 X.
         self._aurora_proc: subprocess.Popen | None = None
+        # v0.1.99: WebView2 crash 감지용 — 본체 짧게 살다가 정상 종료 시 likely
+        # crash → 자동 respawn (최대 3회). spawn 시각 + 카운트 박음.
+        self._aurora_spawn_at: float = 0.0  # time.time() 박음
+        self._aurora_crash_respawn_count: int = 0
 
     def is_auto_start(self) -> bool:
         """v0.1.43: auto-start 모드 여부 — 본체 재시작 흐름에서 launcher 가
@@ -864,12 +868,18 @@ class LauncherApi:
         """본체 실행 — v0.1.80 사용자 제안 패러다임:
         launcher 항상 살아있음 + 본체 spawn 시 webview hide + 본체 종료 시 show.
         본체 자기 죽이기 / launcher 가 본체 죽이기 의무 자체 X.
+
+        v0.1.99: spawn 시각 + crash auto-respawn 카운트 박음 (사용자 보고
+        2026-05-08 \"본체 짧게 살다가 종료\" 본질 — WebView2 native crash 추정).
+        짧은 시간 (60초) 안 정상 종료 = likely crash → 최대 3회 자동 respawn.
         """
         proc = launch_aurora()
         if proc is None:
             return {"success": False, "message": "본체 .exe 미존재 — 먼저 업데이트"}
         # 본체 process 보관 + polling thread 시작
         self._aurora_proc = proc
+        self._aurora_spawn_at = time.time()  # v0.1.99: crash 감지용
+        self._aurora_crash_respawn_count = 0  # v0.1.99: 자동 respawn 카운터
         self._start_aurora_polling()
         # launcher webview hide — 본체 GUI 가 사용자 화면 차지
         self._hide_launcher_window()
@@ -946,14 +956,40 @@ class LauncherApi:
                         new_proc = launch_aurora()
                         if new_proc is not None:
                             self._aurora_proc = new_proc
+                            self._aurora_spawn_at = time.time()
                             logger.info("새 본체 spawn OK — polling 계속")
                             continue  # 새 process 측 polling 계속
                         logger.warning(
                             "새 본체 spawn 실패 — launcher show fallback",
                         )
-                    # 본체 정상 종료 (사용자 X 클릭 / crash) 또는 auto-spawn 실패
+                    # v0.1.99: WebView2 crash 자동 respawn — 짧은 시간 (60초) 안
+                    # 정상 종료 (rc=0) = likely crash. 사용자 X 클릭 측 보통 1분+
+                    # 사용 후 종료 → 그 시점은 user intent 로 간주.
+                    # 최대 3회 respawn (무한 루프 방지). rc != 0 = 명시적 fail 측
+                    # 그대로 launcher show (자동 respawn X).
+                    elapsed = time.time() - self._aurora_spawn_at
+                    likely_crash = (
+                        rc == 0
+                        and elapsed < 60.0
+                        and self._aurora_crash_respawn_count < 3
+                    )
+                    if likely_crash:
+                        self._aurora_crash_respawn_count += 1
+                        logger.warning(
+                            "본체 짧게 살다가 종료 (rc=0, %.1f초) — likely WebView2 "
+                            "crash. 자동 respawn (#%d/3)",
+                            elapsed, self._aurora_crash_respawn_count,
+                        )
+                        new_proc = launch_aurora()
+                        if new_proc is not None:
+                            self._aurora_proc = new_proc
+                            self._aurora_spawn_at = time.time()
+                            continue
+                        logger.warning("respawn 실패 — launcher show fallback")
+                    # 본체 정상 종료 (사용자 X 클릭) 또는 respawn 한도 초과 / fail
                     logger.info(
-                        "본체 종료 감지 (rc=%s) → launcher show + START 활성", rc,
+                        "본체 종료 감지 (rc=%s, %.1f초 살아있음) → launcher show + "
+                        "START 활성", rc, elapsed,
                     )
                     self._aurora_proc = None
                     self._show_launcher_window()

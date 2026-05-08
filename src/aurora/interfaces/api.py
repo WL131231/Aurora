@@ -380,6 +380,39 @@ class DashboardFlowDTO(BaseModel):
 # ============================================================
 
 
+# ============================================================
+# v0.1.99: 60초 주기 heartbeat — backend 살아있음 확인 (진단 자료)
+# ============================================================
+
+
+async def _heartbeat_loop() -> None:
+    """매 60초 \"body alive\" 로그 박음. 봇 미가동 시에도 진단 자료 박힘.
+
+    \"로그 안 남음\" 사용자 보고 (2026-05-08) 시 backend 죽음 vs 단순 idle 구분
+    본질. heartbeat 측 marker — 마지막 heartbeat 이후 60초+ 측 backend hang /
+    process death 확정.
+    """
+    import time as _t
+    counter = 0
+    while True:
+        try:
+            await asyncio.sleep(60)
+            counter += 1
+            bot = bot_instance.get_instance()
+            logger.info(
+                "[heartbeat #%d] body alive — running=%s last_step_ago=%s초 mode=%s",
+                counter, bot.running,
+                ((int(_t.time() * 1000) - bot.last_step_ts) // 1000)
+                if bot.last_step_ts > 0 else "X",
+                settings.run_mode,
+            )
+        except asyncio.CancelledError:
+            logger.info("[heartbeat] 측 cancel — shutdown 흐름")
+            break
+        except Exception as e:  # noqa: BLE001 — heartbeat 측 어떤 예외도 loop 안 죽임
+            logger.warning("[heartbeat] 측 예외 (계속 진행): %s", e)
+
+
 def _find_bot_match(
     bot_records: list[TradeDTO],
     ex_c: Any,
@@ -415,9 +448,15 @@ def create_app() -> FastAPI:
     async def lifespan(_app: FastAPI):
         # startup — release_check 5분 주기 폴링 시작 (v0.1.25)
         release_check.start_polling()
+        # v0.1.99: 60초 주기 heartbeat task — 봇 미가동 시에도 \"body 살아있음\" 로그
+        # 박힘. \"로그 안 남음\" 진단 시 backend 죽음 vs 단순 idle 구분 가능.
+        heartbeat_task = asyncio.create_task(_heartbeat_loop())
+        logger.info("FastAPI lifespan startup OK — release_check + heartbeat 박힘")
         yield
         # shutdown — 폴링 task 깨끗하게 cancel
         release_check.stop_polling()
+        heartbeat_task.cancel()
+        logger.info("FastAPI lifespan shutdown")
 
     app = FastAPI(
         title="Aurora API",

@@ -32,6 +32,10 @@ TF_WEIGHTS: dict[str, int] = {
 DEFAULT_ENTRY_THRESHOLD: float = 1.0
 """진입 점수 임계값 — 최저 가중치(15m=1) 만으로도 진입 가능 (단일 신호 진입 정책)."""
 
+MULTI_SIGNAL_BOOST: float = 1.3
+"""v0.1.78 (C): 같은 방향 unique source 수 ≥ 2 시 score booster.
+Tako AND 컨펌 패턴 차용 — 다중 지표 동시 정렬 시 거짓 신호 ↓ 본질."""
+
 
 # ============================================================
 # 의사결정 dataclass
@@ -97,6 +101,18 @@ def compose_entry(
         elif sig.direction == Direction.SHORT:
             short_score += score
             short_sources.append(source_label)
+
+    # v0.1.78 (C): 다중 신호 동시 정렬 booster — Tako AND 컨펌 패턴 차용.
+    # 같은 방향 unique source 수 ≥ 2 면 score × MULTI_SIGNAL_BOOST.
+    # Why: 두 개 이상 지표가 동시 같은 방향 정렬 시 거짓 신호 ↓ — 강한 진입.
+    # OR 진입 (단일 신호도 진입) 본질 유지 + 강 신호 시 score 부스트로 임계값
+    # 명확 통과 + 사용자 시각 "강한 신호" 본질.
+    long_unique = len({s.split("@")[0] for s in long_sources})
+    short_unique = len({s.split("@")[0] for s in short_sources})
+    if long_unique >= 2:
+        long_score *= MULTI_SIGNAL_BOOST
+    if short_unique >= 2:
+        short_score *= MULTI_SIGNAL_BOOST
 
     # 진입 결정 — 큰 방향이 임계값 넘어야 진입.
     # Why: 양 방향 점수가 같거나 둘 다 임계 미달 = 보류. 헷갈리는 시장에선 안 들어감 (안전).

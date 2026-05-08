@@ -1103,6 +1103,11 @@ class BotInstance:
                         reason="priority_swap",
                     )
                     self._record_closed(closed)
+                    # v0.1.78 (B): Tako reverse 패턴 — 청산 직후 dedup reset 박음.
+                    # 다음 step (1초 후) 자연 진입 시 같은 bar 같은 source 재진입 dedup 우회.
+                    # PRIORITY swap = 의도적 반대 방향 진입이라 사고팔고 무한 루프 위험 X.
+                    self._last_entry_bar_ts.clear()
+                    self._last_entry_sources = ()
                     priority_handled = True
                     break
 
@@ -1115,6 +1120,10 @@ class BotInstance:
                     logger.info("REVERSE 신호 (%s) → 청산 (다음 step 진입 평가)", cur_dir)
                     _, closed = await self._executor.close_position(reason="reverse")
                     self._record_closed(closed)
+                    # v0.1.78 (B): Tako reverse 패턴 — REVERSE 청산 직후 dedup reset.
+                    # 다음 step 반대 방향 신호 박힘 시 같은 bar 우회 진입 본질.
+                    self._last_entry_bar_ts.clear()
+                    self._last_entry_sources = ()
             return
 
         # 4. 외부 포지션 detect (v0.1.9 — 신호 평가 전으로 위치 변경)

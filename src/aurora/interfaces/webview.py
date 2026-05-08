@@ -120,7 +120,14 @@ def _bring_window_to_front_async() -> None:
 
 
 def _kill_other_body_processes() -> None:
-    """body 시작 시 다른 Aurora.exe process 강제 정리. 자기 PID 제외.
+    """body 시작 시 다른 Aurora.exe process 강제 정리. 자기 PID + 부모 PID 제외.
+
+    v0.1.102 fix:
+    - 부모 PID 제외 — apply_pending_update self-update spawn 시 옛 body = 부모,
+      새 body = 자식. ``taskkill /F /T`` 측 tree-kill 측 자식 (= 자기 자신) 도
+      박힘 → 사용자 보고 \"본체 / 런처 안 나옴\" 본질.
+    - CREATE_NO_WINDOW 박음 — PyInstaller --windowed 측 subprocess 측 cmd
+      창 깜빡임 차단.
 
     non-Windows 환경 / tasklist fail 시 silent skip — fallback 흐름 유지.
     """
@@ -131,9 +138,14 @@ def _kill_other_body_processes() -> None:
     import time
     my_pid = os.getpid()
     try:
+        my_parent_pid = os.getppid()
+    except OSError:
+        my_parent_pid = -1
+    try:
         r = subprocess.run(  # noqa: S603, S607
             ["tasklist", "/FI", "IMAGENAME eq Aurora.exe", "/FO", "CSV", "/NH"],
             capture_output=True, timeout=5, check=False,
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
         )
         if r.returncode != 0:
             return
@@ -151,11 +163,18 @@ def _kill_other_body_processes() -> None:
                 continue
             if pid == my_pid:
                 continue
+            if pid == my_parent_pid:
+                logger.info(
+                    "v0.1.102 body startup nuke: Aurora.exe PID=%d 측 부모 — skip",
+                    pid,
+                )
+                continue
             logger.info("v0.1.100 body startup nuke: Aurora.exe PID=%d kill", pid)
             try:
                 subprocess.run(  # noqa: S603, S607
                     ["taskkill", "/F", "/T", "/PID", str(pid)],
                     capture_output=True, timeout=5, check=False,
+                    creationflags=0x08000000,  # CREATE_NO_WINDOW
                 )
                 killed += 1
             except (OSError, subprocess.TimeoutExpired) as e:

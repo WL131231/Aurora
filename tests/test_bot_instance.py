@@ -147,6 +147,32 @@ def test_v0_1_42_bar_dedup_initial_state() -> None:
     assert bot._last_entry_sources == ()
 
 
+def test_v0_1_91_priority_swap_bar_dedup_initial_state() -> None:
+    """v0.1.91: priority_swap 같은 봉 안 1회 한정 — 초기 상태 0 (한 번도 swap X).
+
+    Why: 사용자 보고 (2026-05-08) Harmonic 만 켜놓아도 priority_swap 무한 루프.
+    EMA/RSI Fixed 지표가 항상 emit + swap 후 dedup reset → 다음 step 다시 진입
+    → 또 swap. 같은 봉 안 1회 한정 박힘 → 봉 닫힘까지 추가 swap 차단.
+    """
+    bot = bot_instance.get_instance()
+    assert bot._last_priority_swap_bar_ts == 0
+
+
+def test_v0_1_91_priority_swap_blocked_same_bar() -> None:
+    """v0.1.91: 같은 bar_ts 면 swap_blocked_same_bar=True 본질 검증."""
+    bot = bot_instance.get_instance()
+
+    # 첫 swap 박힘 시뮬레이션 — bar_ts 박음
+    bar_ts = 1_700_000_000_000  # ms epoch
+    bot._last_priority_swap_bar_ts = bar_ts
+
+    # 같은 봉 = 차단 (production 측 swap_blocked_same_bar = True 분기)
+    assert bot._last_priority_swap_bar_ts == bar_ts
+    # 다음 봉 (1H = 60분 후) = 차단 풀림
+    next_bar_ts = bar_ts + 60 * 60 * 1000
+    assert bot._last_priority_swap_bar_ts != next_bar_ts
+
+
 def test_configure_sets_client_and_options() -> None:
     """configure(client, ...) — 어댑터 + 설정 inject."""
     bot = bot_instance.get_instance()

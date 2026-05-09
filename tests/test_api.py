@@ -627,3 +627,139 @@ def test_apk_status_reflects_error_state() -> None:
     body = _client().get("/update/apk-status").json()
     assert body["status"] == "error"
     assert body["error_msg"] == "connection refused"
+
+
+# ============================================================
+# Release latest (v0.1.25)
+# ============================================================
+
+
+def test_release_latest_no_update() -> None:
+    """/release/latest — pending 없음 → has_update=False."""
+    from aurora.interfaces import release_check
+    release_check.reset_state()
+
+    r = _client().get("/release/latest")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["has_update"] is False
+    assert body["tag"] == ""
+    assert body["current_version"] != ""  # __version__ 반영
+
+
+def test_release_latest_with_pending() -> None:
+    """/release/latest — pending 박힘 → has_update=True + 필드 노출."""
+    from aurora.interfaces import release_check
+    release_check.reset_state()
+    release_check._state["pending_release"] = {
+        "tag": "v999.0.0",
+        "name": "Test Release",
+        "body": "Release notes",
+        "html_url": "https://github.com/WL131231/Aurora/releases/tag/v999.0.0",
+        "published_at": "2026-05-04T00:00:00Z",
+    }
+
+    r = _client().get("/release/latest")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["has_update"] is True
+    assert body["tag"] == "v999.0.0"
+    assert body["name"] == "Test Release"
+    assert body["html_url"].endswith("/v999.0.0")
+    assert body["current_version"] != ""
+
+
+# ============================================================
+# Trades (v0.1.23)
+# ============================================================
+
+
+def test_trades_returns_empty_list_no_history() -> None:
+    """/trades — bot 거래 없음 → 빈 list."""
+    r = _client().get("/trades")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_trades_returns_bot_records() -> None:
+    """/trades — BotInstance._closed_trades 반영."""
+    from types import SimpleNamespace
+    bot = bot_instance.get_instance()
+    bot._closed_trades = [  # type: ignore[attr-defined]
+        SimpleNamespace(
+            symbol="BTC/USDT:USDT", direction="long", leverage=10,
+            qty=0.01, entry_price=80000.0, exit_price=82000.0,
+            pnl_usd=20.0, roi_pct=2.0, opened_at_ts=1000000, closed_at_ts=2000000,
+            reason="tp_full", triggered_by=["EMA"], fee_usd=0.5,
+        ),
+    ]
+
+    body = _client().get("/trades").json()
+    assert len(body) == 1
+    t = body[0]
+    assert t["symbol"] == "BTC/USDT:USDT"
+    assert t["direction"] == "long"
+    assert t["pnl_usd"] == 20.0
+    assert t["reason"] == "tp_full"
+    assert t["triggered_by"] == ["EMA"]
+
+
+# ============================================================
+# Stats (v0.1.24)
+# ============================================================
+
+
+def test_stats_returns_zero_metrics_no_trades() -> None:
+    """/stats — 거래 없음 → 모든 지표 0."""
+    r = _client().get("/stats")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total_trades"] == 0
+    assert body["win_count"] == 0
+    assert body["loss_count"] == 0
+    assert body["win_rate_pct"] == 0.0
+    assert body["cumulative_pnl_usd"] == 0.0
+
+
+def test_stats_reflects_closed_trades() -> None:
+    """/stats — closed_trades 있으면 total_trades 반영."""
+    from types import SimpleNamespace
+    bot = bot_instance.get_instance()
+    bot._closed_trades = [  # type: ignore[attr-defined]
+        SimpleNamespace(
+            symbol="BTC/USDT:USDT", direction="long", leverage=10,
+            qty=0.01, entry_price=80000.0, exit_price=82000.0,
+            pnl_usd=20.0, roi_pct=2.0, opened_at_ts=1000000, closed_at_ts=2000000,
+            reason="tp_full", triggered_by=["EMA"], fee_usd=0.5,
+        ),
+        SimpleNamespace(
+            symbol="BTC/USDT:USDT", direction="short", leverage=10,
+            qty=0.01, entry_price=80000.0, exit_price=81000.0,
+            pnl_usd=-10.0, roi_pct=-1.0, opened_at_ts=3000000, closed_at_ts=4000000,
+            reason="sl", triggered_by=[], fee_usd=0.5,
+        ),
+    ]
+
+    body = _client().get("/stats").json()
+    assert body["total_trades"] == 2
+    assert body["win_count"] == 1
+    assert body["loss_count"] == 1
+    assert body["win_rate_pct"] == 50.0
+    assert body["cumulative_pnl_usd"] == 10.0
+
+
+# ============================================================
+# UI 핫 업데이트 (apply_ui, v0.1.25)
+# ============================================================
+
+
+def test_apply_ui_returns_failure_in_dev_env() -> None:
+    """dev/pytest 환경 (frozen=False) → exe_dir=None → success=False."""
+    from unittest.mock import patch
+
+    with patch("aurora.interfaces.webview._exe_dir", return_value=None):
+        r = _client().post("/update/apply_ui")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is False
+    assert "빌드된 .exe" in body["message"]

@@ -53,10 +53,19 @@ try:
     import certifi
     _SSL_CONTEXT: ssl.SSLContext = ssl.create_default_context(cafile=certifi.where())
     _SSL_CTX_SOURCE: str = f"certifi {certifi.where()}"
-except ImportError:
-    # certifi 미설치 (dev 일부 환경) — system default fallback.
+    _SSL_IMPORT_ERROR: str | None = None
+except ImportError as _ssl_err:
+    # certifi 미설치 또는 PyInstaller 측 collect-data 측 X — system default fallback.
+    # v0.2.18 (ChoYoon #133 P0 ⑦): Windows 사용자 측 launcher.log 측 "system default"
+    # 박힘 = certifi import 실제 fail. fail 사유 측 별도 변수 박아 _setup_file_logging
+    # 직후 logger 박음 (진단 자료). build_launcher.py 측 --hidden-import certifi 박음.
     _SSL_CONTEXT = ssl.create_default_context()
     _SSL_CTX_SOURCE = "system default"
+    _SSL_IMPORT_ERROR = repr(_ssl_err)
+except Exception as _ssl_err:  # noqa: BLE001 — certifi 측 다른 fail 측 fallback
+    _SSL_CONTEXT = ssl.create_default_context()
+    _SSL_CTX_SOURCE = "system default"
+    _SSL_IMPORT_ERROR = repr(_ssl_err)
 
 # ============================================================
 # 설정 상수
@@ -71,8 +80,16 @@ HTTP_TIMEOUT_SEC = 15
 # 조회 실패" 에러. ChoYoon Claude #133 코드 점검 verify.
 LAUNCHER_USER_AGENT = f"Aurora-Launcher/{__version__}"
 
-# 본체 .exe 이름 — release.yml 의 Aurora-windows.exe 와 정합
-AURORA_EXE_NAME = "Aurora.exe"
+# v0.2.18 (ChoYoon #133 P0 ⑧, 사용자 huihu 환기): 본체 .exe 이름 측 release.yml asset
+# 정합 박음. v0.1.116 측 `Aurora.exe` 측 박혀 사용자 측 manual rename workaround
+# (= release asset `Aurora-windows.exe` 측 download 박은 후 미존재 fail). v0.2.18 측
+# AURORA_EXE_NAME 측 platform 분기 박아 release asset 측 그대로 spawn.
+# macOS: Aurora.app (별도 .zip 흐름, _body_local_target 측 처리, 본 상수 X)
+# Linux: Aurora (dev fallback)
+if platform.system() == "Windows":
+    AURORA_EXE_NAME = "Aurora-windows.exe"
+else:
+    AURORA_EXE_NAME = "Aurora.exe"
 
 # 본체 데이터 격리 폴더 이름 — v0.1.17~v0.1.21 launcher 옆 ``_aurora/``.
 # v0.1.22 부터 ``%LOCALAPPDATA%\Aurora\`` (Windows 표준 hidden 위치) 로 이전.
@@ -195,11 +212,16 @@ def _body_artifact_name() -> str:
 
 
 def _body_local_target() -> Path:
-    """v0.1.67: 플랫폼별 로컬 본체 path. Linux = Windows fallback (CI/dev 만)."""
+    """v0.1.67 + v0.2.18: 플랫폼별 로컬 본체 path. release asset 이름 정합.
+
+    macOS:   Aurora.app (zip 풀어서 박힘)
+    Windows: Aurora-windows.exe (= release asset 그대로, AURORA_EXE_NAME 측 동일)
+    Linux:   Aurora.exe (dev fallback)
+    """
     data_dir = _aurora_data_dir()
     if platform.system() == "Darwin":
-        return data_dir / "Aurora.app"  # zip 풀어서 박힘
-    return data_dir / "Aurora.exe"  # Windows + Linux fallback
+        return data_dir / "Aurora.app"
+    return data_dir / AURORA_EXE_NAME
 
 
 def _aurora_exe_path() -> Path:
@@ -256,12 +278,30 @@ def _migrate_legacy_layout() -> None:
             logger.info("legacy %s → %s 이전 완료", legacy_exe, new_exe)
         except OSError as e:
             logger.warning("legacy exe 이전 실패 (재다운 필요): %s", e)
+    # ── 3단계 (v0.2.18, ChoYoon #133 P0 ⑧): Windows 측 v0.1.116 까지 박혔던
+    # `Aurora.exe` 측 v0.2.18 측 `Aurora-windows.exe` 측 rename 박음.
+    # release asset 이름 정합 박은 본질 = 사용자 huihu 측 manual rename workaround
+    # 박은 거 측 자동 처리. 측 새 본체 측 release 측 download 박힐 때 .exe.new
+    # 측 정합 — 본 step 측 사용자 측 v0.1.116 까지 박힌 본체 측 보존.
+    if platform.system() == "Windows":
+        legacy_v0116_exe = new_data_dir / "Aurora.exe"
+        new_v0218_exe = new_data_dir / "Aurora-windows.exe"
+        if legacy_v0116_exe.exists() and not new_v0218_exe.exists():
+            try:
+                legacy_v0116_exe.rename(new_v0218_exe)
+                logger.info(
+                    "v0.2.18 본체 이름 자동 migration: %s → %s",
+                    legacy_v0116_exe, new_v0218_exe,
+                )
+            except OSError as e:
+                logger.warning("v0.2.18 본체 rename 실패 (재다운 필요): %s", e)
     # launcher 옆 잔재 (.new / .old / .aurora_version) 정리.
     # v0.1.24: launcher.exe.old 는 swap 직후 unlink 되지만 release 잔재 가능 → 정리.
     # legacy launcher.exe.new 는 apply_pending_launcher_update 가 호환 처리하므로
     # 여기선 unlink X (swap 흐름 방해 방지).
     for name in (
         "Aurora.exe.new", "Aurora.exe.old", ".aurora_version",
+        "Aurora-windows.exe.new", "Aurora-windows.exe.old",
         "Aurora-launcher.exe.old",
     ):
         legacy = _launcher_dir() / name
@@ -1210,15 +1250,31 @@ class LauncherApi:
         v0.1.109 (ChoYoon 권장 b): macOS 측 hide 측 dock icon 측 그대로 박혀 있어
         focus 측 본체 측 잡혀있을 가능성. show 시 NSApp 측 forefront 박음 — pywebview
         측 노출 X 라 osascript 박아 \"frontmost = true\" 박음.
+
+        v0.2.18 (ChoYoon #133 P0 ①): v0.1.116 측 hide 측 ``set visible=false`` 박은
+        symmetric 정합 박힘 본질 — show 측 ``set visible=true`` 측 추가 의무 박음.
+        Windows 측 정상 동작 verify 박힘 (사용자 huihu) → macOS-specific 회귀 박힘.
         """
         try:
             import webview  # type: ignore[import-not-found]
             if webview.windows:
                 webview.windows[0].show()
                 logger.info("launcher webview show — 본체 종료 감지 + 등장")
-                # v0.1.109: macOS 측 forefront 박음 — show 만으론 dock 박힌 채
-                # 사용자 화면 측 안 떠올라옴.
+                # v0.1.109 + v0.2.18: macOS 측 forefront + visible 박음.
+                # show 만으론 dock 박힌 채 사용자 화면 측 안 떠올라옴.
                 if platform.system() == "Darwin":
+                    # v0.2.18: hide 측 set visible=false 박았으므로 show 측
+                    # set visible=true 박아야 dock + 사용자 화면 측 표시 회복.
+                    try:
+                        subprocess.run(  # noqa: S603, S607
+                            ["osascript", "-e",
+                             'tell application "System Events" to set visible'
+                             ' of process "Aurora-launcher" to true'],
+                            capture_output=True, timeout=3, check=False,
+                        )
+                        logger.debug("macOS osascript visible=true 박힘")
+                    except (OSError, subprocess.TimeoutExpired) as e:
+                        logger.debug("osascript visible=true 실패 (계속 진행): %s", e)
                     try:
                         subprocess.run(  # noqa: S603, S607
                             ["osascript", "-e",
@@ -1404,6 +1460,10 @@ def _log_environment_info() -> None:
     # 다음 cycle launcher.log 에서 "certifi C:\...\_MEI...\certifi\cacert.pem" 박힘
     # → frozen 환경 SSL 핸드셰이크 본질 정합 verify 가능.
     logger.info("SSL context: %s", _SSL_CTX_SOURCE)
+    # v0.2.18 (ChoYoon #133 P0 ⑦): Windows 측 "system default" 박힘 = certifi
+    # import 측 fail. 사유 박음 → root cause 진단 (ImportError module name 등).
+    if _SSL_IMPORT_ERROR is not None:
+        logger.warning("certifi import 실패 사유: %s", _SSL_IMPORT_ERROR)
     logger.info("=" * 60)
 
 

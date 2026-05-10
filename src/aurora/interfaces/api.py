@@ -912,16 +912,36 @@ def create_app() -> FastAPI:
         bot = bot_instance.get_instance()
         coinalyze_client = getattr(bot, "_coinalyze", None)
         if coinalyze_client is None:
+            logger.info("/market-trend enabled=false: _coinalyze=None (COINALYZE_API_KEY 미설정)")
             return MarketTrendDTO(enabled=False)
 
         trends: list[MarketTrendCoinDTO] = []
         for coin in ("BTC", "ETH"):
             try:
                 t = await coinalyze_client.fetch_trend(coin)
-            except Exception:  # noqa: BLE001 — 네트워크 실패 fallback
+            except Exception as e:  # noqa: BLE001 — 네트워크 실패 fallback
+                # v0.2.17: 사용자 보고 fix — fetch_trend 실패 사유 기록
+                logger.warning("/market-trend %s fetch_trend 실패: %r", coin, e)
                 t = None
             if t is None:
+                logger.info("/market-trend %s: trend=None (cache 미생성/fetch fail)", coin)
                 continue
+            # v0.2.17: 사용자 보고 (2026-05-09) — UI 측 24h/OI/CVD/Funding 측 "—"
+            # 본질 진단. 어떤 field 측 None 박는지 logger 박음 (Coinalyze 측 일부
+            # field 측 plan 측 응답 X 가능성).
+            none_fields = [
+                k for k, v in {
+                    "price": t.price, "price_24h": t.price_24h,
+                    "oi": t.oi, "oi_24h": t.oi_24h,
+                    "cvd_spot": t.cvd_spot, "cvd_futures": t.cvd_futures,
+                    "funding_rate": t.funding_rate,
+                }.items() if v is None
+            ]
+            if none_fields:
+                logger.info(
+                    "/market-trend %s None field: %s",
+                    coin, ", ".join(none_fields),
+                )
             trends.append(MarketTrendCoinDTO(
                 coin=t.coin, score=t.score, direction=t.direction,
                 strong=t.strong, reasons=list(t.reasons),
@@ -940,6 +960,11 @@ def create_app() -> FastAPI:
                 funding_rate=t.funding_rate,
                 fetched_at_ms=t.fetched_at_ms,
             ))
+        # v0.2.17: trend list 측 빈 / 누락 박힘 측 진단
+        logger.info(
+            "/market-trend trends=%d (%s)",
+            len(trends), ", ".join(t.coin for t in trends) or "EMPTY",
+        )
         return MarketTrendDTO(enabled=True, trends=trends)
 
     # ───── Release 알림 (v0.1.25) ──────────────────────
@@ -1063,14 +1088,21 @@ def create_app() -> FastAPI:
 
         bot = bot_instance.get_instance()
         cache = bot._cache  # noqa: SLF001 — 내부 cache 직접 read (Phase 1 패턴)
+        # v0.2.17: 사용자 보고 (2026-05-09) 차트 빈 본질 → 진단 logger 박음
         if cache is None:
+            logger.info("/chart enabled=false: bot._cache=None (봇 미가동/.start 미호출)")
             return ChartDTO(enabled=False, timeframe=timeframe)
 
         try:
             df = cache.get(timeframe)
         except KeyError:
+            logger.info(
+                "/chart enabled=false: timeframe=%r cache 측 X (cache TFs=%s)",
+                timeframe, list(cache._cache.keys()) if hasattr(cache, "_cache") else "?",  # noqa: SLF001
+            )
             return ChartDTO(enabled=False, timeframe=timeframe)
         if df.empty:
+            logger.info("/chart enabled=false: tf=%r df.empty (cache 측 빈 DataFrame)", timeframe)
             return ChartDTO(enabled=False, timeframe=timeframe)
 
         # tail(limit) — UI 표시 영역만 + 지표 계산은 full df 로 한 후 tail

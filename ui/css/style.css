@@ -1540,10 +1540,27 @@ input[type="range"].slider-input:disabled {
     gap: 1.5rem;
 }
 .market-data-section {
-    /* v0.1.114: Market Flow 측 좌측 컬럼 합쳐 기존 sticky 측 길어 본질 X. 제거.
-       너비 측 480px 측 박음 (Market Flow 측 9-col table 측 fit + Market Data 카드 측 정합). */
+    /* v0.2.17: 사용자 요청 (2026-05-09) — 좌측 column 측 viewport 측 sticky 박음.
+       column 자체 측 별도 scroll → 본문 우측 측 스크롤 박혀도 좌측 column 측 항상 보임.
+       max-height 측 viewport 약간 빼서 column 안 측 자체 scroll 박힘. */
     flex: 0 0 480px;
     min-width: 0;
+    position: sticky;
+    top: 1rem;
+    align-self: flex-start;
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+}
+/* sticky column 안 측 scrollbar 측 살짝 보이게 (Aurora purple 정합) */
+.market-data-section::-webkit-scrollbar {
+    width: 6px;
+}
+.market-data-section::-webkit-scrollbar-thumb {
+    background: rgba(96, 81, 155, 0.25);
+    border-radius: 3px;
+}
+.market-data-section::-webkit-scrollbar-thumb:hover {
+    background: rgba(96, 81, 155, 0.45);
 }
 .dashboard-main {
     flex: 1 1 auto;

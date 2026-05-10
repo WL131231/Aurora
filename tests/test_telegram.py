@@ -17,7 +17,6 @@ from aurora.interfaces.telegram import (
     _fmt_exit,
 )
 
-
 # ── 헬퍼 ─────────────────────────────────────────────────────────
 
 def _make_plan(sl: float, tps: list[float]):

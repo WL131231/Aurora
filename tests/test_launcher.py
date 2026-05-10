@@ -140,6 +140,10 @@ def test_launcher_api_check_update_no_release():
 
 def test_launcher_api_check_update_has_update(tmp_path, monkeypatch):
     monkeypatch.setattr(launcher, "_launcher_dir", lambda: tmp_path)
+    # v0.2.19 fix: _aurora_data_dir 측 mock 박음 — 사용자 머신 측 LocalAppData 측 본체
+    # 박혀있어 has_update=False 박는 fragile test 본질 (CI runner 측 pass 박는 거 측
+    # LocalAppData 측 비어있어 정합 박힌 것).
+    monkeypatch.setattr(launcher, "_aurora_data_dir", lambda: tmp_path / "_aurora")
     # 본체 .exe 미존재 → has_update=True (첫 다운로드 권유)
     fake_release = {
         "tag_name": "v0.2.0",

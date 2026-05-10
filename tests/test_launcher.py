@@ -80,25 +80,27 @@ def test_fetch_latest_release_returns_none_on_network_error():
 
 
 def test_apply_swap_replaces_exe(tmp_path, monkeypatch):
-    """다운로드된 .new → 격리 폴더의 Aurora.exe 와 swap.
+    """다운로드된 .new → 격리 폴더의 본체 .exe 와 swap.
 
     v0.1.22: 격리 폴더가 ``%LOCALAPPDATA%\\Aurora`` 로 이동. 테스트는 ``_aurora_data_dir``
     을 ``tmp_path/_aurora`` 로 직접 mock — 사용자 LocalAppData 오염 방지.
+    v0.2.18: AURORA_EXE_NAME 측 platform 분기 (Windows: Aurora-windows.exe).
     """
     aurora_dir = tmp_path / "_aurora"
     aurora_dir.mkdir()
     monkeypatch.setattr(launcher, "_launcher_dir", lambda: tmp_path)
     monkeypatch.setattr(launcher, "_aurora_data_dir", lambda: aurora_dir)
 
-    exe = aurora_dir / "Aurora.exe"
+    exe_name = launcher.AURORA_EXE_NAME  # v0.2.18: platform 분기
+    exe = aurora_dir / exe_name
     exe.write_bytes(b"old-exe-content")
-    new = tmp_path / "Aurora.exe.new"
+    new = tmp_path / f"{exe_name}.new"
     new.write_bytes(b"new-exe-content")
 
     assert launcher.apply_swap(new) is True
     assert exe.read_bytes() == b"new-exe-content"
     assert not new.exists()  # .new 는 swap 후 사라짐 (rename 으로)
-    assert not (aurora_dir / "Aurora.exe.old").exists()  # 백업도 정리됨
+    assert not (aurora_dir / f"{exe_name}.old").exists()  # 백업도 정리됨
 
 
 def test_apply_swap_when_no_existing_exe(tmp_path, monkeypatch):
@@ -107,11 +109,12 @@ def test_apply_swap_when_no_existing_exe(tmp_path, monkeypatch):
     monkeypatch.setattr(launcher, "_launcher_dir", lambda: tmp_path)
     monkeypatch.setattr(launcher, "_aurora_data_dir", lambda: aurora_dir)
 
-    new = tmp_path / "Aurora.exe.new"
+    exe_name = launcher.AURORA_EXE_NAME  # v0.2.18: platform 분기
+    new = tmp_path / f"{exe_name}.new"
     new.write_bytes(b"first-time")
 
     assert launcher.apply_swap(new) is True
-    assert (aurora_dir / "Aurora.exe").read_bytes() == b"first-time"
+    assert (aurora_dir / exe_name).read_bytes() == b"first-time"
 
 
 # ============================================================
@@ -254,3 +257,109 @@ def test_download_and_swap_logs_entry_and_result(caplog, tmp_path, monkeypatch):
     msgs = [r.message for r in caplog.records]
     assert any("download_and_swap 진입" in m for m in msgs)
     assert any("download_and_swap 완료" in m for m in msgs)
+
+
+# ============================================================
+# v0.2.18: ChoYoon #133 P0 ⑧ — AURORA_EXE_NAME platform 분기
+# ============================================================
+
+
+def test_aurora_exe_name_matches_platform():
+    """AURORA_EXE_NAME 측 platform 정합 (Windows: Aurora-windows.exe)."""
+    import platform as _p
+    if _p.system() == "Windows":
+        assert launcher.AURORA_EXE_NAME == "Aurora-windows.exe"
+    else:
+        # macOS / Linux dev fallback
+        assert launcher.AURORA_EXE_NAME == "Aurora.exe"
+
+
+def test_migrate_legacy_v0116_to_v0218_renames_aurora_exe(tmp_path, monkeypatch):
+    """v0.2.18 측 Windows 자동 migration — `Aurora.exe` 측 박혔으면 `Aurora-windows.exe` 측 rename.
+
+    v0.1.116 까지 박힌 사용자 측 본체 측 보존 박음 (재 download X).
+    """
+    import platform as _p
+    if _p.system() != "Windows":
+        return  # macOS / Linux 측 본 step 측 noop — skip
+    aurora_dir = tmp_path / "_aurora"
+    aurora_dir.mkdir()
+    monkeypatch.setattr(launcher, "_launcher_dir", lambda: tmp_path)
+    monkeypatch.setattr(launcher, "_aurora_data_dir", lambda: aurora_dir)
+
+    legacy = aurora_dir / "Aurora.exe"
+    legacy.write_bytes(b"v0.1.116-body")
+
+    launcher._migrate_legacy_layout()
+
+    assert not legacy.exists()
+    assert (aurora_dir / "Aurora-windows.exe").read_bytes() == b"v0.1.116-body"
+
+
+def test_migrate_skips_when_v0218_already_present(tmp_path, monkeypatch):
+    """v0.2.18 측 본체 측 이미 박혀있으면 legacy 측 그대로 (덮어쓰기 X)."""
+    import platform as _p
+    if _p.system() != "Windows":
+        return
+    aurora_dir = tmp_path / "_aurora"
+    aurora_dir.mkdir()
+    monkeypatch.setattr(launcher, "_launcher_dir", lambda: tmp_path)
+    monkeypatch.setattr(launcher, "_aurora_data_dir", lambda: aurora_dir)
+
+    legacy = aurora_dir / "Aurora.exe"
+    legacy.write_bytes(b"old-v0116")
+    new = aurora_dir / "Aurora-windows.exe"
+    new.write_bytes(b"already-v0218")
+
+    launcher._migrate_legacy_layout()
+
+    # v0.2.18 측 그대로 박힘
+    assert new.read_bytes() == b"already-v0218"
+
+
+# ============================================================
+# v0.2.18: ChoYoon #133 P0 ① — macOS launcher show-back (osascript set visible=true)
+# ============================================================
+
+
+def test_show_launcher_window_macos_calls_osascript_visible_and_activate():
+    """macOS 측 _show_launcher_window 측 osascript 측 visible=true + activate 두 번 호출."""
+    from unittest.mock import MagicMock
+
+    # webview module 측 mock — windows[0].show() 만 호출 박힘
+    fake_win = MagicMock()
+    fake_webview = MagicMock(windows=[fake_win])
+
+    api = launcher.LauncherApi()
+    with patch.dict("sys.modules", {"webview": fake_webview}), \
+         patch("aurora_launcher.launcher.platform.system", return_value="Darwin"), \
+         patch("aurora_launcher.launcher.subprocess.run") as mock_run:
+        api._show_launcher_window()
+
+    # show() 호출 박힘
+    fake_win.show.assert_called_once()
+    # osascript 측 visible=true + activate 두 번 호출 박힘
+    cmds = [c.args[0] for c in mock_run.call_args_list]
+    visible_cmds = [c for c in cmds if "set visible" in c[-1]]
+    activate_cmds = [c for c in cmds if "to activate" in c[-1]]
+    assert visible_cmds, f"set visible=true osascript 측 호출 X: {cmds}"
+    assert activate_cmds, f"activate osascript 측 호출 X: {cmds}"
+    # visible 측 활성화 (true)
+    assert "to true" in visible_cmds[0][-1]
+
+
+def test_show_launcher_window_windows_skips_osascript():
+    """Windows 측 osascript 호출 X (정상 동작 보존)."""
+    from unittest.mock import MagicMock
+
+    fake_win = MagicMock()
+    fake_webview = MagicMock(windows=[fake_win])
+
+    api = launcher.LauncherApi()
+    with patch.dict("sys.modules", {"webview": fake_webview}), \
+         patch("aurora_launcher.launcher.platform.system", return_value="Windows"), \
+         patch("aurora_launcher.launcher.subprocess.run") as mock_run:
+        api._show_launcher_window()
+
+    fake_win.show.assert_called_once()
+    mock_run.assert_not_called()

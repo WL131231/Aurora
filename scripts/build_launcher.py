@@ -62,6 +62,11 @@ def main() -> int:
         # Why: ChoYoon Claude #133 환기 — frozen --windowed --onefile 일부 환경에서
         # ssl 모듈 CA path 깨짐 → urllib HTTPS 핸드셰이크 fail → "조회 실패" 일반화.
         "--collect-data", "certifi",
+        # v0.2.18 (ChoYoon #133 P0 ⑦): Windows launcher 측 "SSL context: system default"
+        # 박힘 = certifi import 측 fail (--collect-data 측 data 만 박고 module 측 X).
+        # --hidden-import 측 PyInstaller import tracker 측 명시 박음 → frozen .exe
+        # 측 import 정합.
+        "--hidden-import", "certifi",
         "--clean",
         "--noconfirm",
         "--onefile",

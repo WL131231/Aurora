@@ -99,7 +99,7 @@
         } catch (_) { /* 캐시 손상 — 무시 후 새 fetch */ }
 
         // 백그라운드 fetch — 캐시 만료 / 신선 데이터 박음.
-        fetch("https://api.github.com/repos/WL131231/Aurora/releases/latest", {
+        fetch("https://api.github.com/repos/WL131231/Aurora-releases/releases/latest", {
             headers: { Accept: "application/vnd.github.v3+json" },
             cache: "no-cache",
         })

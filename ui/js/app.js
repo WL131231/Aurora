@@ -1126,7 +1126,11 @@ function _fmtUsd(v) {
     if (abs >= 1e3) return (v / 1e3).toFixed(1) + "K";
     return v.toFixed(0);
 }
-function _fmtPct(v, digits = 2) {
+// v0.2.19 (사용자 보고 fix): 이전 _fmtPct(v, digits) 측 line 851 _fmtPct(now, prev)
+// 측 같은 이름 박혀있어 JS hoisting last-wins → Market Data 카드 측 _fmtPct(price, price_24h)
+// 호출 측 (price).toFixed(price_24h) 박힘 = price_24h ~80000 박혀 RangeError throw →
+// _renderMarketCard 24h/OI/CVD/Funding 측 모두 fail. v0.2.19 측 _fmtPercent 측 rename.
+function _fmtPercent(v, digits = 2) {
     if (v == null) return "—";
     return v.toFixed(digits) + "%";
 }
@@ -1195,7 +1199,7 @@ async function refreshDashboardFlow() {
         return `<tr>
             <td class="dflow-exchange">${ex}</td>
             <td>${s.price != null ? "$" + s.price.toLocaleString(undefined, {maximumFractionDigits: 2}) : "—"}</td>
-            <td class="${chgCls}">${_fmtPct(s.price_24h_change_pct)}</td>
+            <td class="${chgCls}">${_fmtPercent(s.price_24h_change_pct)}</td>
             <td>${s.oi_usd != null ? "$" + _fmtUsd(s.oi_usd) : "—"}</td>
             <td class="${fundingCls}">${_fmtFunding(s.funding_rate)}</td>
             <td>${_fmtRatio(s.ls_ratio_global)}</td>

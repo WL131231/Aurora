@@ -3,9 +3,13 @@ name: Release
 # tag push 시 Windows + macOS 동시 빌드 → GitHub Release 자동 첨부.
 # 사용자 = releases/latest/download/<file> URL 로 즉시 다운로드.
 #
+# v0.2.20: 코드 repo (Aurora) 측 private 박힘 + release artifact 측 별도 public
+# repo (Aurora-releases) 측 push. RELEASES_REPO_TOKEN secret 측 fine-grained PAT
+# 박힘 (Aurora-releases 측 Contents:write).
+#
 # 사용법:
-#   git tag v0.1.0 && git push origin v0.1.0
-#   → ~10분 후 https://github.com/WL131231/Aurora/releases/latest 에 자동 첨부:
+#   git tag v0.2.20 && git push origin v0.2.20
+#   → ~10분 후 https://github.com/WL131231/Aurora-releases/releases/latest 에 자동 첨부:
 #     · Aurora-windows.exe  (Windows 단일 실행파일)
 #     · Aurora-macOS.zip    (macOS .app 번들 zip)
 on:
@@ -199,8 +203,10 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # v0.2.20: artifact 측 별도 public repo (Aurora-releases) 측 push.
+          # 코드 repo (Aurora) 측 private 박힘 → release artifact 만 public.
+          repository: WL131231/Aurora-releases
+          token: ${{ secrets.RELEASES_REPO_TOKEN }}
 
       - name: Upload artifact (workflow 결과)
         uses: actions/upload-artifact@v4
@@ -225,8 +231,9 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # v0.2.20: Aurora-releases (public) 측 push — 코드 repo private 정합.
+          repository: WL131231/Aurora-releases
+          token: ${{ secrets.RELEASES_REPO_TOKEN }}
 
   # UI 핫 업데이트용 별도 zip — .exe 와 분리, 빠른 빌드 (PR b: UI 핫 업데이트).
   # webview 가 <exe_dir>/ui_override/ 우선 lookup, 없으면 _MEIPASS bundle fallback.
@@ -259,8 +266,9 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # v0.2.20: Aurora-releases 측 push
+          repository: WL131231/Aurora-releases
+          token: ${{ secrets.RELEASES_REPO_TOKEN }}
 
   # Android APK — Chaquopy 임베디드 Python, arm64-v8a + x86_64 fat APK.
   # apk_updater.py 가 본 asset (Aurora-android.apk) 을 다운로드해 자가 업데이트에 사용.
@@ -339,8 +347,9 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # v0.2.20: Aurora-releases 측 push
+          repository: WL131231/Aurora-releases
+          token: ${{ secrets.RELEASES_REPO_TOKEN }}
 
   # Launcher 미니 .exe — 사용자가 launcher 만 다운받아 본체 자동 업데이트.
   # 본체 (Aurora.exe) 의 자기-swap race condition 회피 + 원신 런처 스타일 UX.
@@ -463,8 +472,9 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # v0.2.20: Aurora-releases 측 push
+          repository: WL131231/Aurora-releases
+          token: ${{ secrets.RELEASES_REPO_TOKEN }}
 
       - name: Attach launcher to release
         uses: softprops/action-gh-release@v2
@@ -473,5 +483,6 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # v0.2.20: Aurora-releases 측 push
+          repository: WL131231/Aurora-releases
+          token: ${{ secrets.RELEASES_REPO_TOKEN }}

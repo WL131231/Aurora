@@ -45,7 +45,9 @@ logger = logging.getLogger(__name__)
 # 설정 상수
 # ============================================================
 
-GITHUB_API_LATEST = "https://api.github.com/repos/WL131231/Aurora/releases/latest"
+# v0.2.20: 코드 repo (Aurora) 측 private 박힘 + release artifact 측 별도 public
+# repo (Aurora-releases) 측 호스팅 박음. 본체 self-update 측 본 URL 측 fetch.
+GITHUB_API_LATEST = "https://api.github.com/repos/WL131231/Aurora-releases/releases/latest"
 HTTP_TIMEOUT_SEC = 5  # GitHub API + 네트워크 끊김 빠른 fail
 DOWNLOAD_TIMEOUT_SEC = 300  # 60 MB 다운로드 여유
 

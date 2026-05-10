@@ -31,7 +31,9 @@ from aurora import __version__
 logger = logging.getLogger(__name__)
 
 
-GITHUB_API_LATEST = "https://api.github.com/repos/WL131231/Aurora/releases/latest"
+# v0.2.20: 코드 repo (Aurora) 측 private 박힘 + release artifact 측 별도 public
+# repo (Aurora-releases) 측 호스팅 박음. 본체 측 새 버전 알림 측 본 URL 측 fetch.
+GITHUB_API_LATEST = "https://api.github.com/repos/WL131231/Aurora-releases/releases/latest"
 HTTP_TIMEOUT_SEC = 5
 POLL_INTERVAL_SEC = 5 * 60  # 5분
 

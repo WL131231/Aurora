@@ -367,3 +367,75 @@ def test_show_launcher_window_windows_skips_osascript():
 
     fake_win.show.assert_called_once()
     mock_run.assert_not_called()
+
+
+# ============================================================
+# v0.2.22: ChoYoon #133 18 cycle P1 ② — self-update PyObjC race
+# ============================================================
+
+
+def test_apply_pending_macos_skips_when_self_version_higher_or_equal(tmp_path, monkeypatch):
+    """metadata pending 측 자기 ≤ 케이스 — 단순 .zip.new + metadata 삭제 (swap X)."""
+    monkeypatch.setattr(launcher, "_aurora_data_dir", lambda: tmp_path)
+    src_zip = tmp_path / "Aurora-launcher-macOS.zip.new"
+    src_zip.write_bytes(b"fake-zip-bytes")
+    metadata = src_zip.with_suffix(".new.version")
+    metadata.write_text("v0.0.1", encoding="utf-8")  # 자기 (__version__) 보다 낮음
+    monkeypatch.setattr(launcher, "_launcher_new_path", lambda: src_zip)
+
+    result = launcher._apply_pending_launcher_update_macos()
+
+    assert result is False
+    assert not src_zip.exists(), "pending .zip.new 측 단순 삭제 박혀야"
+    assert not metadata.exists(), "metadata 측 단순 삭제 박혀야"
+
+
+def test_apply_pending_macos_no_metadata_skips_version_branch(tmp_path, monkeypatch):
+    """metadata X 박힌 경우 — version 비교 분기 측 진입 X (legacy 호환)."""
+    monkeypatch.setattr(launcher, "_aurora_data_dir", lambda: tmp_path)
+    src_zip = tmp_path / "Aurora-launcher-macOS.zip.new"
+    src_zip.write_bytes(b"fake-zip-bytes")
+    monkeypatch.setattr(launcher, "_launcher_new_path", lambda: src_zip)
+    # sys.executable 측 .app X 측 mock — swap 측 fail 박지만 핵심 측 "단순 삭제 X"
+    monkeypatch.setattr(launcher.sys, "executable", "/tmp/not-an-app/launcher")
+
+    result = launcher._apply_pending_launcher_update_macos()
+
+    # metadata X → 단순 삭제 분기 X → swap 흐름 진입 (단 .app X 라 fail)
+    assert src_zip.exists(), "metadata X 측 단순 삭제 박지 X"
+    assert result is False
+
+
+# ============================================================
+# v0.2.22: P1 ④ — macOS polling skip (legacy false positive 차단)
+# ============================================================
+
+
+def test_start_aurora_polling_skips_on_macos(caplog):
+    """macOS 측 polling skip — open wrapper Popen 측 PID 추적 의미 X."""
+    import logging as _logging
+
+    api = launcher.LauncherApi()
+
+    with caplog.at_level(_logging.INFO, logger="aurora_launcher.launcher"), \
+         patch("aurora_launcher.launcher.platform.system", return_value="Darwin"), \
+         patch("aurora_launcher.launcher.threading.Thread") as mock_thread:
+        api._start_aurora_polling()
+
+    mock_thread.assert_not_called()
+    msgs = [r.message for r in caplog.records]
+    assert any("macOS skip" in m for m in msgs)
+
+
+def test_start_aurora_polling_runs_on_windows():
+    """Windows 측 정상 polling thread 시작 박힘 (기존 흐름 보존)."""
+    from unittest.mock import MagicMock
+
+    api = launcher.LauncherApi()
+    api._aurora_proc = MagicMock()
+
+    with patch("aurora_launcher.launcher.platform.system", return_value="Windows"), \
+         patch("aurora_launcher.launcher.threading.Thread") as mock_thread:
+        api._start_aurora_polling()
+
+    mock_thread.assert_called_once()

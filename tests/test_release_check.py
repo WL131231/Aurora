@@ -102,6 +102,49 @@ def test_fetch_latest_returns_dict_on_success():
         assert release_check.fetch_latest() == fake
 
 
+def test_notify_cb_called_on_new_version():
+    """새 버전 첫 발견 시 _notify_cb 호출."""
+    received = []
+    release_check._state["_notify_cb"] = lambda p: received.append(p)
+    fake = {
+        "tag_name": "v999.0.0",
+        "html_url": "https://x",
+        "name": "Big", "body": "", "published_at": "",
+    }
+    with patch("aurora.interfaces.release_check.fetch_latest", return_value=fake):
+        release_check.check_once()
+    assert len(received) == 1
+    assert received[0]["tag"] == "v999.0.0"
+
+
+def test_notify_cb_not_called_twice_for_same_tag():
+    """같은 tag 두 번 발견 — 콜백 1회만 호출 (중복 알림 방지)."""
+    received = []
+    release_check._state["_notify_cb"] = lambda p: received.append(p)
+    fake = {
+        "tag_name": "v999.0.0",
+        "html_url": "https://x",
+        "name": "Big", "body": "", "published_at": "",
+    }
+    with patch("aurora.interfaces.release_check.fetch_latest", return_value=fake):
+        release_check.check_once()
+        release_check.check_once()
+    assert len(received) == 1
+
+
+def test_notify_cb_exception_does_not_propagate():
+    """콜백 내부 예외 — check_once 가 정상 종료 (봇 안정성)."""
+    release_check._state["_notify_cb"] = lambda _: (_ for _ in ()).throw(RuntimeError("boom"))
+    fake = {
+        "tag_name": "v999.0.0",
+        "html_url": "https://x",
+        "name": "Big", "body": "", "published_at": "",
+    }
+    with patch("aurora.interfaces.release_check.fetch_latest", return_value=fake):
+        release_check.check_once()  # 예외 없이 통과해야 함
+    assert release_check.get_pending_release() is not None
+
+
 def test_start_polling_without_event_loop_falls_back_to_check_only():
     """이벤트 루프 없는 환경 (sync test) — task 안 띄우고 즉시 1회 체크만."""
     with patch("aurora.interfaces.release_check.fetch_latest", return_value=None):

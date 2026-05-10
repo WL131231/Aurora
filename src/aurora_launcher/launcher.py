@@ -71,7 +71,10 @@ except Exception as _ssl_err:  # noqa: BLE001 — certifi 측 다른 fail 측 fa
 # 설정 상수
 # ============================================================
 
-GITHUB_API_LATEST = "https://api.github.com/repos/WL131231/Aurora/releases/latest"
+# v0.2.20: 코드 repo (Aurora) 측 private 박힘 + release artifact 측 별도 public
+# repo (Aurora-releases) 측 호스팅 박음. launcher 측 본 URL 측 fetch — 사용자 측
+# 코드 측 access 측 X 라도 release self-update 측 그대로 박힘.
+GITHUB_API_LATEST = "https://api.github.com/repos/WL131231/Aurora-releases/releases/latest"
 # v0.1.59: 5 → 15초 보강 (방화벽 / 외부 네트워크 환경에서 GitHub API 응답 5초 넘음 보고).
 HTTP_TIMEOUT_SEC = 15
 

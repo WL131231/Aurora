@@ -798,3 +798,75 @@ def test_atr_wilder_gap_uses_prev_close_in_tr() -> None:
     # ATR[0] = 1.0
     # ATR[1] = 1.0 + (1/14)*(10.5 - 1.0) = 1.0 + 9.5/14 ≈ 1.6786
     assert atr.iloc[1] == pytest.approx(1.0 + 9.5 / 14.0, rel=1e-6)
+
+
+# ============================================================
+# dual_supertrend_booster / dual_supertrend_alignment (8)
+# ============================================================
+
+from aurora.core.indicators import (  # noqa: E402
+    dual_supertrend_alignment,
+    dual_supertrend_booster,
+)
+
+
+def _trend_ohlc(start: float, end: float, n: int = 40) -> pd.DataFrame:
+    """강한 추세 OHLC DataFrame 헬퍼 — SuperTrend 방향 확립용."""
+    closes = np.linspace(start, end, n)
+    return pd.DataFrame({
+        "high": closes * 1.005,
+        "low":  closes * 0.995,
+        "close": closes,
+    })
+
+
+# ── dual_supertrend_booster ───────────────────────────────────
+
+def test_dual_st_booster_no_alignment_neutral() -> None:
+    """alignment=0 → 1.0 (중립 booster)."""
+    assert dual_supertrend_booster(0, "long") == pytest.approx(1.0)
+    assert dual_supertrend_booster(0, "short") == pytest.approx(1.0)
+
+
+def test_dual_st_booster_aligned_long_returns_1_5() -> None:
+    """alignment=+1 + signal=long → 1.5 (강 정렬 일치)."""
+    assert dual_supertrend_booster(1, "long") == pytest.approx(1.5)
+
+
+def test_dual_st_booster_aligned_short_returns_1_5() -> None:
+    """alignment=-1 + signal=short → 1.5 (강 정렬 일치)."""
+    assert dual_supertrend_booster(-1, "short") == pytest.approx(1.5)
+
+
+def test_dual_st_booster_opposite_long_returns_0_5() -> None:
+    """alignment=-1 + signal=long → 0.5 (강 반대 — 가중치 ↓)."""
+    assert dual_supertrend_booster(-1, "long") == pytest.approx(0.5)
+
+
+def test_dual_st_booster_opposite_short_returns_0_5() -> None:
+    """alignment=+1 + signal=short → 0.5."""
+    assert dual_supertrend_booster(1, "short") == pytest.approx(0.5)
+
+
+# ── dual_supertrend_alignment ─────────────────────────────────
+
+def test_dual_st_alignment_too_short_returns_zero() -> None:
+    """데이터 부족 (2 행) → 0."""
+    df = _trend_ohlc(100.0, 110.0, n=2)
+    assert dual_supertrend_alignment(df, period_fast=3, period_slow=3) == 0
+
+
+def test_dual_st_alignment_bull_trend_returns_plus_one() -> None:
+    """강한 상승 추세 → 두 ST 모두 bull → +1."""
+    df = _trend_ohlc(100.0, 200.0, n=40)
+    result = dual_supertrend_alignment(df, period_fast=3, mult_fast=1.0,
+                                       period_slow=3, mult_slow=1.5)
+    assert result == 1
+
+
+def test_dual_st_alignment_bear_trend_returns_minus_one() -> None:
+    """강한 하락 추세 → 두 ST 모두 bear → -1."""
+    df = _trend_ohlc(200.0, 100.0, n=40)
+    result = dual_supertrend_alignment(df, period_fast=3, mult_fast=1.0,
+                                       period_slow=3, mult_slow=1.5)
+    assert result == -1

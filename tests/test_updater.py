@@ -197,3 +197,46 @@ def test_apply_ui_update_rejects_corrupt_zip(tmp_path):
     exe_dir = tmp_path / "exe"
     exe_dir.mkdir()
     assert updater.apply_ui_update(bad_zip, exe_dir) is False
+
+
+# ============================================================
+# _is_frozen / _launched_from_launcher / _exe_path
+# ============================================================
+
+
+def test_is_frozen_false_in_dev():
+    """dev/pytest 환경 → sys.frozen 없음 → False."""
+    assert updater._is_frozen() is False
+
+
+def test_is_frozen_true_when_frozen(monkeypatch):
+    """sys.frozen=True 설정 시 → True."""
+    import sys
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert updater._is_frozen() is True
+
+
+def test_launched_from_launcher_false_by_default(monkeypatch):
+    """AURORA_FROM_LAUNCHER 미설정 → False."""
+    monkeypatch.delenv("AURORA_FROM_LAUNCHER", raising=False)
+    assert updater._launched_from_launcher() is False
+
+
+def test_launched_from_launcher_true_when_env_set(monkeypatch):
+    """AURORA_FROM_LAUNCHER=1 → True."""
+    monkeypatch.setenv("AURORA_FROM_LAUNCHER", "1")
+    assert updater._launched_from_launcher() is True
+
+
+def test_launched_from_launcher_false_when_env_other_value(monkeypatch):
+    """AURORA_FROM_LAUNCHER=0 → False (정확히 '1' 만 유효)."""
+    monkeypatch.setenv("AURORA_FROM_LAUNCHER", "0")
+    assert updater._launched_from_launcher() is False
+
+
+def test_exe_path_returns_resolved_path():
+    """_exe_path() → Path.resolve() 결과 (절대 경로)."""
+    import sys
+    from pathlib import Path
+    expected = Path(sys.executable).resolve()
+    assert updater._exe_path() == expected

@@ -24,6 +24,7 @@ API 한도:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -34,6 +35,13 @@ import aiohttp
 from aurora.timeouts import COINALYZE_HTTP_TIMEOUT_SEC
 
 logger = logging.getLogger(__name__)
+
+# v0.2.23 (사용자 보고 2026-05-11 — HTTP 429 본질):
+# Coinalyze 무료 plan = 40 calls/min ≈ 1.5/sec. fetch_trend 측 5 endpoint × 3 TF
+# = 15 calls / coin 측 burst 박음 → 순간 limit hit → 모든 field None.
+# 매 호출 후 250ms throttle → 4 calls/sec → 60초 측 240 calls 측 한도 충분 안.
+# 봇 측 측 5분 cache 박혀있어 — 매 5분 측 fetch (BTC+ETH) = ~7.5초 측 throttle.
+_FETCH_THROTTLE_SEC = 0.25
 
 # Coinalyze API endpoint
 BASE_URL = "https://api.coinalyze.net/v1"
@@ -297,7 +305,38 @@ class CoinalyzeClient:
         params = dict(params)
         params["api_key"] = self._api_key
         async with session.get(f"{BASE_URL}/{endpoint}", params=params) as resp:
-            return await resp.json()
+            try:
+                body = await resp.json(content_type=None)
+            except (ValueError, aiohttp.ContentTypeError) as e:
+                # v0.2.23: JSON 파싱 실패 측 raw text logger 박음
+                text = await resp.text()
+                logger.warning(
+                    "Coinalyze %s HTTP %d JSON 파싱 실패: %s (body=%s)",
+                    endpoint, resp.status, e, text[:200],
+                )
+                return None
+            # v0.2.23 (사용자 보고 2026-05-11 — ETH 측 모든 field None 본질):
+            # Coinalyze 측 error response 측 dict ({"error": "..."}) 박는데
+            # _get_ohlcv 측 `isinstance(data, list)` 측 fail → silent None 반환.
+            # 본 진단 logger 측 root cause 측 정확 잡음.
+            safe_params = {k: v for k, v in params.items() if k != "api_key"}
+            if resp.status != 200:
+                logger.warning(
+                    "Coinalyze %s HTTP %d: %s (params=%s)",
+                    endpoint, resp.status, str(body)[:200], safe_params,
+                )
+            elif isinstance(body, dict):
+                # 정상 응답 측 list 박힘. dict 박힘 = API error.
+                err = body.get("error") or body.get("message") or str(body)[:200]
+                logger.warning(
+                    "Coinalyze %s API error response: %s (params=%s)",
+                    endpoint, err, safe_params,
+                )
+        # v0.2.23: 호출 간 throttle — 무료 plan 40 calls/min 한도 안 박음.
+        # fetch_trend 측 15 endpoint × 2 coin 측 burst 측 — 250ms 측 throttle 박아
+        # 순간 limit hit 방지.
+        await asyncio.sleep(_FETCH_THROTTLE_SEC)
+        return body
 
     async def _get_ohlcv(
         self, session: aiohttp.ClientSession, symbol: str,

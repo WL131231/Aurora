@@ -15,8 +15,11 @@ import pytest
 
 from aurora.backtest.replay import (
     TF_MINUTES,
+    AggregatedBar,
     MultiTfAggregator,
     _bucket_open_time,
+    _new_bar,
+    _update_in_place,
 )
 
 # ============================================================
@@ -352,3 +355,86 @@ def test_weekly_anchored_to_monday() -> None:
     bucket2 = _bucket_open_time(pd.Timestamp("2024-01-15 12:00:00"), TF_MINUTES["1W"])
     assert bucket2 == pd.Timestamp("2024-01-15 00:00:00")
     assert bucket2.weekday() == 0
+
+
+# ============================================================
+# _new_bar — 1분봉 → 새 TF AggregatedBar 생성
+# ============================================================
+
+
+def test_new_bar_copies_ohlcv_from_minute_bar() -> None:
+    """1분봉 OHLCV 값이 AggregatedBar 에 그대로 복사된다."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    minute = make_minute_bar("2024-01-08 09:00:00", o=100.0, h=102.0, lo=99.0, c=101.0, v=50.0)
+    bar = _new_bar(open_time, minute, tf_minutes=60)
+    assert bar.open == 100.0
+    assert bar.high == 102.0
+    assert bar.low == 99.0
+    assert bar.close == 101.0
+    assert bar.volume == 50.0
+
+
+def test_new_bar_open_time_and_close_ts() -> None:
+    """open_time 그대로, close_ts = open_time + tf_minutes."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    minute = make_minute_bar("2024-01-08 09:00:00", o=1.0, h=1.0, lo=1.0, c=1.0, v=1.0)
+    bar = _new_bar(open_time, minute, tf_minutes=240)
+    assert bar.open_time == open_time
+    assert bar.close_ts == open_time + pd.Timedelta(minutes=240)
+
+
+def test_new_bar_returns_aggregated_bar_instance() -> None:
+    """반환 타입이 AggregatedBar."""
+    open_time = pd.Timestamp("2024-01-08 00:00:00")
+    minute = make_minute_bar("2024-01-08 00:00:00", o=1.0, h=1.0, lo=1.0, c=1.0, v=1.0)
+    assert isinstance(_new_bar(open_time, minute, tf_minutes=15), AggregatedBar)
+
+
+# ============================================================
+# _update_in_place — 진행 중인 봉 갱신 (in-place mutation)
+# ============================================================
+
+
+def test_update_in_place_extends_high() -> None:
+    """새 분봉 high > 기존 high → 교체."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    bar = _new_bar(open_time, make_minute_bar("", 100.0, 102.0, lo=99.0, c=100.0, v=10.0), 60)
+    _update_in_place(bar, make_minute_bar("", 101.0, 105.0, lo=100.0, c=103.0, v=5.0))
+    assert bar.high == 105.0
+
+
+def test_update_in_place_extends_low() -> None:
+    """새 분봉 low < 기존 low → 교체."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    bar = _new_bar(open_time, make_minute_bar("", 100.0, 102.0, lo=99.0, c=100.0, v=10.0), 60)
+    _update_in_place(bar, make_minute_bar("", 99.0, 100.0, lo=96.0, c=97.0, v=5.0))
+    assert bar.low == 96.0
+
+
+def test_update_in_place_close_is_latest() -> None:
+    """close 는 항상 마지막 분봉의 close 로 덮어씀."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    bar = _new_bar(open_time, make_minute_bar("", 100.0, 102.0, 99.0, 101.0, 10.0), 60)
+    _update_in_place(bar, make_minute_bar("", 101.0, 103.0, lo=100.5, c=102.5, v=7.0))
+    assert bar.close == 102.5
+
+
+def test_update_in_place_volume_accumulates() -> None:
+    """volume 은 누적 합산."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    bar = _new_bar(open_time, make_minute_bar("", 100.0, 100.0, lo=100.0, c=100.0, v=10.0), 60)
+    _update_in_place(bar, make_minute_bar("", 100.0, 100.0, lo=100.0, c=100.0, v=20.0))
+    _update_in_place(bar, make_minute_bar("", 100.0, 100.0, lo=100.0, c=100.0, v=5.0))
+    assert bar.volume == 35.0
+
+
+def test_update_in_place_does_not_change_open_or_open_time() -> None:
+    """open / open_time / close_ts 는 갱신하지 않음."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    bar = _new_bar(open_time, make_minute_bar("", 100.0, 102.0, 99.0, 101.0, 10.0), 60)
+    orig_open = bar.open
+    orig_close_ts = bar.close_ts
+    _update_in_place(bar, make_minute_bar("", 200.0, 210.0, lo=198.0, c=205.0, v=30.0))
+    assert bar.open == orig_open
+    assert bar.open_time == open_time
+    assert bar.close_ts == orig_close_ts

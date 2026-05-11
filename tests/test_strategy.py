@@ -1617,3 +1617,65 @@ def test_classify_regime_default_module_constants() -> None:
     df_range = _make_4h_df(list(100.0 + rng.uniform(-0.05, 0.05, 250)), spread=0.1)
     assert classify_regime(df_range) == classify_regime(df_range, regime_config=cfg_default)
     assert classify_regime(df_range) == Regime.RANGE
+
+
+# ============================================================
+# _last_bar_timestamp
+# ============================================================
+
+
+def test_last_bar_timestamp_datetime_index() -> None:
+    """DatetimeIndex → 마지막 봉 timestamp 반환."""
+    from aurora.core.strategy import _last_bar_timestamp
+    idx = pd.date_range("2024-01-01", periods=5, freq="1h")
+    df = pd.DataFrame({"close": range(5)}, index=idx)
+    assert _last_bar_timestamp(df) == idx[-1]
+
+
+def test_last_bar_timestamp_integer_index_returns_none() -> None:
+    """정수 인덱스 → None (timestamp 아님)."""
+    from aurora.core.strategy import _last_bar_timestamp
+    df = pd.DataFrame({"close": [1.0, 2.0, 3.0]})
+    assert _last_bar_timestamp(df) is None
+
+
+def test_last_bar_timestamp_empty_returns_none() -> None:
+    """빈 DataFrame / None → None."""
+    from aurora.core.strategy import _last_bar_timestamp
+    assert _last_bar_timestamp(pd.DataFrame()) is None
+    assert _last_bar_timestamp(None) is None  # type: ignore[arg-type]
+
+
+# ============================================================
+# _detect_ma_trend
+# ============================================================
+
+
+def test_detect_ma_trend_uptrend() -> None:
+    """상승 계열 데이터 → fast SMA > slow SMA → 'up'."""
+    from aurora.core.strategy import _detect_ma_trend
+    closes = [100.0 + i * 0.5 for i in range(60)]
+    df = pd.DataFrame({"close": closes})
+    assert _detect_ma_trend(df, fast=5, slow=20) == "up"
+
+
+def test_detect_ma_trend_downtrend() -> None:
+    """하락 계열 데이터 → fast SMA < slow SMA → 'down'."""
+    from aurora.core.strategy import _detect_ma_trend
+    closes = [100.0 - i * 0.5 for i in range(60)]
+    df = pd.DataFrame({"close": closes})
+    assert _detect_ma_trend(df, fast=5, slow=20) == "down"
+
+
+def test_detect_ma_trend_insufficient_data_returns_none() -> None:
+    """slow 보다 데이터 적으면 None."""
+    from aurora.core.strategy import _detect_ma_trend
+    df = pd.DataFrame({"close": [100.0] * 5})
+    assert _detect_ma_trend(df, fast=5, slow=20) is None
+
+
+def test_detect_ma_trend_missing_close_returns_none() -> None:
+    """'close' 컬럼 없으면 None."""
+    from aurora.core.strategy import _detect_ma_trend
+    df = pd.DataFrame({"open": [100.0] * 30})
+    assert _detect_ma_trend(df, fast=5, slow=20) is None

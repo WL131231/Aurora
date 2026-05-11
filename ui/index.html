@@ -462,10 +462,13 @@
                             <button data-tf="4H">4H</button>
                         </span>
                         <span class="chart-overlay-toggle" id="chart-overlay-toggle">
-                            <!-- v0.2.29 (사용자 요청): "EMA" → "MA Cross" 정정. 실제 측 fast/slow EMA cross 박힘 = MA Cross 본질. -->
+                            <!-- v0.2.29 (사용자 요청): "EMA" → "MA Cross" 정정. -->
                             <button data-ind="ema" class="active" title="Fast EMA(20) + Slow EMA(50) cross">MA Cross</button>
                             <button data-ind="bb" class="active" title="Bollinger Bands (20, 2σ)">Bollinger</button>
                             <button data-ind="st" class="active" title="Supertrend (ATR-based)">Supertrend</button>
+                            <!-- v0.3.0 (사용자 요청 2026-05-11): RSI + Ichimoku 측 추가 -->
+                            <button data-ind="rsi" class="active" title="RSI (14, 0~100 subchart)">RSI</button>
+                            <button data-ind="ichi" class="active" title="Ichimoku Cloud (Span A/B fill)">Ichimoku</button>
                         </span>
                     </div>
                     <div class="metric-card chart-card" id="bot-chart-section">
@@ -476,6 +479,10 @@
                         <div class="chart-wrap">
                             <div id="bot-chart"></div>
                             <div class="chart-empty" id="chart-empty">봇 가동 시 자동으로 표시됨</div>
+                        </div>
+                        <!-- v0.3.0 (사용자 요청 2026-05-11): RSI subchart 별도 — 0~100 axis, 30/70 horizontal lines -->
+                        <div class="chart-wrap chart-wrap-rsi">
+                            <div id="bot-chart-rsi"></div>
                         </div>
                     </div>
 

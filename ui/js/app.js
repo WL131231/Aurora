@@ -1013,9 +1013,12 @@ async function refreshMarketTrend() {
 const Chart = {
     chart: null,
     candleSeries: null,
-    lineSeries: {},      // { ema_fast, ema_slow, bb_upper, bb_middle, bb_lower, st_fast, st_slow }
+    lineSeries: {},      // { ema_fast, ema_slow, bb_upper, bb_middle, bb_lower, st_fast, st_slow, ichi_a, ichi_b }
+    // v0.3.0 (사용자 요청 2026-05-11): RSI subchart + Ichimoku line 추가
+    rsiChart: null,
+    rsiSeries: null,
     timeframe: "1H",
-    overlays: { ema: true, bb: true, st: true },
+    overlays: { ema: true, bb: true, st: true, rsi: true, ichi: true },
     _resizeObserver: null,
 };
 
@@ -1063,12 +1066,71 @@ function _initBotChart() {
         bb_lower:  { color: "rgba(96, 165, 250, 0.6)", lineWidth: 1, title: "BB↓" },
         st_fast:   { color: "#fbbf24", lineWidth: 1, title: "ST(2)" },
         st_slow:   { color: "#f97316", lineWidth: 1, title: "ST(3)" },
+        // v0.3.0 (사용자 요청): Ichimoku Span A/B 측 main chart 측 line + 두 line 사이 cloud tint
+        ichi_a:    { color: "rgba(52, 211, 153, 0.55)", lineWidth: 1, title: "Ichimoku Span A" },
+        ichi_b:    { color: "rgba(251, 113, 133, 0.55)", lineWidth: 1, title: "Ichimoku Span B" },
     };
     for (const [key, opts] of Object.entries(lineDefs)) {
         Chart.lineSeries[key] = Chart.chart.addLineSeries({
             ...opts,
             lastValueVisible: false,
             priceLineVisible: false,
+        });
+    }
+
+    // v0.3.0: RSI subchart 측 별도 — 0~100 axis + 30/70 horizontal lines
+    const rsiContainer = document.getElementById("bot-chart-rsi");
+    if (rsiContainer && !Chart.rsiChart) {
+        Chart.rsiChart = LightweightCharts.createChart(rsiContainer, {
+            layout: {
+                background: { type: "solid", color: "transparent" },
+                textColor: "#a1a1aa",
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 9,
+            },
+            grid: {
+                vertLines: { color: "rgba(96, 81, 155, 0.06)" },
+                horzLines: { color: "rgba(96, 81, 155, 0.06)" },
+            },
+            rightPriceScale: {
+                borderColor: "rgba(96, 81, 155, 0.18)",
+                autoScale: false,
+                scaleMargins: { top: 0.05, bottom: 0.05 },
+            },
+            timeScale: {
+                borderColor: "rgba(96, 81, 155, 0.18)",
+                timeVisible: false,
+                secondsVisible: false,
+                visible: false,
+            },
+            crosshair: { mode: 1 },
+            autoSize: true,
+        });
+        Chart.rsiSeries = Chart.rsiChart.addLineSeries({
+            color: "#a78bfa",
+            lineWidth: 2,
+            title: "RSI(14)",
+            lastValueVisible: true,
+            priceLineVisible: false,
+        });
+        // 30 / 70 horizontal lines
+        Chart.rsiSeries.createPriceLine({
+            price: 70, color: "rgba(251, 113, 133, 0.5)",
+            lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "70",
+        });
+        Chart.rsiSeries.createPriceLine({
+            price: 30, color: "rgba(52, 211, 153, 0.5)",
+            lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "30",
+        });
+        Chart.rsiSeries.createPriceLine({
+            price: 50, color: "rgba(161, 161, 170, 0.3)",
+            lineWidth: 1, lineStyle: 3, axisLabelVisible: false, title: "",
+        });
+        // main chart + rsi chart 측 timescale 측 sync (사용자 measure pan/zoom 측 동기)
+        Chart.chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+            if (Chart.rsiChart && range) {
+                Chart.rsiChart.timeScale().setVisibleRange(range);
+            }
         });
     }
 }
@@ -1079,6 +1141,7 @@ function _applyChartOverlays() {
         ema: ["ema_fast", "ema_slow"],
         bb:  ["bb_upper", "bb_middle", "bb_lower"],
         st:  ["st_fast", "st_slow"],
+        ichi: ["ichi_a", "ichi_b"],  // v0.3.0
     };
     for (const [group, keys] of Object.entries(map)) {
         const visible = !!Chart.overlays[group];
@@ -1086,6 +1149,11 @@ function _applyChartOverlays() {
             const s = Chart.lineSeries[k];
             if (s) s.applyOptions({ visible });
         }
+    }
+    // v0.3.0: RSI subchart 측 toggle — container 측 visibility 박음
+    const rsiWrap = document.querySelector(".chart-wrap-rsi");
+    if (rsiWrap) {
+        rsiWrap.style.display = Chart.overlays.rsi ? "block" : "none";
     }
 }
 
@@ -1127,6 +1195,12 @@ async function refreshBotChart() {
     for (const k of lineKeys) {
         const s = Chart.lineSeries[k];
         if (s) s.setData(data[k] || []);
+    }
+    // v0.3.0: Ichimoku Span A/B 측 main chart 측 line + RSI 측 subchart
+    if (Chart.lineSeries.ichi_a) Chart.lineSeries.ichi_a.setData(data.ichimoku_span_a || []);
+    if (Chart.lineSeries.ichi_b) Chart.lineSeries.ichi_b.setData(data.ichimoku_span_b || []);
+    if (Chart.rsiSeries) {
+        Chart.rsiSeries.setData(data.rsi || []);
     }
     _applyChartOverlays();
 

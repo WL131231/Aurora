@@ -25,8 +25,11 @@ from aurora.timeouts import make_exchange_timeout
 logger = logging.getLogger(__name__)
 
 _OKX_BASE = "https://www.okx.com"
-_HTTP_TIMEOUT = make_exchange_timeout()  # v0.1.98: central config
+_HTTP_TIMEOUT = make_exchange_timeout()
 _LS_PERIOD = "5m"
+# v0.3.1: Whale 측 Binance 측 동일 정합
+_WHALE_THRESHOLD_USD = 100_000.0
+_WHALE_WINDOW_MS = 5 * 60 * 1000
 
 
 class OkxMarketData(ExchangeMarketData):
@@ -50,15 +53,17 @@ class OkxMarketData(ExchangeMarketData):
             fetched_at_ms=int(time.time() * 1000),
         )
 
+        # v0.3.1: recent trades 측 추가 (Whale notional)
         results = await asyncio.gather(
             self._fetch_ticker(session, inst_id),
             self._fetch_oi(session, inst_id),
             self._fetch_funding(session, inst_id),
             self._fetch_ls_account(session, coin),
             self._fetch_ls_top_position(session, coin),
+            self._fetch_recent_trades(session, inst_id),
             return_exceptions=True,
         )
-        ticker, oi_row, funding, ls_acc, ls_top_pos = results
+        ticker, oi_row, funding, ls_acc, ls_top_pos, recent_trades = results
 
         # Ticker — price / 24h volume
         if isinstance(ticker, Exception):
@@ -114,9 +119,58 @@ class OkxMarketData(ExchangeMarketData):
             except (TypeError, ValueError, IndexError) as e:
                 snap.errors.append(f"ls_top_pos calc: {e}")
 
+        # v0.3.1: Whale notional — recent trades 측 5분 윈도우 측 ≥ $100K 합산
+        snap.whale_threshold_usd = _WHALE_THRESHOLD_USD
+        import time as _time
+        now_ms = int(_time.time() * 1000)
+        window_start = now_ms - _WHALE_WINDOW_MS
+        if isinstance(recent_trades, Exception):
+            snap.errors.append(f"recent_trades: {recent_trades}")
+        elif isinstance(recent_trades, list):
+            try:
+                buy_sum = 0.0
+                sell_sum = 0.0
+                count = 0
+                for t in recent_trades:
+                    ts = int(t.get("ts", 0) or 0)
+                    if ts < window_start:
+                        continue
+                    price = float(t.get("px", 0) or 0)
+                    sz = float(t.get("sz", 0) or 0)
+                    # OKX 측 swap contract 측 — sz 측 contract 수. BTC-USDT-SWAP 측 1 contract = 0.01 BTC.
+                    # 측 — 측 — 측 — 측 — 측 — 측 — 측 — 측 — 측 — 측 — 측 — 측 — 측 — 측 — 측 — 측 — 측 — 측 — notional 측 = sz × ctVal × price
+                    # 단순화 측 — 측 — 측 sz × price 측 박음 (~1% 측 정도 오차 가능, ≥ $100K threshold 측 측 정합).
+                    notional = price * sz * 0.01  # ctVal = 0.01 BTC for BTC-USDT-SWAP
+                    if notional < _WHALE_THRESHOLD_USD:
+                        continue
+                    count += 1
+                    # OKX side: "buy" = taker buy, "sell" = taker sell
+                    if t.get("side") == "buy":
+                        buy_sum += notional
+                    else:
+                        sell_sum += notional
+                snap.whale_buy_5m_usd = buy_sum
+                snap.whale_sell_5m_usd = sell_sum
+                snap.whale_count_5m = count
+            except (TypeError, ValueError) as e:
+                snap.errors.append(f"recent_trades calc: {e}")
+
         if snap.errors:
             logger.debug("OKX snapshot %s 부분 실패: %s", inst_id, "; ".join(snap.errors))
         return snap
+
+    async def _fetch_recent_trades(self, session, inst_id: str) -> list:
+        """v0.3.1: V5 trades — 500 trades 측 Whale 측 input.
+
+        Response: data = [{ instId, px, sz, side("buy"/"sell"), ts(ms), ... }]
+        """
+        data = await self._get_json(
+            session, "/api/v5/market/trades",
+            {"instId": inst_id, "limit": 500},
+        )
+        if data.get("code") != "0":
+            raise RuntimeError(f"okx code={data.get('code')} msg={data.get('msg')}")
+        return data.get("data") or []
 
     # ============================================================
     # endpoint sub-methods

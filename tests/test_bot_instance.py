@@ -247,7 +247,7 @@ async def test_stop_closes_client() -> None:
 
 
 @pytest.mark.asyncio
-async def test_step_resets_position_when_externally_closed() -> None:
+async def test_step_resets_position_when_externally_closed(monkeypatch) -> None:
     """거래소 측 포지션 사라지면 (사용자 직접 청산) Executor state reset.
 
     v0.1.7 fix: 이전엔 _plan 영원히 살아 has_position=True → 트레일링만 돌고
@@ -264,13 +264,17 @@ async def test_step_resets_position_when_externally_closed() -> None:
     client = _make_mock_client(ohlcv_rows=rows)
     # 거래소 측은 처음부터 포지션 없음 (사용자 직접 청산 후 시점 시뮬)
     client.fetch_position = AsyncMock(return_value=None)
+    monkeypatch.setattr("aurora.interfaces.bot_instance.settings.run_mode", "demo")
     bot.configure(client=client, timeframes=["1H"], tpsl_config=TpSlConfig())
 
     # Executor 에 가짜 _plan 직접 주입 (봇 자기 진입 후 시점)
+    # entry_price = OHLCV base (100.0) 와 일치 — SL trigger 차단 (테스트 의도 = None 카운터)
     plan = build_risk_plan(
-        entry_price=78000.0, direction="long", leverage=10,
+        entry_price=100.0, direction="long", leverage=10,
         equity_usd=10000.0, config=TpSlConfig(), risk_pct=0.01,
     )
+    plan.sl_price = 0.0  # SL 비활성 — 가격 변동으로 인한 청산 차단
+    plan.tp_prices = [9999.0, 9999.0, 9999.0, 9999.0]  # TP 비활성
     await bot.start()
     # v0.1.52: background _run_loop 정지 — 직접 _step 호출만으로 검증 (loop 가
     # 카운터 누적시켜 race 방지).

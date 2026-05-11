@@ -1,11 +1,15 @@
 """Coinalyze 추세 통합 단위 테스트 (v0.1.53).
 
 interpret_score / trend_filter / trend_score_multiplier 회귀.
+CoinalyzeClient._cache_valid + __init__ + score edge-case 추가.
 """
 
 from __future__ import annotations
 
+import time
+
 from aurora.market.coinalyze import (
+    CoinalyzeClient,
     MarketTrend,
     _interpret_score,
     trend_filter,
@@ -216,3 +220,86 @@ def test_trend_multiplier_none() -> None:
     """trend=None → ×1.0 (기존 동작 유지)."""
     assert trend_score_multiplier(None, "long") == 1.0
     assert trend_score_multiplier(None, "short") == 1.0
+
+
+# ============================================================
+# CoinalyzeClient.__init__ — 생성자 검증
+# ============================================================
+
+
+def test_client_empty_api_key_raises_value_error() -> None:
+    """빈 문자열 api_key → ValueError."""
+    with __import__("pytest").raises(ValueError, match="Coinalyze API key required"):
+        CoinalyzeClient(api_key="")
+
+
+# ============================================================
+# CoinalyzeClient._cache_valid — TTL 캐시 유효성 검사
+# ============================================================
+
+
+def test_cache_valid_returns_false_when_coin_absent() -> None:
+    """coin 키가 _cache_ts 에 없으면 False 반환."""
+    client = CoinalyzeClient(api_key="dummy")
+    assert client._cache_valid("BTC") is False
+
+
+def test_cache_valid_returns_true_for_fresh_entry() -> None:
+    """방금 저장한 ts → TTL 이내 → True."""
+    client = CoinalyzeClient(api_key="dummy", cache_ttl_sec=300)
+    client._cache_ts["BTC"] = time.time()
+    assert client._cache_valid("BTC") is True
+
+
+def test_cache_valid_returns_false_for_expired_entry() -> None:
+    """TTL + 1초 이전 ts → 만료 → False."""
+    client = CoinalyzeClient(api_key="dummy", cache_ttl_sec=300)
+    client._cache_ts["BTC"] = time.time() - 301
+    assert client._cache_valid("BTC") is False
+
+
+# ============================================================
+# _interpret_score — 미커버 edge-case 분기
+# ============================================================
+
+
+def test_interpret_score_slightly_negative_funding_decrements() -> None:
+    """펀딩 -0.05% (-0.1 ≤ pct < 0) → score -1, "펀딩 숏 우세".
+
+    pct > 0.1 / pct < -0.1 / pct >= 0 분기를 모두 통과해 else 에 진입하는
+    경계 케이스. CVD/OI 모두 0 으로 격리해 funding 효과만 검증.
+    """
+    score, direction, strong, reasons = _interpret_score(
+        oi=None, oi_24h=None, price=None, price_24h=None,
+        cvd_spot=0, cvd_futures=0,
+        funding_rate=-0.0005,  # pct = -0.05% — 경계 안쪽
+    )
+    assert score == -1
+    assert direction == "short"
+    assert "펀딩 숏 우세" in reasons
+
+
+def test_interpret_score_zero_funding_neutral_reason() -> None:
+    """펀딩 0.0% → "펀딩 중립" reason 추가, score 변화 없음."""
+    score, _dir, _strong, reasons = _interpret_score(
+        oi=None, oi_24h=None, price=None, price_24h=None,
+        cvd_spot=0, cvd_futures=0,
+        funding_rate=0.0,
+    )
+    assert score == 0
+    assert "펀딩 중립" in reasons
+
+
+def test_interpret_score_cvd_futures_only_positive() -> None:
+    """cvd_spot=0, cvd_futures>0 → score +1, "선물 CVD 매수 우세".
+
+    현물 CVD 없이 선물 CVD 만 양수인 경우 (elif cvd_f > 0 분기).
+    """
+    score, direction, _strong, reasons = _interpret_score(
+        oi=None, oi_24h=None, price=None, price_24h=None,
+        cvd_spot=0, cvd_futures=500,
+        funding_rate=None,
+    )
+    assert score == 1
+    assert direction == "long"
+    assert "선물 CVD 매수 우세" in reasons

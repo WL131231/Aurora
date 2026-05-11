@@ -494,20 +494,30 @@ async def test_bitget_fetch_snapshot_happy_path() -> None:
 # ============================================================
 
 
-def _make_hl_session(meta_response: Any, trades_response: Any = None) -> MagicMock:
+def _make_hl_session(
+    meta_response: Any,
+    trades_response: Any = None,
+    leaderboard_response: Any = None,
+) -> MagicMock:
     """Hyperliquid POST /info dispatch — body type 별.
 
-    v0.3.1: recentTrades 측 별도 분기 박음 (whale fetch).
+    v0.3.1: recentTrades 측 별도 분기.
+    v0.3.2: leaderboard / clearinghouseState 측 별도 분기 (top trader).
     """
     session = MagicMock()
     def _post(url: str, json=None, timeout=None):
         ctx = AsyncMock()
         resp = MagicMock()
         resp.raise_for_status = MagicMock()
-        # body type 분기 — recentTrades 측 별도 응답
         body_type = (json or {}).get("type") if json else None
         if body_type == "recentTrades":
             payload = trades_response if trades_response is not None else []
+        elif body_type == "leaderboard":
+            # v0.3.2: default 측 빈 leaderboard
+            payload = leaderboard_response if leaderboard_response is not None else {"leaderboardRows": []}
+        elif body_type == "clearinghouseState":
+            # v0.3.2: default 측 빈 position (test 측 별도 mock 박을지 결정)
+            payload = {"assetPositions": []}
         else:
             payload = meta_response
             if isinstance(payload, Exception):

@@ -14,6 +14,7 @@ funding: 1시간 단위 표기 (Binance/Bybit 측 8시간 단위). UI 표기 정
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -29,6 +30,11 @@ _HTTP_TIMEOUT = make_exchange_timeout()
 # v0.3.1: Whale 측 Binance 측 동일 정합
 _WHALE_THRESHOLD_USD = 100_000.0
 _WHALE_WINDOW_MS = 5 * 60 * 1000
+# v0.3.2 (사용자 요청 2026-05-11): HL Top Trader 측 leaderboard 측 박음.
+# leaderboard top N user 측 clearinghouseState fetch → coin 별 long / short notional
+# 합산 → top trader ratio (notional 가중 + account 수 가중). onchain 실시간 ⭐
+_HL_LEADERBOARD_TOP_N = 50  # rate limit 측 안전 박음 (~50 calls/cycle, 1200/min 한도)
+_HL_LEADERBOARD_WINDOW = "day"  # day / week / month / allTime
 
 
 class HyperliquidMarketData(ExchangeMarketData):
@@ -133,9 +139,123 @@ class HyperliquidMarketData(ExchangeMarketData):
             except (TypeError, ValueError) as e:
                 snap.errors.append(f"recentTrades calc: {e}")
 
+        # v0.3.2: Top Trader (leaderboard + clearinghouseState) — onchain 실시간
+        try:
+            top_pos_ratio, top_acc_ratio = await self._fetch_top_trader_ratios(
+                session, coin,
+            )
+            if top_pos_ratio is not None:
+                snap.ls_ratio_top_position = top_pos_ratio
+            if top_acc_ratio is not None:
+                snap.ls_ratio_top_account = top_acc_ratio
+        except Exception as e:  # noqa: BLE001
+            snap.errors.append(f"top_trader: {e}")
+
         if snap.errors:
             logger.debug("Hyperliquid snapshot %s 부분 실패: %s", symbol, "; ".join(snap.errors))
         return snap
+
+    async def _fetch_top_trader_ratios(
+        self, session: aiohttp.ClientSession, coin: str,
+    ) -> tuple[float | None, float | None]:
+        """v0.3.2: HL leaderboard top N user 측 long/short notional + account 측 ratio.
+
+        흐름:
+            1. POST /info {"type":"leaderboard","window":"day"} → top N user (ethAddress)
+            2. 각 user 측 POST /info {"type":"clearinghouseState","user":"0x..."} 측 fetch
+            3. coin 측 position 측 long/short notional 측 분리 합산
+            4. ratio = long_notional / short_notional (top_position)
+                     = long_accounts / short_accounts (top_account)
+
+        Returns:
+            (ls_ratio_top_position, ls_ratio_top_account) — fetch 측 fail 측 (None, None).
+        """
+        # 1. leaderboard fetch
+        try:
+            leaderboard = await self._post_info(
+                session, {"type": "leaderboard"},
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("HL leaderboard fetch 실패: %s", e)
+            return None, None
+
+        rows = []
+        if isinstance(leaderboard, dict):
+            rows = leaderboard.get("leaderboardRows", []) or []
+        elif isinstance(leaderboard, list):
+            rows = leaderboard
+        if not rows:
+            return None, None
+
+        # account value 내림차순 sort (이미 sort 박혀있을 가능성, 안전)
+        try:
+            rows.sort(
+                key=lambda r: float(r.get("accountValue", 0) or 0),
+                reverse=True,
+            )
+        except (TypeError, ValueError):
+            pass
+
+        # 2. top N user 측 측 clearinghouseState 측 parallel fetch
+        top_addresses = [
+            r.get("ethAddress") for r in rows[:_HL_LEADERBOARD_TOP_N]
+            if r.get("ethAddress")
+        ]
+        if not top_addresses:
+            return None, None
+
+        async def _fetch_state(addr: str) -> dict | None:
+            try:
+                return await self._post_info(
+                    session, {"type": "clearinghouseState", "user": addr},
+                )
+            except Exception:  # noqa: BLE001 — 부분 실패 격리
+                return None
+
+        states = await asyncio.gather(
+            *[_fetch_state(a) for a in top_addresses],
+            return_exceptions=True,
+        )
+
+        # 3. coin 측 long / short notional 측 분리 + account 수
+        long_notional = 0.0
+        short_notional = 0.0
+        long_accounts = 0
+        short_accounts = 0
+        for state in states:
+            if not isinstance(state, dict):
+                continue
+            positions = state.get("assetPositions", []) or []
+            for ap in positions:
+                pos = ap.get("position") if isinstance(ap, dict) else None
+                if not isinstance(pos, dict):
+                    continue
+                if pos.get("coin") != coin:
+                    continue
+                try:
+                    szi = float(pos.get("szi", 0) or 0)
+                    px = float(pos.get("entryPx", 0) or 0)
+                    if szi == 0 or px == 0:
+                        continue
+                    notional = abs(szi) * px
+                    if szi > 0:
+                        long_notional += notional
+                        long_accounts += 1
+                    else:
+                        short_notional += notional
+                        short_accounts += 1
+                except (TypeError, ValueError):
+                    continue
+
+        top_pos_ratio = (
+            long_notional / short_notional
+            if short_notional > 0 else None
+        )
+        top_acc_ratio = (
+            long_accounts / short_accounts
+            if short_accounts > 0 else None
+        )
+        return top_pos_ratio, top_acc_ratio
 
     # ============================================================
     # POST /info — body 별 dispatch

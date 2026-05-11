@@ -113,6 +113,24 @@ async function launchOnly() {
 // setStatus 를 window 측에 박음.
 window.setStatus = setStatus;
 
+// v0.2.24 (ChoYoon #133 P1 ③): launcher progress bar — backend readiness polling 측
+// 매 2.5초 측 setProgress(percent, text) 박음. 사용자 측 멈춤 의심 회피 + 시각
+// 자료. 100% + ✓ 박은 후 launcher hide 측 자연 흐름 박음.
+window.setProgress = (percent, text) => {
+    const container = document.getElementById("progress-container");
+    const bar = document.getElementById("progress-bar");
+    const label = document.getElementById("progress-text");
+    if (!container || !bar || !label) return;
+    container.style.display = "block";
+    bar.style.width = Math.max(0, Math.min(100, percent)) + "%";
+    label.textContent = text || "";
+};
+
+window.hideProgress = () => {
+    const container = document.getElementById("progress-container");
+    if (container) container.style.display = "none";
+};
+
 btnStart.addEventListener("click", startFlow);
 
 window.addEventListener("pywebviewready", async () => {

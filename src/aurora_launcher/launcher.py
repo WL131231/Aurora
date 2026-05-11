@@ -1207,11 +1207,22 @@ class LauncherApi:
                                 f"✓ Aurora 시작됨 ({elapsed:.0f}초)",
                                 "#34d399",
                             )
-                            time.sleep(0.3)  # 짧은 빈 보여주기
+                            # v0.2.24: progress bar 100% + 짧은 빈 보여주기
+                            self._update_progress_js(100.0, "✓ 시작됨")
+                            time.sleep(0.3)
                             self._hide_launcher_window()
                             return
                 except Exception:  # noqa: BLE001 — startup 중 connection refused 정상
                     pass
+                # v0.2.24 (ChoYoon #133 P1 ③): progress bar 측 매 5 시도 (2.5초) 갱신
+                # — 사용자 측 멈춤 의심 회피 + 시각 자료. percent 측 95% 측 cap 박음
+                # (마지막 5% 측 ready 박힘 시점 측 100%).
+                if attempt % 5 == 0:
+                    elapsed = time.time() - self._aurora_spawn_at
+                    percent = min(95.0, (elapsed / ready_timeout) * 100)
+                    self._update_progress_js(
+                        percent, f"본체 준비 중... ({elapsed:.0f}초)",
+                    )
                 # 매 10번 (5초) 측 status 갱신
                 if attempt % 10 == 0:
                     elapsed = time.time() - self._aurora_spawn_at
@@ -1230,6 +1241,7 @@ class LauncherApi:
                 f"⚠ 본체 응답 X ({elapsed:.0f}초) — hide 강행",
                 "#fbbf24",
             )
+            # v0.2.24: timeout 측 progress 100% 박지 X — 사용자 측 fail 정합 인지
             time.sleep(1.0)
             self._hide_launcher_window()
 
@@ -1252,6 +1264,28 @@ class LauncherApi:
             )
         except Exception as e:  # noqa: BLE001
             logger.debug("status JS update fail: %s", e)
+
+    def _update_progress_js(self, percent: float, text: str) -> None:
+        """v0.2.24 (ChoYoon #133 P1 ③): launcher webview progress bar 측 갱신.
+
+        readiness polling thread 측 매 2.5초 측 percent 갱신 박음. 사용자 측
+        멈춤 의심 회피 + 시각 자료. JS 측 setProgress 측 window 박혀있어
+        evaluate_js 측 호출 가능. ready 박힐 때 100% 박음 + 짧은 fade.
+
+        Args:
+            percent: 0.0 ~ 100.0
+            text: progress 측 아래 표기 텍스트
+        """
+        try:
+            import webview  # type: ignore[import-not-found]
+            if not webview.windows:
+                return
+            text_esc = text.replace("\\", "\\\\").replace("'", "\\'")
+            webview.windows[0].evaluate_js(
+                f"if (window.setProgress) setProgress({percent:.1f}, '{text_esc}');",
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("progress JS update fail: %s", e)
 
     def _hide_launcher_window(self) -> None:
         """v0.1.80: launcher webview hide — 백그라운드 살아있음.

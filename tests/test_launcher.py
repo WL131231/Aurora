@@ -439,3 +439,52 @@ def test_start_aurora_polling_runs_on_windows():
         api._start_aurora_polling()
 
     mock_thread.assert_called_once()
+
+
+# ============================================================
+# v0.2.24: ChoYoon #133 P1 ③ — launcher progress bar
+# ============================================================
+
+
+def test_update_progress_js_calls_evaluate_js():
+    """_update_progress_js 측 webview.evaluate_js 측 setProgress 호출 박음."""
+    from unittest.mock import MagicMock
+
+    fake_win = MagicMock()
+    fake_webview = MagicMock(windows=[fake_win])
+
+    api = launcher.LauncherApi()
+    with patch.dict("sys.modules", {"webview": fake_webview}):
+        api._update_progress_js(45.7, "본체 준비 중... (27초)")
+
+    fake_win.evaluate_js.assert_called_once()
+    call_arg = fake_win.evaluate_js.call_args[0][0]
+    assert "setProgress" in call_arg
+    assert "45.7" in call_arg
+    assert "본체 준비 중" in call_arg
+
+
+def test_update_progress_js_escapes_single_quote():
+    """text 측 single quote 박힘 — JS 측 escape 박음."""
+    from unittest.mock import MagicMock
+
+    fake_win = MagicMock()
+    fake_webview = MagicMock(windows=[fake_win])
+
+    api = launcher.LauncherApi()
+    with patch.dict("sys.modules", {"webview": fake_webview}):
+        api._update_progress_js(50.0, "test 'quote'")
+
+    call_arg = fake_win.evaluate_js.call_args[0][0]
+    assert "\'" in call_arg
+
+
+def test_update_progress_js_no_webview_window_safe():
+    """webview.windows 측 빈 — silent return (exception X)."""
+    from unittest.mock import MagicMock
+
+    fake_webview = MagicMock(windows=[])
+
+    api = launcher.LauncherApi()
+    with patch.dict("sys.modules", {"webview": fake_webview}):
+        api._update_progress_js(50.0, "test")  # raise X

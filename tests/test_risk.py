@@ -13,7 +13,9 @@ from aurora.core.risk import (
     TrailingMode,
     build_risk_plan,
     calc_position_size,
+    min_sl_pct_by_leverage,
     sl_pct_for_leverage,
+    tp_pct_4_levels_for_leverage,
     tp_pct_range_for_leverage,
     update_trailing_sl,
 )
@@ -632,3 +634,57 @@ def test_trailing_sl_unidirectional_short() -> None:
     new_sl = update_trailing_sl(90.0, plan, cfg, tp_hits=0,
                                  highest_since_entry=100.0, lowest_since_entry=85.0)
     assert new_sl == 90.0
+
+
+# ============================================================
+# tp_pct_4_levels_for_leverage
+# ============================================================
+
+
+def test_tp_pct_4_levels_length() -> None:
+    """항상 4단계 반환."""
+    for lev in (10, 20, 37, 38, 50):
+        assert len(tp_pct_4_levels_for_leverage(lev)) == 4
+
+
+def test_tp_pct_4_levels_ascending() -> None:
+    """TP1 < TP2 < TP3 < TP4 오름차순."""
+    for lev in (10, 25, 37, 38, 50):
+        levels = tp_pct_4_levels_for_leverage(lev)
+        assert levels[0] < levels[1] < levels[2] < levels[3]
+
+
+def test_tp_pct_4_levels_10x_matches_range() -> None:
+    """10x: 레인지 (2.80%, 3.80%) 의 min/max 가 TP1/TP4."""
+    tp_min, tp_max = tp_pct_range_for_leverage(10)
+    levels = tp_pct_4_levels_for_leverage(10)
+    assert abs(levels[0] - tp_min) < 1e-9
+    assert abs(levels[-1] - tp_max) < 1e-9
+
+
+def test_tp_pct_4_levels_50x_matches_range() -> None:
+    """50x: 레인지 (6.00%, 7.00%) 의 min/max 가 TP1/TP4."""
+    tp_min, tp_max = tp_pct_range_for_leverage(50)
+    levels = tp_pct_4_levels_for_leverage(50)
+    assert abs(levels[0] - tp_min) < 1e-9
+    assert abs(levels[-1] - tp_max) < 1e-9
+
+
+def test_tp_pct_4_levels_equal_step() -> None:
+    """4단계 간격이 동일 (3등분)."""
+    for lev in (10, 37, 50):
+        levels = tp_pct_4_levels_for_leverage(lev)
+        step = (levels[-1] - levels[0]) / 3
+        assert abs(levels[1] - (levels[0] + step)) < 1e-9
+        assert abs(levels[2] - (levels[0] + 2 * step)) < 1e-9
+
+
+# ============================================================
+# min_sl_pct_by_leverage (deprecated alias)
+# ============================================================
+
+
+def test_min_sl_pct_by_leverage_is_alias() -> None:
+    """deprecated alias — sl_pct_for_leverage 와 동일한 값 반환."""
+    for lev in (10, 20, 37, 38, 50):
+        assert min_sl_pct_by_leverage(lev) == sl_pct_for_leverage(lev)

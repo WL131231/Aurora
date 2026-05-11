@@ -12,6 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from aurora.exchange.team_aliases import (
+    _load_user_aliases,
     list_aliases,
     load_aliases,
     resolve_alias,
@@ -91,3 +92,48 @@ def test_load_aliases_skips_malformed_entries(tmp_path: Path):
     with patch("aurora.exchange.team_aliases._aliases_path", return_value=fake):
         aliases = load_aliases()
         assert aliases == {"장수": {"api_key": "k", "api_secret": "s"}}
+
+
+# ============================================================
+# _load_user_aliases
+# ============================================================
+
+
+def test_load_user_aliases_returns_valid_entries(tmp_path, monkeypatch) -> None:
+    """config_store 에 user_aliases 있으면 api_key/api_secret 쌍 반환."""
+    from aurora.interfaces import config_store
+    monkeypatch.setattr(config_store, "_config_path", lambda: tmp_path / "cfg.json")
+    import json
+    cfg = {"user_aliases": {"외부유저": {"api_key": "k1", "api_secret": "s1"}}}
+    (tmp_path / "cfg.json").write_text(json.dumps(cfg), encoding="utf-8")
+    result = _load_user_aliases()
+    assert result == {"외부유저": {"api_key": "k1", "api_secret": "s1"}}
+
+
+def test_load_user_aliases_skips_missing_secret(tmp_path, monkeypatch) -> None:
+    """api_key 만 있고 api_secret 없는 항목 제외."""
+    from aurora.interfaces import config_store
+    monkeypatch.setattr(config_store, "_config_path", lambda: tmp_path / "cfg.json")
+    import json
+    cfg = {"user_aliases": {"불완전": {"api_key": "k1"}}}
+    (tmp_path / "cfg.json").write_text(json.dumps(cfg), encoding="utf-8")
+    assert _load_user_aliases() == {}
+
+
+def test_load_user_aliases_returns_empty_when_no_key(tmp_path, monkeypatch) -> None:
+    """config_store 에 user_aliases 키 없으면 빈 dict."""
+    from aurora.interfaces import config_store
+    monkeypatch.setattr(config_store, "_config_path", lambda: tmp_path / "cfg.json")
+    import json
+    (tmp_path / "cfg.json").write_text(json.dumps({"use_bollinger": False}), encoding="utf-8")
+    assert _load_user_aliases() == {}
+
+
+def test_load_user_aliases_wrong_type_returns_empty(tmp_path, monkeypatch) -> None:
+    """user_aliases 가 dict 가 아니면 빈 dict."""
+    from aurora.interfaces import config_store
+    monkeypatch.setattr(config_store, "_config_path", lambda: tmp_path / "cfg.json")
+    import json
+    cfg = {"user_aliases": "not a dict"}
+    (tmp_path / "cfg.json").write_text(json.dumps(cfg), encoding="utf-8")
+    assert _load_user_aliases() == {}

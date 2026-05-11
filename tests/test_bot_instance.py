@@ -1014,3 +1014,99 @@ async def test_restore_active_position_paper_skipped(monkeypatch) -> None:
     assert active_position_store.load() is not None
 
     await bot.stop()
+
+
+# ============================================================
+# register_trade_alert_callback + _fire_trade_alert
+# ============================================================
+
+
+def test_register_trade_alert_callback_fires_on_event() -> None:
+    """콜백 등록 후 _fire_trade_alert 호출 시 event/data 전달됨."""
+    from aurora.interfaces.bot_instance import (
+        _fire_trade_alert,
+        _trade_alert_callbacks,
+        _trade_alert_disabled,
+        _trade_alert_fail_counts,
+        register_trade_alert_callback,
+    )
+
+    _trade_alert_callbacks.clear()
+    _trade_alert_disabled.clear()
+    _trade_alert_fail_counts.clear()
+
+    received: list[tuple[str, dict]] = []
+    register_trade_alert_callback(lambda e, d: received.append((e, d)))
+
+    _fire_trade_alert("entry", {"symbol": "BTC/USDT", "direction": "long"})
+    assert len(received) == 1
+    assert received[0] == ("entry", {"symbol": "BTC/USDT", "direction": "long"})
+
+    _trade_alert_callbacks.clear()
+
+
+def test_fire_trade_alert_auto_disables_after_threshold_fails() -> None:
+    """3회 연속 실패 → 콜백 자동 disable (4번째 호출 시 실행 X)."""
+    from aurora.interfaces.bot_instance import (
+        _TRADE_ALERT_FAIL_THRESHOLD,
+        _fire_trade_alert,
+        _trade_alert_callbacks,
+        _trade_alert_disabled,
+        _trade_alert_fail_counts,
+        register_trade_alert_callback,
+    )
+
+    _trade_alert_callbacks.clear()
+    _trade_alert_disabled.clear()
+    _trade_alert_fail_counts.clear()
+
+    call_count = 0
+
+    def _always_fail(_event: str, _data: dict) -> None:
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError("boom")
+
+    register_trade_alert_callback(_always_fail)
+    fn_id = id(_always_fail)
+
+    for _ in range(_TRADE_ALERT_FAIL_THRESHOLD):
+        _fire_trade_alert("exit", {})
+
+    assert fn_id in _trade_alert_disabled
+    assert call_count == _TRADE_ALERT_FAIL_THRESHOLD
+
+    # 4번째 호출 — disable 됐으므로 실행 X
+    _fire_trade_alert("exit", {})
+    assert call_count == _TRADE_ALERT_FAIL_THRESHOLD
+
+    _trade_alert_callbacks.clear()
+    _trade_alert_disabled.clear()
+    _trade_alert_fail_counts.clear()
+
+
+# ============================================================
+# external_position_detected / last_indicator_status
+# ============================================================
+
+
+def test_external_position_detected_defaults_false() -> None:
+    """초기값 False — Aurora 가 아직 외부 포지션 감지 전."""
+    bot = bot_instance.get_instance()
+    assert bot.external_position_detected is False
+
+
+def test_last_indicator_status_returns_dict() -> None:
+    """last_indicator_status 는 dict 반환 — 초기에는 빈 dict (step 미실행)."""
+    bot = bot_instance.get_instance()
+    status = bot.last_indicator_status
+    assert isinstance(status, dict)
+
+
+def test_last_indicator_status_is_copy() -> None:
+    """반환값은 내부 상태의 복사본 — 수정해도 원본 불변."""
+    bot = bot_instance.get_instance()
+    status = bot.last_indicator_status
+    status["EMA"] = "long"
+    # 원본에 영향 없음
+    assert bot.last_indicator_status.get("EMA") is None

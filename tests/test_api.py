@@ -170,6 +170,41 @@ def test_positions_returns_mapped_dtos_when_configured() -> None:
     assert p["tp_prices"] == []
 
 
+def test_positions_returns_sl_tp_from_executor() -> None:
+    """봇 자기 포지션이면 SL/TP 가격을 Executor _plan 에서 채워서 반환."""
+    from unittest.mock import AsyncMock, MagicMock
+    from aurora.exchange.base import Position
+    from aurora.core.risk import TpSlConfig, build_risk_plan
+
+    mock_client = MagicMock()
+    mock_client.get_positions = AsyncMock(
+        return_value=[
+            Position(
+                symbol="BTC/USDT:USDT", side="long", qty=0.01, entry_price=80000.0,
+                leverage=10, unrealized_pnl=50.0, margin_mode="cross",
+            ),
+        ],
+    )
+    from aurora.exchange.execution import Executor
+
+    bot = bot_instance.get_instance()
+    bot.configure(client=mock_client, symbol="BTC/USDT:USDT")
+    plan = build_risk_plan(
+        entry_price=80000.0, direction="long", leverage=10,
+        equity_usd=10000.0, config=TpSlConfig(), risk_pct=0.01,
+    )
+    bot._executor = Executor(mock_client, "BTC/USDT:USDT", TpSlConfig())
+    bot._executor._plan = plan
+    bot._executor._remaining_qty = plan.position.coin_amount
+
+    body = _client().get("/positions").json()
+    assert len(body) == 1
+    p = body[0]
+    assert p["sl_price"] is not None
+    assert p["sl_price"] < 80000.0
+    assert len(p["tp_prices"]) > 0
+
+
 def test_positions_empty_on_exchange_error() -> None:
     """거래소 호출 실패 시 빈 리스트 (UI 안전)."""
     from unittest.mock import AsyncMock, MagicMock

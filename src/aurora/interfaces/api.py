@@ -671,11 +671,16 @@ def create_app() -> FastAPI:
         # triggered_by 는 봇 자기 진입한 포지션에만 의미 있음.
         # Executor._plan 이 살아있고 거래소 측 포지션 = 봇 자기 → triggered_by 노출.
         # 외부 포지션이거나 stop/start 사이클 중 _plan 잃은 케이스 → 빈 list.
-        bot_triggered = (
-            bot._executor.triggered_by
-            if bot._executor is not None and bot._executor.has_position
-            else []
-        )
+        ex = bot._executor
+        bot_has_pos = ex is not None and ex.has_position
+
+        def _is_bot_pos(p) -> bool:
+            return (
+                bot_has_pos
+                and p.symbol == bot._symbol
+                and p.side == ex._plan.direction  # type: ignore[union-attr]
+            )
+
         return [
             PositionDTO(
                 symbol=p.symbol,
@@ -684,17 +689,9 @@ def create_app() -> FastAPI:
                 quantity=p.qty,
                 leverage=p.leverage,
                 unrealized_pnl_usd=p.unrealized_pnl,
-                sl_price=None,    # 거래소 미반환 — Executor 별도 관리 (TODO)
-                tp_prices=[],     # 동일
-                # 봇 자기 포지션이면 triggered_by, 외부면 빈 list
-                triggered_by=(
-                    bot_triggered
-                    if bot._executor is not None
-                    and bot._executor.has_position
-                    and p.symbol == bot._symbol
-                    and p.side == bot._executor._plan.direction
-                    else []
-                ),
+                sl_price=ex._plan.sl_price if _is_bot_pos(p) else None,  # type: ignore[union-attr]
+                tp_prices=list(ex._plan.tp_prices) if _is_bot_pos(p) else [],  # type: ignore[union-attr]
+                triggered_by=list(ex.triggered_by) if _is_bot_pos(p) else [],  # type: ignore[union-attr]
             )
             for p in raw
         ]

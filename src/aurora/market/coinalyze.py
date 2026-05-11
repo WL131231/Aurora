@@ -24,6 +24,7 @@ API 한도:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -34,6 +35,13 @@ import aiohttp
 from aurora.timeouts import COINALYZE_HTTP_TIMEOUT_SEC
 
 logger = logging.getLogger(__name__)
+
+# v0.2.23 (사용자 보고 2026-05-11 — HTTP 429 본질):
+# Coinalyze 무료 plan = 40 calls/min ≈ 1.5/sec. fetch_trend 측 5 endpoint × 3 TF
+# = 15 calls / coin 측 burst 박음 → 순간 limit hit → 모든 field None.
+# 매 호출 후 250ms throttle → 4 calls/sec → 60초 측 240 calls 측 한도 충분 안.
+# 봇 측 측 5분 cache 박혀있어 — 매 5분 측 fetch (BTC+ETH) = ~7.5초 측 throttle.
+_FETCH_THROTTLE_SEC = 0.25
 
 # Coinalyze API endpoint
 BASE_URL = "https://api.coinalyze.net/v1"
@@ -324,7 +332,11 @@ class CoinalyzeClient:
                     "Coinalyze %s API error response: %s (params=%s)",
                     endpoint, err, safe_params,
                 )
-            return body
+        # v0.2.23: 호출 간 throttle — 무료 plan 40 calls/min 한도 안 박음.
+        # fetch_trend 측 15 endpoint × 2 coin 측 burst 측 — 250ms 측 throttle 박아
+        # 순간 limit hit 방지.
+        await asyncio.sleep(_FETCH_THROTTLE_SEC)
+        return body
 
     async def _get_ohlcv(
         self, session: aiohttp.ClientSession, symbol: str,

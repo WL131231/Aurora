@@ -763,3 +763,98 @@ def test_apply_ui_returns_failure_in_dev_env() -> None:
     body = r.json()
     assert body["success"] is False
     assert "빌드된 .exe" in body["message"]
+
+
+# ============================================================
+# _find_bot_match — 순수 매칭 헬퍼
+# ============================================================
+
+
+from types import SimpleNamespace  # noqa: E402
+
+from aurora.interfaces.api import TradeDTO, _find_bot_match  # noqa: E402
+
+
+def _make_trade(
+    symbol: str = "BTC/USDT:USDT",
+    direction: str = "long",
+    closed_at_ts: int = 1_000_000,
+    qty: float = 0.01,
+) -> TradeDTO:
+    """최소 필드만 채운 TradeDTO 생성 헬퍼."""
+    return TradeDTO(
+        symbol=symbol, direction=direction, leverage=20,
+        qty=qty, entry_price=80000.0, exit_price=79000.0,
+        pnl_usd=-100.0, roi_pct=-1.25,
+        opened_at_ts=900_000, closed_at_ts=closed_at_ts,
+        reason="sl",
+    )
+
+
+def _make_ex(
+    symbol: str = "BTC/USDT:USDT",
+    direction: str = "long",
+    closed_at_ts: int = 1_000_000,
+    qty: float = 0.01,
+) -> SimpleNamespace:
+    return SimpleNamespace(symbol=symbol, direction=direction,
+                           closed_at_ts=closed_at_ts, qty=qty)
+
+
+def test_find_bot_match_returns_matching_record() -> None:
+    """모든 기준 충족 — 첫 번째 봇 record 반환."""
+    b = _make_trade()
+    ex = _make_ex()
+    assert _find_bot_match([b], ex) is b
+
+
+def test_find_bot_match_symbol_mismatch_returns_none() -> None:
+    b = _make_trade(symbol="BTC/USDT:USDT")
+    ex = _make_ex(symbol="ETH/USDT:USDT")
+    assert _find_bot_match([b], ex) is None
+
+
+def test_find_bot_match_direction_mismatch_returns_none() -> None:
+    b = _make_trade(direction="long")
+    ex = _make_ex(direction="short")
+    assert _find_bot_match([b], ex) is None
+
+
+def test_find_bot_match_timestamp_outside_5s_returns_none() -> None:
+    """ts 차이 > 5000ms → None."""
+    b = _make_trade(closed_at_ts=1_000_000)
+    ex = _make_ex(closed_at_ts=1_005_001)
+    assert _find_bot_match([b], ex) is None
+
+
+def test_find_bot_match_timestamp_exactly_5s_still_matches() -> None:
+    """> 5000 조건 — 정확히 5000ms 는 match."""
+    b = _make_trade(closed_at_ts=1_000_000)
+    ex = _make_ex(closed_at_ts=1_005_000)
+    assert _find_bot_match([b], ex) is b
+
+
+def test_find_bot_match_qty_outside_1pct_returns_none() -> None:
+    """qty 차이 > 1% → None."""
+    b = _make_trade(qty=0.01)
+    ex = _make_ex(qty=0.01016)  # 1.6% 차이
+    assert _find_bot_match([b], ex) is None
+
+
+def test_find_bot_match_qty_within_1pct_matches() -> None:
+    """qty 차이 0.5% (허용 범위) → match."""
+    b = _make_trade(qty=0.01)
+    ex = _make_ex(qty=0.01005)  # 0.5% 차이
+    assert _find_bot_match([b], ex) is b
+
+
+def test_find_bot_match_empty_list_returns_none() -> None:
+    assert _find_bot_match([], _make_ex()) is None
+
+
+def test_find_bot_match_returns_first_match() -> None:
+    """매칭 여러 개일 때 첫 번째만 반환."""
+    b1 = _make_trade()
+    b2 = _make_trade()
+    ex = _make_ex()
+    assert _find_bot_match([b1, b2], ex) is b1

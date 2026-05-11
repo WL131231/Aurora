@@ -151,3 +151,58 @@ def test_start_polling_without_event_loop_falls_back_to_check_only():
         release_check.start_polling()
     # task 띄우려다 RuntimeError 면 폴링 task 는 None 이지만 last_check_ts 는 갱신
     assert release_check.get_last_check_ts() is not None
+
+
+def test_start_polling_with_loop_creates_task():
+    """이벤트 루프 있는 환경 — task 생성 확인."""
+    import asyncio
+
+    async def _run():
+        with patch("aurora.interfaces.release_check.fetch_latest", return_value=None):
+            release_check.start_polling()
+        task = release_check._state["task"]
+        assert task is not None
+        assert not task.done()
+        release_check.stop_polling()
+
+    asyncio.run(_run())
+
+
+def test_start_polling_noop_when_already_running():
+    """이미 task 실행 중 — 두 번째 start_polling 은 noop (task 교체 X)."""
+    import asyncio
+
+    async def _run():
+        with patch("aurora.interfaces.release_check.fetch_latest", return_value=None):
+            release_check.start_polling()
+        task1 = release_check._state["task"]
+        with patch("aurora.interfaces.release_check.fetch_latest", return_value=None):
+            release_check.start_polling()  # 두 번째 호출
+        task2 = release_check._state["task"]
+        assert task1 is task2  # 같은 task (교체 X)
+        release_check.stop_polling()
+        # cancel 된 task 완료 대기 — coroutine never awaited 경고 제거
+        await asyncio.gather(task1, return_exceptions=True)
+
+    asyncio.run(_run())
+
+
+def test_stop_polling_cancels_task():
+    """stop_polling — task cancel + _state["task"] = None."""
+    import asyncio
+
+    async def _run():
+        with patch("aurora.interfaces.release_check.fetch_latest", return_value=None):
+            release_check.start_polling()
+        assert release_check._state["task"] is not None
+        release_check.stop_polling()
+        assert release_check._state["task"] is None
+
+    asyncio.run(_run())
+
+
+def test_stop_polling_noop_when_no_task():
+    """task 없는 상태에서 stop_polling — 예외 없이 통과."""
+    assert release_check._state["task"] is None
+    release_check.stop_polling()  # 예외 없이 통과
+    assert release_check._state["task"] is None

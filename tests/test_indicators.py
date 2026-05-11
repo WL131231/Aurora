@@ -8,9 +8,13 @@ import pytest
 
 from aurora.core.indicators import (
     HarmonicMatch,
+    _within,
+    _within_any,
     atr_wilder,
     bollinger_bands,
     detect_pivots,
+    dual_supertrend_alignment,
+    dual_supertrend_booster,
     ema,
     harmonic_pattern,
     ichimoku_cloud,
@@ -19,6 +23,7 @@ from aurora.core.indicators import (
     pivot_low,
     rsi,
     rsi_divergence,
+    supertrend,
     volume_confirmation,
 )
 
@@ -798,3 +803,160 @@ def test_atr_wilder_gap_uses_prev_close_in_tr() -> None:
     # ATR[0] = 1.0
     # ATR[1] = 1.0 + (1/14)*(10.5 - 1.0) = 1.0 + 9.5/14 ≈ 1.6786
     assert atr.iloc[1] == pytest.approx(1.0 + 9.5 / 14.0, rel=1e-6)
+
+
+# ============================================================
+# _within / _within_any — 하모닉 tolerance 헬퍼
+# ============================================================
+
+
+def test_within_exact_match_returns_true() -> None:
+    assert _within(0.618, 0.618, 0.01) is True
+
+
+def test_within_inside_tolerance_returns_true() -> None:
+    """0.5% 차이 — 1% tolerance 이내 → True."""
+    assert _within(1.005, 1.0, 0.01) is True
+
+
+def test_within_outside_tolerance_returns_false() -> None:
+    """1.5% 차이 — 1% tolerance 초과 → False."""
+    assert _within(1.015, 1.0, 0.01) is False
+
+
+def test_within_target_zero_uses_abs_check() -> None:
+    """target == 0 → |value| ≤ tolerance 체크."""
+    assert _within(0.0, 0.0, 0.01) is True
+    assert _within(0.005, 0.0, 0.01) is True
+    assert _within(0.02, 0.0, 0.01) is False
+
+
+def test_within_any_matches_one_target() -> None:
+    assert _within_any(0.618, (0.618, 0.786), 0.01) is True
+
+
+def test_within_any_matches_second_target() -> None:
+    assert _within_any(0.788, (0.618, 0.786), 0.01) is True
+
+
+def test_within_any_no_match_returns_false() -> None:
+    assert _within_any(0.9, (0.618, 0.786), 0.01) is False
+
+
+def test_within_any_empty_targets_returns_false() -> None:
+    assert _within_any(0.618, (), 0.01) is False
+
+
+# ============================================================
+# supertrend — ATR 기반 추세 라인
+# ============================================================
+
+
+def _make_ohlcv_trend(closes: list[float], offset: float = 1.0) -> pd.DataFrame:
+    """합성 OHLCV — high/low offset 고정, 인덱스 DatetimeIndex."""
+    idx = pd.date_range("2024-01-01", periods=len(closes), freq="1h")
+    return pd.DataFrame({
+        "open": closes,
+        "high": [c + offset for c in closes],
+        "low": [c - offset for c in closes],
+        "close": closes,
+        "volume": [100.0] * len(closes),
+    }, index=idx)
+
+
+def test_supertrend_invalid_period_raises() -> None:
+    df = _make_ohlcv_trend([100.0] * 20)
+    with pytest.raises(ValueError, match="period"):
+        supertrend(df, period=0)
+
+
+def test_supertrend_missing_columns_raises() -> None:
+    df = pd.DataFrame({"close": [100.0] * 20})
+    with pytest.raises(ValueError):
+        supertrend(df)
+
+
+def test_supertrend_empty_dataframe_returns_empty() -> None:
+    df = pd.DataFrame(columns=["high", "low", "close"])
+    result = supertrend(df)
+    assert len(result) == 0
+
+
+def test_supertrend_output_columns() -> None:
+    df = _make_ohlcv_trend(list(range(100, 150)))
+    result = supertrend(df)
+    assert "trend" in result.columns
+    assert "line" in result.columns
+    assert len(result) == 50
+
+
+def test_supertrend_bull_series_trend_positive() -> None:
+    """단조 상승 (100→200) 50봉 — 최종 trend +1."""
+    closes = list(np.linspace(100.0, 200.0, 50))
+    df = _make_ohlcv_trend(closes, offset=0.5)
+    result = supertrend(df, period=7, multiplier=2.0)
+    assert result["trend"].iloc[-1] == pytest.approx(1.0)
+
+
+def test_supertrend_bear_series_trend_negative() -> None:
+    """단조 하락 (200→100) 50봉 — 최종 trend -1."""
+    closes = list(np.linspace(200.0, 100.0, 50))
+    df = _make_ohlcv_trend(closes, offset=0.5)
+    result = supertrend(df, period=7, multiplier=2.0)
+    assert result["trend"].iloc[-1] == pytest.approx(-1.0)
+
+
+# ============================================================
+# dual_supertrend_alignment
+# ============================================================
+
+
+def test_dual_alignment_short_data_returns_zero() -> None:
+    """데이터 부족 (< period + 2) → 0."""
+    df = _make_ohlcv_trend([100.0] * 5)
+    assert dual_supertrend_alignment(df, period_fast=14, period_slow=14) == 0
+
+
+def test_dual_alignment_bull_series_returns_plus_one() -> None:
+    """상승 시리즈 — 두 ST 모두 bull → +1."""
+    closes = list(np.linspace(100.0, 200.0, 60))
+    df = _make_ohlcv_trend(closes, offset=0.5)
+    assert dual_supertrend_alignment(df, period_fast=7, mult_fast=2.0, period_slow=7, mult_slow=3.0) == 1
+
+
+def test_dual_alignment_bear_series_returns_minus_one() -> None:
+    """하락 시리즈 — 두 ST 모두 bear → -1."""
+    closes = list(np.linspace(200.0, 100.0, 60))
+    df = _make_ohlcv_trend(closes, offset=0.5)
+    assert dual_supertrend_alignment(df, period_fast=7, mult_fast=2.0, period_slow=7, mult_slow=3.0) == -1
+
+
+# ============================================================
+# dual_supertrend_booster
+# ============================================================
+
+
+def test_booster_bull_alignment_long_signal() -> None:
+    """alignment=+1 + long → ×1.5."""
+    assert dual_supertrend_booster(1, "long") == pytest.approx(1.5)
+
+
+def test_booster_bear_alignment_short_signal() -> None:
+    """alignment=-1 + short → ×1.5."""
+    assert dual_supertrend_booster(-1, "short") == pytest.approx(1.5)
+
+
+def test_booster_no_alignment_returns_neutral() -> None:
+    """alignment=0 → ×1.0 (방향 무관)."""
+    assert dual_supertrend_booster(0, "long") == pytest.approx(1.0)
+    assert dual_supertrend_booster(0, "short") == pytest.approx(1.0)
+
+
+def test_booster_bull_alignment_short_signal_penalizes() -> None:
+    """alignment=+1 (bull) + short 신호 → ×0.5 (반대)."""
+    assert dual_supertrend_booster(1, "short") == pytest.approx(0.5)
+
+
+def test_booster_bear_alignment_long_signal_penalizes() -> None:
+    """alignment=-1 (bear) + long 신호 → ×0.5 (반대)."""
+    assert dual_supertrend_booster(-1, "long") == pytest.approx(0.5)

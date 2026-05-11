@@ -9,7 +9,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def _config_path() -> Path:
@@ -21,12 +24,17 @@ def load() -> dict:
     """JSON 파일에서 설정 dict 로드.
 
     파일이 없으면 빈 dict 를 반환하여 호출자가 기본값을 쓰도록 위임.
+    JSON parse 실패 시 빈 dict 반환 + warn (시작 차단 X).
     """
     path = _config_path()
     if not path.exists():
         return {}
-    with path.open(encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with path.open(encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("config_store: 설정 파일 로드 실패 — 기본값 사용 (%s)", e)
+        return {}
 
 
 def save(config: dict) -> None:

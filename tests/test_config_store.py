@@ -72,3 +72,20 @@ def test_save_unicode_korean(isolated_config: Path) -> None:
     loaded = config_store.load()
     assert loaded["message"] == "봇 시작됨"
     assert loaded["mode"] == "실거래"
+
+
+def test_load_corrupt_json_returns_empty(isolated_config: Path) -> None:
+    """JSON 파싱 실패 — 빈 dict 반환 (시작 차단 X)."""
+    isolated_config.parent.mkdir(parents=True, exist_ok=True)
+    isolated_config.write_text("not-json {{{", encoding="utf-8")
+    assert config_store.load() == {}
+
+
+def test_load_corrupt_json_logs_warning(isolated_config: Path, caplog) -> None:
+    """JSON 파싱 실패 시 WARNING 로그 남김."""
+    import logging
+    isolated_config.parent.mkdir(parents=True, exist_ok=True)
+    isolated_config.write_text("broken", encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="aurora.interfaces.config_store"):
+        config_store.load()
+    assert any("설정 파일 로드 실패" in r.message for r in caplog.records)

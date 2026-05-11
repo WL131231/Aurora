@@ -61,12 +61,15 @@ Aurora 측 사용자 머신 측 자동 download + 실행 박는 자동매매 봇
 
 ### 사전 준비
 
-**Windows**: Git for Windows 설치 측 GPG 측 박혀있음. 검증:
+**Windows**: [Gpg4win](https://www.gpg4win.org/) 설치 (Download → $0 → Download 클릭 → 기본값 설치). 설치 후 PowerShell 재시작.
+
 ```bash
-# Git Bash 측 박음
+# PowerShell 측 검증
 gpg --version
 ```
-→ `gpg (GnuPG) 2.x.x` 박혀나오면 OK. 안 박혀있으면 [Git for Windows](https://git-scm.com/download/win) 또는 [Gpg4win](https://www.gpg4win.org/) 설치.
+→ `gpg (GnuPG) 2.x.x` 박혀나오면 OK.
+
+> ⚠️ **Windows 주의**: Git for Windows 측 자체 gpg 박혀있어 → Gpg4win gpg 측 못 찾는 경우 박힘. 아래 3단계 측 `gpg.program` 설정 **반드시 박음** (안 박으면 `gpg failed to sign the data` 에러).
 
 **macOS**: 
 ```bash
@@ -151,7 +154,7 @@ mDMEZxxx... (긴 base64, 30~40줄)
 ### 박는 이유
 > Git 측 본인 commit 측 자동 GPG 서명 박게 박음. 매번 `-S` 플래그 박을 필요 X.
 
-### 박는 방법 (Git Bash / 터미널 측)
+### 박는 방법 (PowerShell / 터미널 측)
 
 ```bash
 # KEY_ID 측 위 (b) 측 복사 측 16자리 박음
@@ -162,6 +165,12 @@ git config --global tag.gpgsign true
 # user.email 측 GPG key 측 등록한 이메일 측 정확히 일치 박아야 ⭐
 git config --global user.email "본인 GitHub 이메일"
 git config --global user.name "본인 이름"
+```
+
+**Windows (Gpg4win) 추가 설정** ⭐
+```bash
+# Git 측 Gpg4win gpg 경로 측 직접 지정 (안 박으면 서명 실패)
+git config --global gpg.program "C:/Program Files/GnuPG/bin/gpg.exe"
 ```
 
 ### 검증
@@ -226,6 +235,13 @@ git push origin main
 ---
 
 ## ❓ 자주 묻는 질문
+
+### Q0. `gpg failed to sign the data` 에러 박혀요 (Windows)
+- A: Git 측 자체 gpg 측 Gpg4win key 측 못 찾는 것. `gpg.program` 박음:
+  ```bash
+  git config --global gpg.program "C:/Program Files/GnuPG/bin/gpg.exe"
+  ```
+  → 박은 후 commit 재시도.
 
 ### Q1. "Verified" 배지 측 안 박혀요
 - A: GPG key email 측 GitHub 등록 email 측 정확 일치 박혔는지 확인 (`gpg --list-secret-keys`).

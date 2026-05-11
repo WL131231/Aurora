@@ -1091,6 +1091,7 @@ def create_app() -> FastAPI:
         from aurora.core.indicators import (
             bollinger_bands,
             ema,
+            harmonic_pattern,
             ichimoku_cloud,
             rsi,
             supertrend,
@@ -1204,6 +1205,37 @@ def create_app() -> FastAPI:
                         shape="arrowUp" if is_long else "arrowDown",
                         text=("L " if is_long else "S ") + ",".join(triggered),
                     ))
+
+        # v0.3.3 (사용자 요청 2026-05-11): Harmonic pattern markers — X/A/B/C/D 측 5 pivot
+        # 측 marker 박음. tail 측 측 — 측 마지막 봉 시점 측 측 detect 박혀있으면 — 측 — X/A/B/C/D
+        # 측 측 timestamp 측 측 — tail.index[bar_idx] 측 박음.
+        try:
+            hm = harmonic_pattern(tail)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("/chart harmonic_pattern 실패 (skip): %s", e)
+            hm = None
+        if hm is not None:
+            pattern_label = f"{hm.name.upper()}({hm.direction[0].upper()})"
+            harmonic_color = "#a855f7"  # purple — 사용자 인지 박힘
+            for label, bar_idx in (
+                ("X", hm.x_bar),
+                ("A", hm.a_bar),
+                ("B", hm.b_bar),
+                ("C", hm.c_bar),
+                ("D", hm.d_bar),
+            ):
+                if bar_idx < 0 or bar_idx >= len(tail.index):
+                    continue
+                ts_sec = int(tail.index[bar_idx].timestamp())
+                # D 측 측 pattern label 박음, 나머지 측 측 점 label
+                text = f"{label} {pattern_label}" if label == "D" else label
+                markers.append(ChartMarker(
+                    time=ts_sec,
+                    position="belowBar" if label in ("X", "B", "D") else "aboveBar",
+                    color=harmonic_color,
+                    shape="circle",
+                    text=text,
+                ))
 
         # lightweight-charts setMarkers 는 time 오름차순 필요
         markers.sort(key=lambda m: m.time)

@@ -1,9 +1,9 @@
-"""Bitget V2 mix (futures) 14D 시계열 fetcher (v0.1.115).
+"""Bitget V2 mix (futures) 14D 시계열 fetcher (v0.3.4: 1H interval).
 
 Public endpoints (API 키 X):
-- ``/api/v2/mix/market/candles?productType=usdt-futures&granularity=1D&limit=14`` — kline
-- ``/api/v2/mix/market/history-fund-rate?symbol=&pageSize=100`` — funding history
-- ``/api/v2/mix/market/account-long-short?period=1d&limit=14`` — LSR (account)
+- ``/api/v2/mix/market/candles?granularity=1H&limit=336`` — 1H kline
+- ``/api/v2/mix/market/history-fund-rate?symbol=&pageSize=50`` — funding (forward-fill)
+- ``/api/v2/mix/market/account-long-short?period=1h&limit=336`` — LSR 1H
 
 OI history endpoint 측 v2 doc 측 미박힘 — bars[i].oi_usd 측 None, ``errors`` 측 사유 박음.
 Top trader / taker volume / spot 측 endpoint X — None.
@@ -17,7 +17,7 @@ import time
 
 import aiohttp
 
-from aurora.market.exchanges.binance_series import _floor_day_ms
+from aurora.market.exchanges.binance_series import _HOUR_MS, _floor_hour_ms
 from aurora.market.exchanges.series_base import (
     ExchangeSeries,
     ExchangeSeriesProvider,
@@ -66,15 +66,15 @@ class BitgetSeriesProvider(ExchangeSeriesProvider):
 
         bars: dict[int, SeriesBar] = {}
 
-        # 1) candles — Bitget 측 [ts, o, h, l, c, baseVol, quoteVol]
+        # 1) candles — Bitget 측 [ts, o, h, l, c, baseVol, quoteVol] (1H)
         if isinstance(candles, Exception):
             series.errors.append(f"candles: {candles}")
         elif isinstance(candles, list):
             for k in candles:
                 try:
                     open_ms = int(k[0])
-                    day = _floor_day_ms(open_ms)
-                    bar = bars.setdefault(day, SeriesBar(ts_ms=day))
+                    hour = _floor_hour_ms(open_ms)
+                    bar = bars.setdefault(hour, SeriesBar(ts_ms=hour))
                     bar.open = float(k[1])
                     bar.high = float(k[2])
                     bar.low = float(k[3])
@@ -85,35 +85,39 @@ class BitgetSeriesProvider(ExchangeSeriesProvider):
                     series.errors.append(f"candle parse: {e}")
                     break
 
-        # 2) funding — list 측 fundingTime / fundingRate (8h)
+        # 2) funding — 8h funding → 1H bucket forward-fill
         if isinstance(funding, Exception):
             series.errors.append(f"funding: {funding}")
         elif isinstance(funding, list):
-            day_buckets: dict[int, list[float]] = {}
+            funding_points: list[tuple[int, float]] = []
             for row in funding:
                 try:
                     ts = int(row.get("fundingTime", 0))
                     rate = float(row.get("fundingRate", 0) or 0)
-                    day = _floor_day_ms(ts)
-                    day_buckets.setdefault(day, []).append(rate)
+                    funding_points.append((ts, rate))
                 except (TypeError, ValueError) as e:
                     series.errors.append(f"funding parse: {e}")
                     break
-            for day, rates in day_buckets.items():
-                if not rates:
-                    continue
-                bar = bars.setdefault(day, SeriesBar(ts_ms=day))
-                bar.funding_rate_avg = sum(rates) / len(rates)
+            funding_points.sort(key=lambda x: x[0])
+            for hour, bar in bars.items():
+                latest_rate: float | None = None
+                for ts, rate in funding_points:
+                    if ts <= hour + _HOUR_MS:
+                        latest_rate = rate
+                    else:
+                        break
+                if latest_rate is not None:
+                    bar.funding_rate_avg = latest_rate
 
-        # 3) LSR — list 측 [{ts, longAccountRatio, shortAccountRatio}]
+        # 3) LSR — list 측 [{ts, longAccountRatio, shortAccountRatio}] (1H)
         if isinstance(lsr, Exception):
             series.errors.append(f"lsr: {lsr}")
         elif isinstance(lsr, list):
             for row in lsr:
                 try:
                     ts = int(row.get("ts", 0))
-                    day = _floor_day_ms(ts)
-                    bar = bars.setdefault(day, SeriesBar(ts_ms=day))
+                    hour = _floor_hour_ms(ts)
+                    bar = bars.setdefault(hour, SeriesBar(ts_ms=hour))
                     long_ratio = float(row.get("longAccountRatio", 0) or 0)
                     short_ratio = float(row.get("shortAccountRatio", 0) or 0)
                     if short_ratio > 0:
@@ -123,7 +127,7 @@ class BitgetSeriesProvider(ExchangeSeriesProvider):
                     break
 
         sorted_bars = sorted(bars.values(), key=lambda b: b.ts_ms)
-        series.bars = sorted_bars[-days:]
+        series.bars = sorted_bars[-(days * 24):]
 
         if series.errors:
             logger.debug(
@@ -143,14 +147,15 @@ class BitgetSeriesProvider(ExchangeSeriesProvider):
             return await resp.json()
 
     async def _fetch_candles(self, session, symbol: str, days: int) -> list:
-        # Bitget 측 startTime / endTime 측 ms — 14d 박음
+        # v0.3.4: granularity=1H, limit max 200 — 14d × 24 = 336 박힘, 200으로 cap
         end_ms = int(time.time() * 1000)
         start_ms = end_ms - (days + 1) * _DAY_MS
+        limit = min(200, days * 24)
         data = await self._get_json(
             session, "/api/v2/mix/market/candles",
             {
                 "productType": _PRODUCT_TYPE, "symbol": symbol,
-                "granularity": "1D", "limit": str(days),
+                "granularity": "1H", "limit": str(limit),
                 "startTime": str(start_ms), "endTime": str(end_ms),
             },
         )
@@ -173,11 +178,13 @@ class BitgetSeriesProvider(ExchangeSeriesProvider):
         return data.get("data") or []
 
     async def _fetch_lsr(self, session, symbol: str, days: int) -> list:
+        # v0.3.4: period=1h, limit max 500
+        limit = min(500, days * 24)
         data = await self._get_json(
             session, "/api/v2/mix/market/account-long-short",
             {
                 "productType": _PRODUCT_TYPE, "symbol": symbol,
-                "period": "1d", "limit": str(days),
+                "period": "1h", "limit": str(limit),
             },
         )
         if data.get("code") != "00000":

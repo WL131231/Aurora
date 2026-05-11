@@ -279,8 +279,9 @@ async def test_binance_series_happy_path() -> None:
     assert bar1.taker_sell_usd == pytest.approx(8_000_000_000.0 - 4_800_000_000.0)
     assert bar1.oi_usd == pytest.approx(8_000_000_000.0)
     assert bar1.ls_ratio_global == pytest.approx(1.45)
-    # funding day1 = (0.0001 + 0.00012 + 0.00014) / 3 = 0.00012
-    assert bar1.funding_rate_avg == pytest.approx(0.00012, rel=1e-3)
+    # v0.3.4: 1H bucket forward-fill — bar1 (day1 00:00) 측 ts <= +1h funding 중 latest
+    # = day1+0 = 0.00010 (day1+8h, day1+16h 측 박혀 늦은 hour bucket 박힘)
+    assert bar1.funding_rate_avg == pytest.approx(0.00010, rel=1e-3)
 
 
 @pytest.mark.asyncio

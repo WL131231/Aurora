@@ -2310,6 +2310,77 @@ input[type="range"].slider-input:disabled {
     min-width: 140px;
 }
 
+/* ============================================================
+   v0.3.4: 데스크탑 사이드바 collapse / expand
+   ============================================================ */
+
+/* 사이드바 너비 transition */
+aside#sidebar {
+    transition: width 0.25s ease-out, padding 0.25s ease-out;
+    overflow: hidden;
+}
+
+/* collapsed 상태 — 너비 0 (완전 숨김) */
+aside#sidebar.sidebar-collapsed {
+    width: 0 !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    border-right: none !important;
+}
+aside#sidebar.sidebar-collapsed > * {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* 사이드바 안 접기 버튼 — 워드마크 옆 */
+.sidebar-collapse-btn {
+    margin-left: auto;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: 1px solid rgba(191, 192, 209, 0.12);
+    border-radius: 4px;
+    cursor: pointer;
+    color: rgba(191, 192, 209, 0.55);
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.sidebar-collapse-btn:hover {
+    color: rgba(191, 192, 209, 0.95);
+    border-color: rgba(168, 85, 247, 0.45);
+    background: rgba(168, 85, 247, 0.08);
+}
+
+/* 사이드바 밖 펼치기 버튼 — collapsed 일 때만 보임 */
+.sidebar-expand-btn {
+    display: none;
+    position: fixed;
+    top: 14px;
+    left: 10px;
+    z-index: 55;
+    width: 26px;
+    height: 26px;
+    align-items: center;
+    justify-content: center;
+    background: rgba(20, 18, 32, 0.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(191, 192, 209, 0.15);
+    border-radius: 4px;
+    cursor: pointer;
+    color: rgba(191, 192, 209, 0.65);
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.sidebar-expand-btn:hover {
+    color: rgba(191, 192, 209, 0.98);
+    border-color: rgba(168, 85, 247, 0.55);
+    background: rgba(168, 85, 247, 0.12);
+}
+body.sidebar-is-collapsed .sidebar-expand-btn {
+    display: flex;
+}
+
 /* ===== 모바일 반응형 (Android APK WebView) ===== */
 
 /* 모바일 헤더 — 기본 숨김, 소형 화면에서만 표시 */
@@ -2385,10 +2456,31 @@ input[type="range"].slider-input:disabled {
 }
 .dflow-ratio-row {
     display: grid;
-    grid-template-columns: 110px 1fr;
+    /* v0.3.4: 라벨 / 바 / L/S ratio 숫자 — 3컬럼 */
+    grid-template-columns: 110px 1fr 60px;
     align-items: center;
     gap: 0.5rem;
     font-size: 0.62rem;
+}
+
+/* v0.3.4: L/S ratio 숫자 표기 (우측 정렬, mono font, ratio 강조) */
+.dflow-ratio-ls {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-align: center;
+    letter-spacing: 0.02em;
+    color: var(--text-1);
+}
+.dflow-ratio-ls.long {
+    color: rgba(52, 211, 153, 0.95);
+}
+.dflow-ratio-ls.short {
+    color: rgba(251, 113, 133, 0.95);
+}
+.dflow-ratio-ls.empty {
+    color: var(--text-3);
+    font-weight: 400;
 }
 .dflow-ratio-label {
     color: var(--text-2);
@@ -2655,6 +2747,25 @@ input[type="range"].slider-input:disabled {
     /* 모바일 헤더 표시 */
     .mobile-header {
         display: flex;
+    }
+
+    /* 데스크탑 collapse 버튼 / expand 버튼 모바일 숨김 — 햄버거 박힘 */
+    .sidebar-collapse-btn,
+    .sidebar-expand-btn {
+        display: none !important;
+    }
+    body.sidebar-is-collapsed .sidebar-expand-btn {
+        display: none !important;
+    }
+    aside#sidebar.sidebar-collapsed {
+        /* 모바일 측 drawer 박힘 — collapse 클래스 무력화 */
+        width: 240px !important;
+        padding: 0 !important;
+        border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
+    }
+    aside#sidebar.sidebar-collapsed > * {
+        opacity: 1;
+        pointer-events: auto;
     }
 
     /* 메인 레이아웃 — 상단 헤더 높이만큼 패딩 */

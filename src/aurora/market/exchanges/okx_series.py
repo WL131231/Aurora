@@ -1,11 +1,11 @@
-"""OKX V5 14D 시계열 fetcher (v0.1.115).
+"""OKX V5 14D 시계열 fetcher (v0.3.4: 1H interval).
 
 Public endpoints (API 키 X):
-- ``/api/v5/market/candles?bar=1D&limit=14`` — daily candle (8 columns)
-- ``/api/v5/public/funding-rate-history?instId=&limit=400`` — funding history (8h)
-- ``/api/v5/rubik/stat/contracts/open-interest-volume?ccy=BTC&period=1D`` — OI hist
-- ``/api/v5/rubik/stat/contracts/long-short-account-ratio?period=1D&limit=14`` — LSR
-- ``/api/v5/rubik/stat/taker-volume?ccy=BTC&instType=CONTRACTS&period=1D`` — taker
+- ``/api/v5/market/candles?bar=1H&limit=336`` — 1H candle
+- ``/api/v5/public/funding-rate-history?instId=&limit=50`` — funding (forward-fill)
+- ``/api/v5/rubik/stat/contracts/open-interest-volume?period=1H`` — OI hist 1H
+- ``/api/v5/rubik/stat/contracts/long-short-account-ratio?period=1H`` — LSR 1H
+- ``/api/v5/rubik/stat/taker-volume?period=1H`` — taker 1H
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import logging
 
 import aiohttp
 
-from aurora.market.exchanges.binance_series import _floor_day_ms
+from aurora.market.exchanges.binance_series import _HOUR_MS, _floor_hour_ms
 from aurora.market.exchanges.series_base import (
     ExchangeSeries,
     ExchangeSeriesProvider,
@@ -63,15 +63,15 @@ class OkxSeriesProvider(ExchangeSeriesProvider):
 
         bars: dict[int, SeriesBar] = {}
 
-        # 1) candles — [ts, o, h, l, c, vol, volCcy, volCcyQuote, confirm]
+        # 1) candles — [ts, o, h, l, c, vol, volCcy, volCcyQuote, confirm] (1H)
         if isinstance(candles, Exception):
             series.errors.append(f"candles: {candles}")
         elif isinstance(candles, list):
             for k in candles:
                 try:
                     open_ms = int(k[0])
-                    day = _floor_day_ms(open_ms)
-                    bar = bars.setdefault(day, SeriesBar(ts_ms=day))
+                    hour = _floor_hour_ms(open_ms)
+                    bar = bars.setdefault(hour, SeriesBar(ts_ms=hour))
                     bar.open = float(k[1])
                     bar.high = float(k[2])
                     bar.low = float(k[3])
@@ -83,63 +83,67 @@ class OkxSeriesProvider(ExchangeSeriesProvider):
                     series.errors.append(f"candle parse: {e}")
                     break
 
-        # 2) funding history — list 측 fundingTime / fundingRate (8h)
+        # 2) funding history — 8h funding → 1H bucket forward-fill
         if isinstance(funding, Exception):
             series.errors.append(f"funding: {funding}")
         elif isinstance(funding, list):
-            day_buckets: dict[int, list[float]] = {}
+            funding_points: list[tuple[int, float]] = []
             for row in funding:
                 try:
                     ts = int(row.get("fundingTime", 0))
                     rate = float(row.get("fundingRate", 0) or 0)
-                    day = _floor_day_ms(ts)
-                    day_buckets.setdefault(day, []).append(rate)
+                    funding_points.append((ts, rate))
                 except (TypeError, ValueError) as e:
                     series.errors.append(f"funding parse: {e}")
                     break
-            for day, rates in day_buckets.items():
-                if not rates:
-                    continue
-                bar = bars.setdefault(day, SeriesBar(ts_ms=day))
-                bar.funding_rate_avg = sum(rates) / len(rates)
+            funding_points.sort(key=lambda x: x[0])
+            for hour, bar in bars.items():
+                latest_rate: float | None = None
+                for ts, rate in funding_points:
+                    if ts <= hour + _HOUR_MS:
+                        latest_rate = rate
+                    else:
+                        break
+                if latest_rate is not None:
+                    bar.funding_rate_avg = latest_rate
 
-        # 3) OI history — [ts, oi_ccy, oi_usd]
+        # 3) OI history — [ts, oi_ccy, oi_usd] (1H)
         if isinstance(oi_hist, Exception):
             series.errors.append(f"oi_hist: {oi_hist}")
         elif isinstance(oi_hist, list):
             for row in oi_hist:
                 try:
                     ts = int(row[0])
-                    day = _floor_day_ms(ts)
-                    bar = bars.setdefault(day, SeriesBar(ts_ms=day))
+                    hour = _floor_hour_ms(ts)
+                    bar = bars.setdefault(hour, SeriesBar(ts_ms=hour))
                     bar.oi_usd = float(row[2] or 0)
                 except (TypeError, ValueError, IndexError) as e:
                     series.errors.append(f"oi parse: {e}")
                     break
 
-        # 4) LSR — [ts, ratio]
+        # 4) LSR — [ts, ratio] (1H)
         if isinstance(lsr, Exception):
             series.errors.append(f"lsr: {lsr}")
         elif isinstance(lsr, list):
             for row in lsr:
                 try:
                     ts = int(row[0])
-                    day = _floor_day_ms(ts)
-                    bar = bars.setdefault(day, SeriesBar(ts_ms=day))
+                    hour = _floor_hour_ms(ts)
+                    bar = bars.setdefault(hour, SeriesBar(ts_ms=hour))
                     bar.ls_ratio_global = float(row[1] or 0)
                 except (TypeError, ValueError, IndexError) as e:
                     series.errors.append(f"lsr parse: {e}")
                     break
 
-        # 5) taker volume — [ts, sellVol, buyVol]
+        # 5) taker volume — [ts, sellVol, buyVol] (1H)
         if isinstance(taker, Exception):
             series.errors.append(f"taker: {taker}")
         elif isinstance(taker, list):
             for row in taker:
                 try:
                     ts = int(row[0])
-                    day = _floor_day_ms(ts)
-                    bar = bars.setdefault(day, SeriesBar(ts_ms=day))
+                    hour = _floor_hour_ms(ts)
+                    bar = bars.setdefault(hour, SeriesBar(ts_ms=hour))
                     sell_vol = float(row[1] or 0)
                     buy_vol = float(row[2] or 0)
                     if bar.close is not None:
@@ -150,7 +154,7 @@ class OkxSeriesProvider(ExchangeSeriesProvider):
                     break
 
         sorted_bars = sorted(bars.values(), key=lambda b: b.ts_ms)
-        series.bars = sorted_bars[-days:]
+        series.bars = sorted_bars[-(days * 24):]
 
         if series.errors:
             logger.debug(
@@ -170,9 +174,11 @@ class OkxSeriesProvider(ExchangeSeriesProvider):
             return await resp.json()
 
     async def _fetch_candles(self, session, inst_id: str, days: int) -> list:
+        # v0.3.4: bar=1H, max 300 박힘 (OKX public limit)
+        limit = min(300, days * 24)
         data = await self._get_json(
             session, "/api/v5/market/candles",
-            {"instId": inst_id, "bar": "1D", "limit": days},
+            {"instId": inst_id, "bar": "1H", "limit": limit},
         )
         if data.get("code") != "0":
             raise RuntimeError(f"okx code={data.get('code')} msg={data.get('msg')}")
@@ -190,35 +196,36 @@ class OkxSeriesProvider(ExchangeSeriesProvider):
         return data.get("data") or []
 
     async def _fetch_oi_hist(self, session, coin: str, days: int) -> list:
+        # v0.3.4: period=1H (rubik 측 supports 1H bucket)
         data = await self._get_json(
             session, "/api/v5/rubik/stat/contracts/open-interest-volume",
-            {"ccy": coin, "period": "1D"},
+            {"ccy": coin, "period": "1H"},
         )
         if data.get("code") != "0":
             raise RuntimeError(f"okx code={data.get('code')} msg={data.get('msg')}")
         rows = data.get("data") or []
-        # 최신 N 개 (rubik 측 desc 박혀있음)
-        return rows[:days]
+        # 최신 N×24 개 (1H × days × 24)
+        return rows[:days * 24]
 
     async def _fetch_lsr(self, session, coin: str, days: int) -> list:
         data = await self._get_json(
             session, "/api/v5/rubik/stat/contracts/long-short-account-ratio",
-            {"ccy": coin, "period": "1D"},
+            {"ccy": coin, "period": "1H"},
         )
         if data.get("code") != "0":
             raise RuntimeError(f"okx code={data.get('code')} msg={data.get('msg')}")
         rows = data.get("data") or []
-        return rows[:days]
+        return rows[:days * 24]
 
     async def _fetch_taker(self, session, coin: str, days: int) -> list:
         data = await self._get_json(
             session, "/api/v5/rubik/stat/taker-volume",
-            {"ccy": coin, "instType": "CONTRACTS", "period": "1D"},
+            {"ccy": coin, "instType": "CONTRACTS", "period": "1H"},
         )
         if data.get("code") != "0":
             raise RuntimeError(f"okx code={data.get('code')} msg={data.get('msg')}")
         rows = data.get("data") or []
-        return rows[:days]
+        return rows[:days * 24]
 
 
 __all__ = ["OkxSeriesProvider"]

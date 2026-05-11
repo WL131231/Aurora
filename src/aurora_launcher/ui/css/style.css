@@ -264,3 +264,31 @@ body {
     0%, 100% { transform: translateY(0) rotate(0deg); }
     50%      { transform: translateY(-12px) rotate(2deg); }
 }
+
+/* ============================================================
+   v0.2.24 (ChoYoon #133 P1 ③): launcher progress bar
+   ============================================================ */
+
+.progress-container {
+    width: 80%;
+    max-width: 360px;
+    margin-top: 1.25rem;
+}
+
+.progress-bar {
+    height: 8px;
+    background: linear-gradient(90deg, #a855f7, #60a5fa, #22d3ee);
+    border-radius: 6px;
+    width: 0%;
+    transition: width 0.35s ease-out;
+    box-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
+}
+
+.progress-text {
+    color: #e5e7eb;
+    font-size: 0.85rem;
+    font-weight: 500;
+    margin-top: 0.5rem;
+    letter-spacing: 0.05em;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}

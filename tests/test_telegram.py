@@ -208,3 +208,126 @@ def test_send_alert_threadsafe_noop_when_no_loop():
     bot._app = None
     bot.chat_id = "1"
     bot.send_alert_threadsafe("test message")  # 아무 예외 없이 통과
+
+
+# ── cmd_update ────────────────────────────────────────────────────
+
+
+def _make_update(chat_id: int) -> SimpleNamespace:
+    """cmd_update 용 Telegram Update stub — reply_text 는 async."""
+    replied = []
+
+    async def _reply(text: str) -> None:
+        replied.append(text)
+
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=chat_id),
+        message=SimpleNamespace(reply_text=_reply),
+        _replied=replied,
+    )
+    return update
+
+
+def test_cmd_update_no_pending_replies_latest():
+    """/update — pending 없음 → '최신 버전' 메시지."""
+    import asyncio
+
+    from aurora.interfaces import release_check
+
+    release_check.reset_state()
+
+    bot = TelegramBot.__new__(TelegramBot)
+    bot.chat_id = "1"
+    bot._loop = None
+    bot._app = None
+
+    update = _make_update(1)
+    asyncio.run(bot.cmd_update(update, None))
+    assert len(update._replied) == 1
+    assert "최신 버전" in update._replied[0]
+
+
+def test_cmd_update_with_pending_replies_update_info():
+    """/update — pending 박힘 → 새 버전 tag + URL 포함 메시지."""
+    import asyncio
+
+    from aurora.interfaces import release_check
+
+    release_check.reset_state()
+    release_check._state["pending_release"] = {
+        "tag": "v999.0.0",
+        "name": "Big Release",
+        "body": "",
+        "html_url": "https://github.com/WL131231/Aurora/releases/tag/v999.0.0",
+        "published_at": "",
+    }
+
+    bot = TelegramBot.__new__(TelegramBot)
+    bot.chat_id = "1"
+    bot._loop = None
+    bot._app = None
+
+    update = _make_update(1)
+    asyncio.run(bot.cmd_update(update, None))
+    assert len(update._replied) == 1
+    assert "v999.0.0" in update._replied[0]
+    assert "업데이트 가능" in update._replied[0]
+
+
+def test_cmd_update_unauthorized_no_reply():
+    """/update — 미인가 chat_id → 응답 없음."""
+    import asyncio
+
+    from aurora.interfaces import release_check
+
+    release_check.reset_state()
+
+    bot = TelegramBot.__new__(TelegramBot)
+    bot.chat_id = "999999"
+    bot._loop = None
+    bot._app = None
+
+    update = _make_update(1)
+    asyncio.run(bot.cmd_update(update, None))
+    assert update._replied == []
+
+
+# ── _on_new_release ───────────────────────────────────────────────
+
+
+def test_on_new_release_calls_send_alert():
+    """새 버전 발견 콜백 → send_alert_threadsafe 호출 + tag 포함."""
+    bot = TelegramBot.__new__(TelegramBot)
+    bot.chat_id = "1"
+    bot._loop = None
+    bot._app = None
+
+    sent = []
+    bot.send_alert_threadsafe = lambda text: sent.append(text)
+
+    pending = {
+        "tag": "v999.0.0",
+        "html_url": "https://github.com/WL131231/Aurora/releases/tag/v999.0.0",
+    }
+    bot._on_new_release(pending)
+
+    assert len(sent) == 1
+    assert "v999.0.0" in sent[0]
+    assert "새 버전 발견" in sent[0]
+
+
+def test_on_new_release_includes_current_version():
+    """콜백 메시지에 현재 버전(__version__) 포함."""
+    from aurora import __version__
+
+    bot = TelegramBot.__new__(TelegramBot)
+    bot.chat_id = "1"
+    bot._loop = None
+    bot._app = None
+
+    sent = []
+    bot.send_alert_threadsafe = lambda text: sent.append(text)
+
+    bot._on_new_release({"tag": "v999.0.0", "html_url": "https://x"})
+
+    assert f"v{__version__}" in sent[0]

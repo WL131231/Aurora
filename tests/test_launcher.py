@@ -488,3 +488,75 @@ def test_update_progress_js_no_webview_window_safe():
     api = launcher.LauncherApi()
     with patch.dict("sys.modules", {"webview": fake_webview}):
         api._update_progress_js(50.0, "test")  # raise X
+
+
+# ============================================================
+# _is_frozen — sys.frozen 분기
+# ============================================================
+
+import sys  # noqa: E402
+
+
+def test_is_frozen_dev_env_returns_false() -> None:
+    """pytest 환경 (sys.frozen 미설정) → False."""
+    assert launcher._is_frozen() is False
+
+
+def test_is_frozen_true_when_sys_frozen_set() -> None:
+    """sys.frozen=True 박힘 → True 반환."""
+    with patch.object(sys, "frozen", True, create=True):
+        assert launcher._is_frozen() is True
+
+
+def test_is_frozen_false_when_sys_frozen_false() -> None:
+    """sys.frozen=False 명시 → False."""
+    with patch.object(sys, "frozen", False, create=True):
+        assert launcher._is_frozen() is False
+
+
+# ============================================================
+# _body_artifact_name — 플랫폼별 asset 이름
+# ============================================================
+
+
+def test_body_artifact_name_windows() -> None:
+    """Windows → Aurora-windows.exe 반환."""
+    with patch("aurora_launcher.launcher.platform.system", return_value="Windows"):
+        assert launcher._body_artifact_name() == "Aurora-windows.exe"
+
+
+def test_body_artifact_name_macos() -> None:
+    """macOS (Darwin) → Aurora-macOS.zip 반환."""
+    with patch("aurora_launcher.launcher.platform.system", return_value="Darwin"):
+        assert launcher._body_artifact_name() == "Aurora-macOS.zip"
+
+
+def test_body_artifact_name_linux_falls_back_to_windows_exe() -> None:
+    """Linux → Windows exe fallback (release.yml CI 빌드 X)."""
+    with patch("aurora_launcher.launcher.platform.system", return_value="Linux"):
+        assert launcher._body_artifact_name() == "Aurora-windows.exe"
+
+
+# ============================================================
+# _launcher_new_path — 다운로드 임시 경로 플랫폼별
+# ============================================================
+
+
+def test_launcher_new_path_windows_ends_with_exe_new(tmp_path) -> None:
+    """Windows → Aurora-launcher.exe.new."""
+    with (
+        patch("aurora_launcher.launcher.platform.system", return_value="Windows"),
+        patch("aurora_launcher.launcher._aurora_data_dir", return_value=tmp_path),
+    ):
+        result = launcher._launcher_new_path()
+    assert result == tmp_path / "Aurora-launcher.exe.new"
+
+
+def test_launcher_new_path_macos_ends_with_zip_new(tmp_path) -> None:
+    """macOS → Aurora-launcher-macOS.zip.new."""
+    with (
+        patch("aurora_launcher.launcher.platform.system", return_value="Darwin"),
+        patch("aurora_launcher.launcher._aurora_data_dir", return_value=tmp_path),
+    ):
+        result = launcher._launcher_new_path()
+    assert result == tmp_path / "Aurora-launcher-macOS.zip.new"

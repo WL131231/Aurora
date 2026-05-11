@@ -13,6 +13,7 @@ from aurora.core.risk import (
     TrailingMode,
     build_risk_plan,
     calc_position_size,
+    min_sl_pct_by_leverage,
     sl_pct_for_leverage,
     tp_pct_range_for_leverage,
     update_trailing_sl,
@@ -632,3 +633,23 @@ def test_trailing_sl_unidirectional_short() -> None:
     new_sl = update_trailing_sl(90.0, plan, cfg, tp_hits=0,
                                  highest_since_entry=100.0, lowest_since_entry=85.0)
     assert new_sl == 90.0
+
+
+# ============================================================
+# min_sl_pct_by_leverage — deprecated alias 회귀 검증
+# ============================================================
+
+
+def test_min_sl_pct_by_leverage_matches_sl_pct_low() -> None:
+    """10x 기준 sl_pct_for_leverage 와 동일한 값 반환."""
+    assert min_sl_pct_by_leverage(10) == pytest.approx(sl_pct_for_leverage(10))
+
+
+def test_min_sl_pct_by_leverage_matches_sl_pct_high() -> None:
+    """50x 기준 sl_pct_for_leverage 와 동일한 값 반환."""
+    assert min_sl_pct_by_leverage(50) == pytest.approx(sl_pct_for_leverage(50))
+
+
+def test_min_sl_pct_by_leverage_returns_float() -> None:
+    """반환 타입이 float."""
+    assert isinstance(min_sl_pct_by_leverage(20), float)

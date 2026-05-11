@@ -115,7 +115,9 @@ def _fire_trade_alert(event: str, data: dict) -> None:
 _LOOP_INTERVAL_SEC = 1.0
 
 # warmup default 봉 수 — 전략 평가에 충분한 history (EMA 480 / RSI Div 등)
-_WARMUP_DEFAULTS = {"15m": 200, "1H": 500, "2H": 250, "4H": 500, "1D": 200}
+# v0.2.28 (사용자 보고 2026-05-11): 15m 측 200 → 500 박음. 사용자 측 차트 측 15m
+# 200봉 측 max 박혀 부족 박은 보고. backend max 500봉 정합 박음.
+_WARMUP_DEFAULTS = {"15m": 500, "1H": 500, "2H": 250, "4H": 500, "1D": 200}
 
 # default 매매 페어 / TF 셋 — configure 안 하면 settings 기반 사용
 _DEFAULT_SYMBOL = "BTC/USDT:USDT"

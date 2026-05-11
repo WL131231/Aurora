@@ -1297,14 +1297,9 @@ async function refreshDashboardRatios() {
         meta.textContent = `5분 snapshot · ${Math.max(0, Math.floor(ageMs / 1000))}초 전`;
     }
 
-    list.innerHTML = data.segments.map(seg => {
-        // v0.2.26 (사용자 요청 2026-05-11): source 거래소 명시 표기.
-        // backend ratios_aggregator 측 measure source_exchanges 배열 박혀있어 — UI 측 표기.
-        const sourceList = (seg.source_exchanges || []);
-        const sourcesText = sourceList.length > 0
-            ? sourceList.join(" · ").toUpperCase()
-            : "데이터 X";
-
+    // v0.2.28 (사용자 요청 2026-05-11): source 측 row 측 측 빼고 — 하단 별도 list 박음.
+    // ex) "WHALE NOTIONAL: BINANCE, BYBIT..." 측 — 측 — 측 — 측 — 측 — 측 — 측 — 측 별도 박음.
+    const rowsHtml = data.segments.map(seg => {
         if (seg.long_pct == null || seg.short_pct == null) {
             return `
                 <div class="dflow-ratio-row">
@@ -1312,14 +1307,13 @@ async function refreshDashboardRatios() {
                     <div class="dflow-ratio-bar">
                         <span class="dflow-ratio-pct empty">— 데이터 없음 —</span>
                     </div>
-                    <span class="dflow-ratio-sources mono">—</span>
                 </div>`;
         }
         const longPct = seg.long_pct * 100;
         const shortPct = seg.short_pct * 100;
         const sample = seg.sample_size != null ? ` · ${seg.sample_size}건` : "";
         return `
-            <div class="dflow-ratio-row" title="${sourcesText}${sample}">
+            <div class="dflow-ratio-row" title="${seg.label}${sample}">
                 <span class="dflow-ratio-label">${seg.label}</span>
                 <div class="dflow-ratio-bar">
                     <div class="dflow-ratio-bar-long" style="width:${longPct.toFixed(1)}%"></div>
@@ -1329,9 +1323,34 @@ async function refreshDashboardRatios() {
                         <span>${shortPct.toFixed(1)}%</span>
                     </span>
                 </div>
-                <span class="dflow-ratio-sources mono" title="${sourcesText}">${sourcesText}</span>
             </div>`;
     }).join("");
+
+    // 거래소 표기 — KR translate map (사용자 친화)
+    const exchangeKR = {
+        binance: "바이낸스",
+        bybit: "바이빗",
+        okx: "오케이엑스",
+        bitget: "비트겟",
+        hyperliquid: "하이퍼리퀴드",
+    };
+    const sourcesHtml = data.segments.map(seg => {
+        const sources = (seg.source_exchanges || []);
+        const sourcesKR = sources.length > 0
+            ? sources.map(s => exchangeKR[s] || s.toUpperCase()).join(", ")
+            : "데이터 X";
+        return `
+            <div class="dflow-source-row">
+                <span class="dflow-source-label">${seg.label}</span>
+                <span class="dflow-source-list">${sourcesKR}</span>
+            </div>`;
+    }).join("");
+
+    list.innerHTML = rowsHtml + `
+        <div class="dflow-sources-section">
+            <div class="dflow-sources-title">📊 데이터 소스</div>
+            ${sourcesHtml}
+        </div>`;
 }
 
 // ─── 14D 시계열 차트 ──────────────────────────────
@@ -1474,14 +1493,12 @@ function _seriesPointsToHistogram(points, posColor, negColor) {
 async function refreshDashboardSeries() {
     _initDflowCharts();
     const meta = document.getElementById("dflow-series-meta");
-    const tbars = document.getElementById("dflow-timeline-bars");
 
     let data;
     try {
         data = await Api.getDashboardSeries(Dflow.coin, 14);
     } catch (_) {
         if (meta) meta.textContent = "로드 실패 (네트워크)";
-        if (tbars) tbars.innerHTML = `<div class="dflow-empty">로드 실패</div>`;
         return;
     }
 
@@ -1494,8 +1511,10 @@ async function refreshDashboardSeries() {
     // 차트 박힘 — lightweight-charts 미로드 시 silent skip
     if (DflowSeries.priceChart) {
         DflowSeries.priceSeries.setData(_seriesPointsToData(data.price_close));
-        DflowSeries.oiSeries.setData(_seriesPointsToData(data.oi_usd, v => v / 1e9)); // B 단위
+        DflowSeries.oiSeries.setData(_seriesPointsToData(data.oi_usd, v => v / 1e9));
         DflowSeries.cvdSeries.setData(_seriesPointsToData(data.perp_cvd, v => v / 1e9));
+        // v0.2.28 (사용자 요청): chart 측 최대 일자 측 박힘 — fitContent 박음
+        DflowSeries.priceChart.timeScale().fitContent();
     }
     if (DflowSeries.flowChart) {
         DflowSeries.fundingSeries.setData(_seriesPointsToHistogram(
@@ -1504,43 +1523,9 @@ async function refreshDashboardSeries() {
         DflowSeries.takerSeries.setData(_seriesPointsToHistogram(
             data.taker_delta_usd, "rgba(52, 211, 153, 0.75)", "rgba(251, 113, 133, 0.75)",
         ));
+        DflowSeries.flowChart.timeScale().fitContent();
     }
-
-    // v0.2.26 (사용자 요청): L/S Timeline 측 — % 표기 + date label + sentiment 색 강조
-    // 옛 단순 green/red 박힘 → 가운데 회색 line + long% 표기 + 일자 표기.
-    if (tbars) {
-        const points = data.ls_global_timeline || [];
-        if (!points.length) {
-            tbars.innerHTML = `<div class="dflow-empty">데이터 없음</div>`;
-        } else {
-            tbars.innerHTML = points.map(p => {
-                if (p.value == null || !isFinite(p.value) || p.value <= 0) {
-                    return `
-                    <div class="dflow-timeline-col empty" title="데이터 X">
-                        <div class="dflow-timeline-bar empty"></div>
-                        <span class="dflow-timeline-label">—</span>
-                    </div>`;
-                }
-                const longPct = (p.value / (1 + p.value)) * 100;
-                const shortPct = 100 - longPct;
-                const d = new Date(p.ts_ms);
-                const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
-                const dateLong = d.toISOString().slice(0, 10);
-                // 강도 표기: |long - 50| 측 — 50 = 중립, 60+ = 강한 long, 40- = 강한 short
-                const strength = Math.abs(longPct - 50);
-                const strongCls = strength >= 10 ? "strong" : (strength >= 5 ? "mid" : "weak");
-                return `
-                <div class="dflow-timeline-col ${strongCls}" title="${dateLong} · L:${longPct.toFixed(1)}% / S:${shortPct.toFixed(1)}% (ratio ${p.value.toFixed(2)})">
-                    <div class="dflow-timeline-bar">
-                        <div class="dflow-timeline-bar-long" style="height:${longPct.toFixed(1)}%"></div>
-                        <div class="dflow-timeline-bar-short" style="height:${shortPct.toFixed(1)}%"></div>
-                        <span class="dflow-timeline-pct">${longPct.toFixed(0)}%</span>
-                    </div>
-                    <span class="dflow-timeline-label">${dateStr}</span>
-                </div>`;
-            }).join("");
-        }
-    }
+    // v0.2.28: L/S Timeline 측 삭제 박힘 (사용자 요청)
 }
 
 // 차트 토글 — TF / 오버레이 (DOM ready 후 박힘)

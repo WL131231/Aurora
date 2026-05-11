@@ -2527,18 +2527,44 @@ input[type="range"].slider-input:disabled {
     opacity: 0.7;
 }
 
-/* v0.2.26: ratio row 측 source 거래소 표기 (사용자 요청) */
+/* v0.2.28 (사용자 요청 2026-05-11): source 측 row 측 측 빼고 — 하단 별도 list 박음.
+   v0.2.26 측 3-col layout 측 측 — 측 2-col 측 정정. */
 .dflow-ratio-row {
-    grid-template-columns: 110px 1fr 90px;  /* 측 source 칼럼 박음 */
+    grid-template-columns: 110px 1fr;
 }
-.dflow-ratio-sources {
-    font-size: 0.5rem;
+
+/* v0.2.28: 하단 source list — "WHALE NOTIONAL: 바이낸스, 바이빗, ..." 측 */
+.dflow-sources-section {
+    margin-top: 0.75rem;
+    padding-top: 0.6rem;
+    border-top: 1px dashed rgba(96, 81, 155, 0.18);
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+.dflow-sources-title {
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: var(--text-2);
+    letter-spacing: 0.04em;
+    margin-bottom: 0.2rem;
+}
+.dflow-source-row {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-size: 0.58rem;
+}
+.dflow-source-label {
     color: var(--text-3);
-    text-align: right;
-    letter-spacing: 0.02em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.55rem;
+}
+.dflow-source-list {
+    color: var(--text-2);
+    line-height: 1.4;
 }
 
 /* v0.2.26: 라인 의미 설명 details */

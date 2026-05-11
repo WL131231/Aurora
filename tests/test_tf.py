@@ -178,3 +178,27 @@ def test_is_valid_timeframe_format_modes():
     assert is_valid_timeframe(" 1H ") is False
     assert is_valid_timeframe(None) is False  # type: ignore[arg-type]
     assert is_valid_timeframe(60) is False    # type: ignore[arg-type]
+
+
+# ============================================================
+# _validate_input — 직접 단위 테스트 (3)
+# ============================================================
+
+from aurora.backtest.tf import _validate_input  # noqa: E402
+
+
+def test_validate_input_valid_string_no_exception() -> None:
+    """비어있지 않은 str → 예외 없음 (None 반환)."""
+    assert _validate_input("1H") is None
+
+
+def test_validate_input_non_string_raises_type_error() -> None:
+    """str 아닌 타입 → TypeError."""
+    with pytest.raises(TypeError, match="str 이어야"):
+        _validate_input(60)  # type: ignore[arg-type]
+
+
+def test_validate_input_empty_string_raises_value_error() -> None:
+    """빈 문자열 → ValueError."""
+    with pytest.raises(ValueError, match="빈 timeframe"):
+        _validate_input("")

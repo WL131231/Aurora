@@ -1617,3 +1617,42 @@ def test_classify_regime_default_module_constants() -> None:
     df_range = _make_4h_df(list(100.0 + rng.uniform(-0.05, 0.05, 250)), spread=0.1)
     assert classify_regime(df_range) == classify_regime(df_range, regime_config=cfg_default)
     assert classify_regime(df_range) == Regime.RANGE
+
+
+# ============================================================
+# _last_bar_timestamp — DataFrame 마지막 봉 timestamp (5)
+# ============================================================
+
+from aurora.core.strategy import _last_bar_timestamp  # noqa: E402
+
+
+def test_last_bar_timestamp_datetime_index_returns_last() -> None:
+    """DatetimeIndex DataFrame → 마지막 index 반환."""
+    idx = pd.date_range("2024-01-01", periods=5, freq="1h")
+    df = pd.DataFrame({"close": range(5)}, index=idx)
+    result = _last_bar_timestamp(df)
+    assert result == idx[-1]
+
+
+def test_last_bar_timestamp_range_index_returns_none() -> None:
+    """RangeIndex DataFrame → None."""
+    df = pd.DataFrame({"close": [1.0, 2.0, 3.0]})
+    assert _last_bar_timestamp(df) is None
+
+
+def test_last_bar_timestamp_empty_df_returns_none() -> None:
+    """빈 DataFrame → None."""
+    df = pd.DataFrame({"close": []})
+    assert _last_bar_timestamp(df) is None
+
+
+def test_last_bar_timestamp_none_input_returns_none() -> None:
+    """None 입력 → None."""
+    assert _last_bar_timestamp(None) is None  # type: ignore[arg-type]
+
+
+def test_last_bar_timestamp_single_row_returns_that_timestamp() -> None:
+    """단일 행 DatetimeIndex → 그 timestamp 반환."""
+    ts = pd.Timestamp("2024-06-15 09:00:00")
+    df = pd.DataFrame({"close": [100.0]}, index=pd.DatetimeIndex([ts]))
+    assert _last_bar_timestamp(df) == ts

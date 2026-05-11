@@ -2002,6 +2002,19 @@ input[type="range"].slider-input:disabled {
     gap: 0.375rem;
 }
 
+/* v0.2.27: 재시작 안내 (사용자 보고 — "재시작하기" 버튼 측 제거) */
+.release-alert-hint {
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.65rem;
+    background: rgba(96, 81, 155, 0.12);
+    border-left: 2px solid rgba(168, 85, 247, 0.55);
+    border-radius: 3px;
+    font-size: 0.65rem;
+    line-height: 1.45;
+    color: var(--text-2);
+    letter-spacing: 0.01em;
+}
+
 .release-alert-btn {
     flex: 1;
     background: rgba(96, 81, 155, 0.18);

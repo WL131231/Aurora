@@ -25,7 +25,10 @@ from aurora.timeouts import make_exchange_timeout
 logger = logging.getLogger(__name__)
 
 _HL_BASE = "https://api.hyperliquid.xyz"
-_HTTP_TIMEOUT = make_exchange_timeout()  # v0.1.98: central config
+_HTTP_TIMEOUT = make_exchange_timeout()
+# v0.3.1: Whale 측 Binance 측 동일 정합
+_WHALE_THRESHOLD_USD = 100_000.0
+_WHALE_WINDOW_MS = 5 * 60 * 1000
 
 
 class HyperliquidMarketData(ExchangeMarketData):
@@ -94,6 +97,41 @@ class HyperliquidMarketData(ExchangeMarketData):
             snap.funding_rate = funding
         except (TypeError, ValueError) as e:
             snap.errors.append(f"ctx calc: {e}")
+
+        # v0.3.1: Whale notional — recentTrades 측 5분 윈도우 측 ≥ $100K 합산
+        snap.whale_threshold_usd = _WHALE_THRESHOLD_USD
+        try:
+            trades_data = await self._post_info(session, {"type": "recentTrades", "coin": coin})
+        except Exception as e:  # noqa: BLE001
+            snap.errors.append(f"recentTrades: {e}")
+            trades_data = None
+        if isinstance(trades_data, list):
+            try:
+                now_ms = int(time.time() * 1000)
+                window_start = now_ms - _WHALE_WINDOW_MS
+                buy_sum = 0.0
+                sell_sum = 0.0
+                count = 0
+                for t in trades_data:
+                    ts = int(t.get("time", 0) or 0)
+                    if ts < window_start:
+                        continue
+                    price = float(t.get("px", 0) or 0)
+                    sz = float(t.get("sz", 0) or 0)
+                    notional = price * sz
+                    if notional < _WHALE_THRESHOLD_USD:
+                        continue
+                    count += 1
+                    # HL side: "B" = taker buy, "A" = taker sell (Ask filled)
+                    if t.get("side") == "B":
+                        buy_sum += notional
+                    else:
+                        sell_sum += notional
+                snap.whale_buy_5m_usd = buy_sum
+                snap.whale_sell_5m_usd = sell_sum
+                snap.whale_count_5m = count
+            except (TypeError, ValueError) as e:
+                snap.errors.append(f"recentTrades calc: {e}")
 
         if snap.errors:
             logger.debug("Hyperliquid snapshot %s 부분 실패: %s", symbol, "; ".join(snap.errors))

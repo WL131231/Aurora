@@ -313,6 +313,11 @@ async def test_bybit_fetch_snapshot_happy_path() -> None:
                 "buyRatio": "0.55", "sellRatio": "0.45", "timestamp": "1",
             }]},
         },
+        # v0.3.1: Whale recent trades — happy path 측 빈 list (whale 0건)
+        "/v5/market/recent-trade": {
+            "retCode": 0,
+            "result": {"list": []},
+        },
     })
 
     snap = await bybit.fetch_snapshot(session, "BTC")
@@ -389,6 +394,11 @@ async def test_okx_fetch_snapshot_happy_path() -> None:
             "code": "0",
             "data": [["1700000000000", "1.05"]],
         },
+        # v0.3.1: Whale recent trades — happy path 측 빈
+        "/api/v5/market/trades": {
+            "code": "0",
+            "data": [],
+        },
     })
 
     snap = await okx.fetch_snapshot(session, "BTC")
@@ -420,6 +430,7 @@ async def test_okx_oi_skipped_when_price_missing() -> None:
         "/api/v5/public/funding-rate": {"code": "0", "data": [{"fundingRate": "0"}]},
         "/api/v5/rubik/stat/contracts/long-short-account-ratio": {"code": "0", "data": []},
         "/api/v5/rubik/stat/contracts/long-short-position-ratio": {"code": "0", "data": []},
+        "/api/v5/market/trades": {"code": "0", "data": []},
     })
 
     snap = await okx.fetch_snapshot(session, "BTC")
@@ -455,6 +466,11 @@ async def test_bitget_fetch_snapshot_happy_path() -> None:
                 "ts": "1", "longAccountRatio": "0.62", "shortAccountRatio": "0.38",
             }],
         },
+        # v0.3.1: Whale recent fills — happy path 측 빈
+        "/api/v2/mix/market/fills": {
+            "code": "00000",
+            "data": [],
+        },
     })
 
     snap = await bitget.fetch_snapshot(session, "BTC")
@@ -478,16 +494,25 @@ async def test_bitget_fetch_snapshot_happy_path() -> None:
 # ============================================================
 
 
-def _make_hl_session(meta_response: Any) -> MagicMock:
-    """Hyperliquid POST /info dispatch — body type 별."""
+def _make_hl_session(meta_response: Any, trades_response: Any = None) -> MagicMock:
+    """Hyperliquid POST /info dispatch — body type 별.
+
+    v0.3.1: recentTrades 측 별도 분기 박음 (whale fetch).
+    """
     session = MagicMock()
     def _post(url: str, json=None, timeout=None):
         ctx = AsyncMock()
         resp = MagicMock()
         resp.raise_for_status = MagicMock()
-        if isinstance(meta_response, Exception):
-            resp.raise_for_status = MagicMock(side_effect=meta_response)
-        resp.json = AsyncMock(return_value=meta_response)
+        # body type 분기 — recentTrades 측 별도 응답
+        body_type = (json or {}).get("type") if json else None
+        if body_type == "recentTrades":
+            payload = trades_response if trades_response is not None else []
+        else:
+            payload = meta_response
+            if isinstance(payload, Exception):
+                resp.raise_for_status = MagicMock(side_effect=payload)
+        resp.json = AsyncMock(return_value=payload)
         ctx.__aenter__.return_value = resp
         ctx.__aexit__.return_value = None
         return ctx

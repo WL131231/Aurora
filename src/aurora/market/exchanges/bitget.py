@@ -23,9 +23,12 @@ from aurora.timeouts import make_exchange_timeout
 logger = logging.getLogger(__name__)
 
 _BITGET_BASE = "https://api.bitget.com"
-_HTTP_TIMEOUT = make_exchange_timeout()  # v0.1.98: central config
+_HTTP_TIMEOUT = make_exchange_timeout()
 _LS_PERIOD = "5m"
 _PRODUCT_TYPE = "usdt-futures"
+# v0.3.1: Whale 측 Binance 측 동일 정합
+_WHALE_THRESHOLD_USD = 100_000.0
+_WHALE_WINDOW_MS = 5 * 60 * 1000
 
 
 class BitgetMarketData(ExchangeMarketData):
@@ -45,12 +48,14 @@ class BitgetMarketData(ExchangeMarketData):
             fetched_at_ms=int(time.time() * 1000),
         )
 
+        # v0.3.1: recent fills 측 추가 (Whale notional)
         results = await asyncio.gather(
             self._fetch_ticker(session, symbol),
             self._fetch_ls(session, symbol),
+            self._fetch_recent_trades(session, symbol),
             return_exceptions=True,
         )
-        ticker, ls = results
+        ticker, ls, recent_trades = results
 
         # Ticker — price / 24h / OI / funding 모두 박힘
         if isinstance(ticker, Exception):
@@ -84,9 +89,54 @@ class BitgetMarketData(ExchangeMarketData):
             except (TypeError, ValueError, ZeroDivisionError) as e:
                 snap.errors.append(f"ls calc: {e}")
 
+        # v0.3.1: Whale notional — recent fills 측 5분 윈도우 측 ≥ $100K 합산
+        snap.whale_threshold_usd = _WHALE_THRESHOLD_USD
+        now_ms = int(time.time() * 1000)
+        window_start = now_ms - _WHALE_WINDOW_MS
+        if isinstance(recent_trades, Exception):
+            snap.errors.append(f"recent_trades: {recent_trades}")
+        elif isinstance(recent_trades, list):
+            try:
+                buy_sum = 0.0
+                sell_sum = 0.0
+                count = 0
+                for t in recent_trades:
+                    ts = int(t.get("ts", 0) or 0)
+                    if ts < window_start:
+                        continue
+                    price = float(t.get("price", 0) or 0)
+                    size = float(t.get("size", 0) or 0)
+                    notional = price * size
+                    if notional < _WHALE_THRESHOLD_USD:
+                        continue
+                    count += 1
+                    # Bitget side: "buy"/"sell"
+                    if t.get("side") == "buy":
+                        buy_sum += notional
+                    else:
+                        sell_sum += notional
+                snap.whale_buy_5m_usd = buy_sum
+                snap.whale_sell_5m_usd = sell_sum
+                snap.whale_count_5m = count
+            except (TypeError, ValueError) as e:
+                snap.errors.append(f"recent_trades calc: {e}")
+
         if snap.errors:
             logger.debug("Bitget snapshot %s 부분 실패: %s", symbol, "; ".join(snap.errors))
         return snap
+
+    async def _fetch_recent_trades(self, session, symbol: str) -> list:
+        """v0.3.1: V2 fills-history — 100 recent fills.
+
+        Response: data = [{ tradeId, price, size, side("buy"/"sell"), ts(ms), ... }]
+        """
+        data = await self._get_json(
+            session, "/api/v2/mix/market/fills",
+            {"productType": _PRODUCT_TYPE, "symbol": symbol, "limit": "100"},
+        )
+        if data.get("code") != "00000":
+            raise RuntimeError(f"bitget code={data.get('code')} msg={data.get('msg')}")
+        return data.get("data") or []
 
     # ============================================================
     # endpoint sub-methods

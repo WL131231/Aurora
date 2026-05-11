@@ -158,6 +158,75 @@ def test_on_trade_alert_entry_calls_send():
     assert "신규 진입" in sent[0]
 
 
+# ============================================================
+# _kst_now_str
+# ============================================================
+
+
+def test_kst_now_str_format() -> None:
+    """_kst_now_str → 'YYYY-MM-DD HH:MM KST' 포맷."""
+    import re
+    from aurora.interfaces.telegram import _kst_now_str
+    result = _kst_now_str()
+    assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2} KST$", result), f"Unexpected: {result!r}"
+
+
+def test_kst_now_str_returns_str() -> None:
+    """_kst_now_str → str 타입."""
+    from aurora.interfaces.telegram import _kst_now_str
+    assert isinstance(_kst_now_str(), str)
+
+
+# ============================================================
+# get_bot singleton
+# ============================================================
+
+
+def test_get_bot_returns_telegram_bot_instance() -> None:
+    """get_bot() → TelegramBot 인스턴스."""
+    import aurora.interfaces.telegram as tg_module
+    tg_module._bot = None  # reset
+    bot = tg_module.get_bot()
+    assert isinstance(bot, TelegramBot)
+    tg_module._bot = None  # cleanup
+
+
+def test_get_bot_singleton_same_object() -> None:
+    """두 번 호출 → 같은 인스턴스 (싱글톤)."""
+    import aurora.interfaces.telegram as tg_module
+    tg_module._bot = None  # reset
+    a = tg_module.get_bot()
+    b = tg_module.get_bot()
+    assert a is b
+    tg_module._bot = None  # cleanup
+
+
+# ============================================================
+# launch_in_background — no-op when no token
+# ============================================================
+
+
+def test_launch_in_background_noop_when_no_token() -> None:
+    """TELEGRAM_BOT_TOKEN 미설정 → 스레드 안 띄움."""
+    import threading
+    from unittest.mock import patch
+    import aurora.interfaces.telegram as tg_module
+    tg_module._bot = None
+
+    bot = TelegramBot.__new__(TelegramBot)
+    bot.token = ""  # 빈 토큰 = 비활성
+    bot.chat_id = ""
+    bot._app = None
+    bot._loop = None
+
+    before = threading.active_count()
+    with patch.object(tg_module, "get_bot", return_value=bot):
+        tg_module.launch_in_background()
+    after = threading.active_count()
+    assert after == before  # 스레드 추가 없음
+    tg_module._bot = None
+
+
 def test_on_trade_alert_exit_calls_send():
     """exit 이벤트 → send_alert_threadsafe 호출."""
     bot = TelegramBot.__new__(TelegramBot)

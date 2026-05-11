@@ -1103,7 +1103,8 @@ async function refreshBotChart() {
 
     let data;
     try {
-        data = await Api.getChart(Chart.timeframe, 100);
+        // v0.2.26 (사용자 요청): 100봉 → 500봉 (backend max). 사용자 시점 차트 측 더 많은 history.
+        data = await Api.getChart(Chart.timeframe, 500);
     } catch (_) {
         if (status) status.textContent = "데이터 로드 실패";
         return;
@@ -1297,6 +1298,13 @@ async function refreshDashboardRatios() {
     }
 
     list.innerHTML = data.segments.map(seg => {
+        // v0.2.26 (사용자 요청 2026-05-11): source 거래소 명시 표기.
+        // backend ratios_aggregator 측 measure source_exchanges 배열 박혀있어 — UI 측 표기.
+        const sourceList = (seg.source_exchanges || []);
+        const sourcesText = sourceList.length > 0
+            ? sourceList.join(" · ").toUpperCase()
+            : "데이터 X";
+
         if (seg.long_pct == null || seg.short_pct == null) {
             return `
                 <div class="dflow-ratio-row">
@@ -1304,14 +1312,14 @@ async function refreshDashboardRatios() {
                     <div class="dflow-ratio-bar">
                         <span class="dflow-ratio-pct empty">— 데이터 없음 —</span>
                     </div>
+                    <span class="dflow-ratio-sources mono">—</span>
                 </div>`;
         }
         const longPct = seg.long_pct * 100;
         const shortPct = seg.short_pct * 100;
-        const sources = (seg.source_exchanges || []).length;
         const sample = seg.sample_size != null ? ` · ${seg.sample_size}건` : "";
         return `
-            <div class="dflow-ratio-row" title="${sources} 거래소 합본${sample}">
+            <div class="dflow-ratio-row" title="${sourcesText}${sample}">
                 <span class="dflow-ratio-label">${seg.label}</span>
                 <div class="dflow-ratio-bar">
                     <div class="dflow-ratio-bar-long" style="width:${longPct.toFixed(1)}%"></div>
@@ -1321,6 +1329,7 @@ async function refreshDashboardRatios() {
                         <span>${shortPct.toFixed(1)}%</span>
                     </span>
                 </div>
+                <span class="dflow-ratio-sources mono" title="${sourcesText}">${sourcesText}</span>
             </div>`;
     }).join("");
 }
@@ -1497,7 +1506,8 @@ async function refreshDashboardSeries() {
         ));
     }
 
-    // L/S Timeline — 14봉 long%/short% 띠
+    // v0.2.26 (사용자 요청): L/S Timeline 측 — % 표기 + date label + sentiment 색 강조
+    // 옛 단순 green/red 박힘 → 가운데 회색 line + long% 표기 + 일자 표기.
     if (tbars) {
         const points = data.ls_global_timeline || [];
         if (!points.length) {
@@ -1505,14 +1515,28 @@ async function refreshDashboardSeries() {
         } else {
             tbars.innerHTML = points.map(p => {
                 if (p.value == null || !isFinite(p.value) || p.value <= 0) {
-                    return `<div class="dflow-timeline-bar empty" title="—"></div>`;
+                    return `
+                    <div class="dflow-timeline-col empty" title="데이터 X">
+                        <div class="dflow-timeline-bar empty"></div>
+                        <span class="dflow-timeline-label">—</span>
+                    </div>`;
                 }
                 const longPct = (p.value / (1 + p.value)) * 100;
                 const shortPct = 100 - longPct;
-                const date = new Date(p.ts_ms).toISOString().slice(0, 10);
-                return `<div class="dflow-timeline-bar" title="${date} · L:${longPct.toFixed(1)}% / S:${shortPct.toFixed(1)}%">
-                    <div class="dflow-timeline-bar-long" style="height:${longPct.toFixed(1)}%"></div>
-                    <div class="dflow-timeline-bar-short" style="height:${shortPct.toFixed(1)}%"></div>
+                const d = new Date(p.ts_ms);
+                const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
+                const dateLong = d.toISOString().slice(0, 10);
+                // 강도 표기: |long - 50| 측 — 50 = 중립, 60+ = 강한 long, 40- = 강한 short
+                const strength = Math.abs(longPct - 50);
+                const strongCls = strength >= 10 ? "strong" : (strength >= 5 ? "mid" : "weak");
+                return `
+                <div class="dflow-timeline-col ${strongCls}" title="${dateLong} · L:${longPct.toFixed(1)}% / S:${shortPct.toFixed(1)}% (ratio ${p.value.toFixed(2)})">
+                    <div class="dflow-timeline-bar">
+                        <div class="dflow-timeline-bar-long" style="height:${longPct.toFixed(1)}%"></div>
+                        <div class="dflow-timeline-bar-short" style="height:${shortPct.toFixed(1)}%"></div>
+                        <span class="dflow-timeline-pct">${longPct.toFixed(0)}%</span>
+                    </div>
+                    <span class="dflow-timeline-label">${dateStr}</span>
                 </div>`;
             }).join("");
         }

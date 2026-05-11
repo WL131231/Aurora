@@ -82,8 +82,8 @@ const getMarketTrend = () => _request("/market-trend");
 
 // ─── 봇 시점 차트 (v0.1.86) ─────────────────────
 // timeframe: "15m" / "1H" / "4H" — bot._cache 에 등록된 TF 만 enabled=True
-// limit: 마지막 N 봉 (10..500)
-const getChart = (timeframe = "1H", limit = 100) =>
+// limit: 마지막 N 봉 (10..500). v0.2.26: default 500 박음 (사용자 요청).
+const getChart = (timeframe = "1H", limit = 500) =>
     _request(`/chart?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`);
 
 // ─── Dashboard Flow (Phase 3, v0.1.87+) ───────

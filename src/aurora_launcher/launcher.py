@@ -557,9 +557,14 @@ def _apply_pending_launcher_update_macos() -> bool:
 
     흐름:
         1. _launcher_new_path() = ``%LAD%/Aurora-launcher-macOS.zip.new``
-        2. ditto -x -k 측 zip 풀어 임시 디렉토리 박음
-        3. 옛 .app 측 .app.old 박음 + 새 .app 측 위치 박음
-        4. ``open -n`` 측 새 .app 분리 spawn + sys.exit(0)
+        2. (v0.2.22) metadata file 측 version 비교 — 자기 측 ≥ pending 측 단순 삭제
+        3. ditto -x -k 측 zip 풀어 임시 디렉토리 박음
+        4. 옛 .app 측 .app.old 박음 + 새 .app 측 위치 박음
+        5. ``open -n`` 측 새 .app 분리 spawn + sys.exit(0)
+
+    v0.2.22 (ChoYoon #133 18 cycle P1 ②): 사용자 측 manual 측 새 version 다운 박은
+    후 첫 실행 시점 측 PyObjC race 회피. self_version >= pending_version 측 단순
+    .zip.new + metadata 측 삭제 박음 (swap 의무 X).
 
     sys.executable 측 frozen .app 측 ``.../Aurora-launcher.app/Contents/MacOS/Aurora-launcher``.
     parents[2] 측 .app 번들.
@@ -567,6 +572,25 @@ def _apply_pending_launcher_update_macos() -> bool:
     src_zip = _launcher_new_path()
     if not src_zip.exists():
         return False
+
+    # v0.2.22: metadata file 측 version 비교
+    metadata = src_zip.with_suffix(".new.version")  # Aurora-launcher-macOS.zip.new.version
+    if metadata.exists():
+        try:
+            pending_v = metadata.read_text(encoding="utf-8").strip().lstrip("v")
+            if _parse_version(pending_v) <= _parse_version(__version__):
+                logger.info(
+                    "pending launcher v%s 측 자기 측 v%s 정합 ↑ → 단순 삭제 (PyObjC race 회피)",
+                    pending_v, __version__,
+                )
+                try:
+                    src_zip.unlink(missing_ok=True)
+                    metadata.unlink(missing_ok=True)
+                except OSError as e:
+                    logger.warning("pending launcher cleanup 실패: %s", e)
+                return False
+        except (OSError, ValueError, TypeError) as e:
+            logger.debug("pending version 비교 실패 (계속 swap): %s", e)
     try:
         app_bundle = Path(sys.executable).resolve().parents[2]
     except IndexError:
@@ -658,6 +682,15 @@ def _check_and_download_launcher_update() -> None:
     logger.info("launcher %s 발견 → 백그라운드 다운로드 (%s)", tag, target)
     if download_to(url, target):
         logger.info("launcher %s 다운 완료 → 다음 시작 시 자동 swap", tag)
+        # v0.2.22 (ChoYoon #133 18 cycle P1 ②): metadata file 측 version 박음.
+        # 다음 launcher 시작 시점 측 _apply_pending_launcher_update_macos 측 measured
+        # version 비교 박아 PyObjC race 회피 박음 (자기 ≥ pending 측 단순 삭제).
+        try:
+            metadata = target.with_suffix(".new.version")
+            metadata.write_text(tag, encoding="utf-8")
+            logger.debug("pending launcher metadata 박음: %s = %s", metadata, tag)
+        except OSError as e:
+            logger.warning("pending launcher metadata 박음 실패 (계속 진행): %s", e)
 
 
 def start_background_launcher_check() -> None:
@@ -1299,7 +1332,20 @@ class LauncherApi:
         흐름:
             - 본체 정상 종료 (X 클릭 / crash) → launcher show + START 활성
             - 본체 marker 종료 (재시작 요청) → 새 본체 자동 spawn (launcher 그대로 hide)
+
+        v0.2.22 (ChoYoon #133 18 cycle P1 ④): macOS 측 ``open .app`` wrapper Popen 측
+        즉시 종료 박음 → ``proc.poll()`` 측 의미 X 박음. 즉 spawn 직후 \"본체 종료
+        감지\" log 측 false positive 박힘 (legacy 오발화). macOS 측 polling skip.
+        macOS 측 본체 종료 감지 → launcher show 흐름 측 v0.2.18 launcher show-back
+        측 측 dock icon 측 사용자 측 직접 클릭 박는 흐름 박음.
         """
+        # v0.2.22: macOS 측 polling skip — open wrapper Popen 측 PID 측 추적 의미 X
+        if platform.system() == "Darwin":
+            logger.info(
+                "_start_aurora_polling: macOS skip — open wrapper Popen 측 즉시 종료, "
+                "본체 종료 감지 측 사용자 측 dock icon 클릭 흐름 박음",
+            )
+            return
         marker_path = _aurora_data_dir() / ".relaunch_request"
 
         def _poll() -> None:

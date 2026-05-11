@@ -580,3 +580,118 @@ async def test_fetch_closed_positions_bybit_network_error_returns_empty():
         )
         result = await client.fetch_closed_positions()
         assert result == []
+
+
+# ============================================================
+# _parse_position — ccxt position dict → Aurora Position
+# ============================================================
+
+
+
+def test_parse_position_long_isolated() -> None:
+    """long / isolated 포지션 정상 변환."""
+    raw = {
+        "symbol": "BTC/USDT:USDT",
+        "side": "long",
+        "contracts": 0.01,
+        "entryPrice": 60000.0,
+        "leverage": 10,
+        "unrealizedPnl": 50.0,
+        "marginMode": "isolated",
+    }
+    pos = CcxtClient._parse_position(raw)
+    assert pos.symbol == "BTC/USDT:USDT"
+    assert pos.side == "long"
+    assert pos.qty == pytest.approx(0.01)
+    assert pos.entry_price == pytest.approx(60000.0)
+    assert pos.leverage == 10
+    assert pos.unrealized_pnl == pytest.approx(50.0)
+    assert pos.margin_mode == "isolated"
+
+
+def test_parse_position_short_cross() -> None:
+    """short / cross 포지션 — marginMode 분기 확인."""
+    raw = {
+        "symbol": "ETH/USDT:USDT",
+        "side": "short",
+        "contracts": 0.1,
+        "entryPrice": 3000.0,
+        "leverage": 20,
+        "unrealizedPnl": -10.0,
+        "marginMode": "cross",
+    }
+    pos = CcxtClient._parse_position(raw)
+    assert pos.side == "short"
+    assert pos.margin_mode == "cross"
+    assert pos.unrealized_pnl == pytest.approx(-10.0)
+
+
+def test_parse_position_unknown_side_defaults_long() -> None:
+    """side 가 'short' 가 아닌 기타 → 'long' fallback."""
+    raw = {"side": "unknown", "symbol": "BTC/USDT:USDT", "marginMode": "isolated"}
+    pos = CcxtClient._parse_position(raw)
+    assert pos.side == "long"
+
+
+def test_parse_position_none_fields_safe() -> None:
+    """모든 선택 필드 None → 기본값으로 안전 처리."""
+    pos = CcxtClient._parse_position({})
+    assert pos.symbol == ""
+    assert pos.side == "long"
+    assert pos.qty == pytest.approx(0.0)
+    assert pos.entry_price == pytest.approx(0.0)
+    assert pos.leverage == 1
+    assert pos.unrealized_pnl == pytest.approx(0.0)
+    assert pos.margin_mode == "isolated"
+
+
+# ============================================================
+# _parse_order — ccxt order dict → Aurora Order
+# ============================================================
+
+
+def test_parse_order_full_fields() -> None:
+    """ccxt order dict 전체 필드 정상 변환."""
+    raw = {
+        "id": "order-123",
+        "symbol": "BTC/USDT:USDT",
+        "amount": 0.01,
+        "price": 60000.0,
+        "status": "filled",
+        "timestamp": 1_700_000_000_000,
+    }
+    order = CcxtClient._parse_order(raw, symbol="BTC/USDT:USDT", side="buy", qty=0.0, price=None)
+    assert order.order_id == "order-123"
+    assert order.symbol == "BTC/USDT:USDT"
+    assert order.side == "buy"
+    assert order.qty == pytest.approx(0.01)
+    assert order.price == pytest.approx(60000.0)
+    assert order.status == "filled"
+    assert order.timestamp_ms == 1_700_000_000_000
+
+
+def test_parse_order_missing_fields_use_fallbacks() -> None:
+    """ccxt raw 측 id/amount/symbol 없음 → 인자 fallback 사용."""
+    raw = {}
+    order = CcxtClient._parse_order(
+        raw, symbol="ETH/USDT:USDT", side="sell", qty=0.5, price=3000.0,
+    )
+    assert order.order_id == ""
+    assert order.symbol == "ETH/USDT:USDT"
+    assert order.qty == pytest.approx(0.5)
+    assert order.price == pytest.approx(3000.0)
+    assert order.timestamp_ms == 0
+
+
+def test_parse_order_price_none_raw_uses_fallback_price() -> None:
+    """raw['price'] 가 None → price 인자 사용."""
+    raw = {"id": "x", "amount": 0.1, "status": "open", "price": None}
+    order = CcxtClient._parse_order(raw, symbol="S", side="buy", qty=0.1, price=99.9)
+    assert order.price == pytest.approx(99.9)
+
+
+def test_parse_order_price_in_raw_overrides_fallback() -> None:
+    """raw['price'] 있으면 price 인자 무시."""
+    raw = {"id": "y", "price": 500.0, "amount": 0.2, "status": "closed"}
+    order = CcxtClient._parse_order(raw, symbol="S", side="sell", qty=0.2, price=999.0)
+    assert order.price == pytest.approx(500.0)

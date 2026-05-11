@@ -318,6 +318,10 @@ class ChartDTO(BaseModel):
     bb_lower: list[ChartLinePoint] = []
     st_fast: list[ChartLinePoint] = []    # SuperTrend (period 14, mult 2.0)
     st_slow: list[ChartLinePoint] = []    # SuperTrend (period 14, mult 3.0)
+    # v0.3.0 (사용자 요청 2026-05-11): RSI + Ichimoku 측 추가
+    rsi: list[ChartLinePoint] = []        # RSI (period 14, 0~100)
+    ichimoku_span_a: list[ChartLinePoint] = []   # Leading Span A
+    ichimoku_span_b: list[ChartLinePoint] = []   # Leading Span B
     markers: list[ChartMarker] = []
 
 
@@ -1084,7 +1088,13 @@ def create_app() -> FastAPI:
         """
         import math
 
-        from aurora.core.indicators import bollinger_bands, ema, supertrend
+        from aurora.core.indicators import (
+            bollinger_bands,
+            ema,
+            ichimoku_cloud,
+            rsi,
+            supertrend,
+        )
 
         bot = bot_instance.get_instance()
         cache = bot._cache  # noqa: SLF001 — 내부 cache 직접 read (Phase 1 패턴)
@@ -1136,6 +1146,9 @@ def create_app() -> FastAPI:
             bb = bollinger_bands(df["close"], 20, 2.0).reindex(tail.index)
             st_f = supertrend(df, 14, 2.0).reindex(tail.index)
             st_s = supertrend(df, 14, 3.0).reindex(tail.index)
+            # v0.3.0 (사용자 요청 2026-05-11): RSI + Ichimoku 추가
+            rsi_series = rsi(df["close"], 14).reindex(tail.index)
+            ichi_df = ichimoku_cloud(df).reindex(tail.index)
         except Exception as e:  # noqa: BLE001 — UI 안전 (지표 실패해도 캔들은 노출)
             logger.warning("/chart 지표 계산 실패: %s", e)
             return ChartDTO(
@@ -1207,6 +1220,10 @@ def create_app() -> FastAPI:
             bb_lower=_series_to_points(bb["lower"]),
             st_fast=_series_to_points(st_f["line"]),
             st_slow=_series_to_points(st_s["line"]),
+            # v0.3.0 (사용자 요청): RSI + Ichimoku Span A/B
+            rsi=_series_to_points(rsi_series),
+            ichimoku_span_a=_series_to_points(ichi_df["span_a"]),
+            ichimoku_span_b=_series_to_points(ichi_df["span_b"]),
             markers=markers,
         )
 

@@ -297,7 +297,34 @@ class CoinalyzeClient:
         params = dict(params)
         params["api_key"] = self._api_key
         async with session.get(f"{BASE_URL}/{endpoint}", params=params) as resp:
-            return await resp.json()
+            try:
+                body = await resp.json(content_type=None)
+            except (ValueError, aiohttp.ContentTypeError) as e:
+                # v0.2.23: JSON 파싱 실패 측 raw text logger 박음
+                text = await resp.text()
+                logger.warning(
+                    "Coinalyze %s HTTP %d JSON 파싱 실패: %s (body=%s)",
+                    endpoint, resp.status, e, text[:200],
+                )
+                return None
+            # v0.2.23 (사용자 보고 2026-05-11 — ETH 측 모든 field None 본질):
+            # Coinalyze 측 error response 측 dict ({"error": "..."}) 박는데
+            # _get_ohlcv 측 `isinstance(data, list)` 측 fail → silent None 반환.
+            # 본 진단 logger 측 root cause 측 정확 잡음.
+            safe_params = {k: v for k, v in params.items() if k != "api_key"}
+            if resp.status != 200:
+                logger.warning(
+                    "Coinalyze %s HTTP %d: %s (params=%s)",
+                    endpoint, resp.status, str(body)[:200], safe_params,
+                )
+            elif isinstance(body, dict):
+                # 정상 응답 측 list 박힘. dict 박힘 = API error.
+                err = body.get("error") or body.get("message") or str(body)[:200]
+                logger.warning(
+                    "Coinalyze %s API error response: %s (params=%s)",
+                    endpoint, err, safe_params,
+                )
+            return body
 
     async def _get_ohlcv(
         self, session: aiohttp.ClientSession, symbol: str,

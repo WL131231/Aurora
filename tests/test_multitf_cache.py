@@ -294,3 +294,58 @@ async def test_step_uses_time_now_when_none():
     # 현재 시각 = 2026 (df 의 1_700_000_000_000 = 2023-11). 봉 경계 한참 지남 → fetch.
     await cache.step()  # now_ts=None
     assert client.fetch_ohlcv.call_count == initial_calls + 1
+
+
+# ============================================================
+# _has_new_bar — 직접 단위 테스트
+# ============================================================
+
+_1H_MS = 60 * 60_000  # 1H TF 의 tf_ms
+
+
+def _cache_with_df(tf: str, df: pd.DataFrame) -> MultiTfCache:
+    """_cache 를 직접 주입한 MultiTfCache (warmup 생략)."""
+    cache = MultiTfCache(MagicMock(), "BTC/USDT:USDT", [tf])
+    cache._cache[tf] = df
+    return cache
+
+
+def test_has_new_bar_none_in_cache_returns_true():
+    """_cache.get(tf) == None (키 없음) → True."""
+    cache = MultiTfCache(MagicMock(), "BTC/USDT:USDT", ["1H"])
+    # _cache 에 "1H" 키 없음 (warmup 미호출)
+    assert cache._has_new_bar("1H", now_ts=1_700_000_000_000) is True
+
+
+def test_has_new_bar_empty_dataframe_returns_true():
+    """_cache 에 빈 DataFrame → True."""
+    cache = MultiTfCache(MagicMock(), "BTC/USDT:USDT", ["1H"])
+    cache._cache["1H"] = pd.DataFrame()
+    assert cache._has_new_bar("1H", now_ts=1_700_000_000_000) is True
+
+
+def test_has_new_bar_exactly_at_boundary_returns_false():
+    """now_ts == last_bar_ts + tf_ms → 봉 아직 열리지 않음 → False."""
+    df = _make_df(start_ts_ms=1_700_000_000_000, count=3, tf_minutes=60)
+    cache = _cache_with_df("1H", df)
+    last_bar_ts_ms = int(df.index[-1].timestamp() * 1000)
+    now_ts = last_bar_ts_ms + _1H_MS  # 정확히 경계 = 다음 봉 open_time 이지 않음 (strictly >)
+    assert cache._has_new_bar("1H", now_ts=now_ts) is False
+
+
+def test_has_new_bar_one_ms_past_boundary_returns_true():
+    """now_ts == last_bar_ts + tf_ms + 1 → 새 봉 시작 → True."""
+    df = _make_df(start_ts_ms=1_700_000_000_000, count=3, tf_minutes=60)
+    cache = _cache_with_df("1H", df)
+    last_bar_ts_ms = int(df.index[-1].timestamp() * 1000)
+    now_ts = last_bar_ts_ms + _1H_MS + 1
+    assert cache._has_new_bar("1H", now_ts=now_ts) is True
+
+
+def test_has_new_bar_well_before_boundary_returns_false():
+    """now_ts 가 현재 봉 중간 시점 → False."""
+    df = _make_df(start_ts_ms=1_700_000_000_000, count=3, tf_minutes=60)
+    cache = _cache_with_df("1H", df)
+    last_bar_ts_ms = int(df.index[-1].timestamp() * 1000)
+    now_ts = last_bar_ts_ms + _1H_MS // 2  # 봉 절반 시점
+    assert cache._has_new_bar("1H", now_ts=now_ts) is False

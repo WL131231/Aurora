@@ -209,6 +209,10 @@ jobs:
           token: ${{ secrets.RELEASES_REPO_TOKEN }}
 
       - name: Upload artifact (workflow 결과)
+        # v0.2.23 (사용자 보고 2026-05-11): artifact storage quota hit 시 본 step
+        # 측 fail 박혀 후속 release attach step 측 skip 박힘 → 사용자 측 자동
+        # update 차단. continue-on-error 박아 release attach 측 별개 동작.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
@@ -334,6 +338,8 @@ jobs:
         run: cp android/app/build/outputs/apk/debug/app-debug.apk Aurora-android.apk
 
       - name: Upload APK artifact (workflow 결과)
+        # v0.2.23: artifact quota hit 측 release attach step 측 영향 X 박음
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: aurora-android

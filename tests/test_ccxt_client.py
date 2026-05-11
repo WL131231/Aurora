@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pandas as pd
 import pytest
 
-from aurora.exchange.base import Balance, Order
+from aurora.exchange.base import Balance, ClosedPosition, Order, Position
 from aurora.exchange.ccxt_client import CcxtClient
 
 # ============================================================
@@ -580,3 +580,158 @@ async def test_fetch_closed_positions_bybit_network_error_returns_empty():
         )
         result = await client.fetch_closed_positions()
         assert result == []
+
+
+# ============================================================
+# 정적 파서 직접 단위 테스트 — 경계 케이스
+# ============================================================
+
+
+def test_page_to_df_empty_returns_empty_with_columns() -> None:
+    """빈 page → 빈 DataFrame (5 컬럼 보장)."""
+    df = CcxtClient._page_to_df([])
+    assert df.empty
+    assert list(df.columns) == ["open", "high", "low", "close", "volume"]
+
+
+def test_page_to_df_single_row_datetimeindex_utc() -> None:
+    """단일 row → DatetimeIndex UTC + 정확한 값."""
+    row = [1_700_000_000_000, 100.0, 110.0, 95.0, 105.0, 1000.0]
+    df = CcxtClient._page_to_df([row])
+    assert isinstance(df.index, pd.DatetimeIndex)
+    assert str(df.index.tz) == "UTC"
+    assert df.iloc[0]["close"] == pytest.approx(105.0)
+    assert "timestamp_ms" not in df.columns
+
+
+def test_page_to_df_multiple_rows_ordered() -> None:
+    """다행 — 순서 보존 + volume 값 정합."""
+    rows = [
+        [1_700_000_000_000, 100.0, 110.0, 90.0, 105.0, 200.0],
+        [1_700_003_600_000, 105.0, 115.0, 100.0, 112.0, 300.0],
+    ]
+    df = CcxtClient._page_to_df(rows)
+    assert len(df) == 2
+    assert df.iloc[1]["volume"] == pytest.approx(300.0)
+
+
+def test_parse_position_normal_long_isolated() -> None:
+    """기본 long isolated 포지션 매핑."""
+    raw: dict = {
+        "symbol": "BTC/USDT:USDT", "side": "long",
+        "contracts": 0.5, "entryPrice": 50000.0,
+        "leverage": 10, "unrealizedPnl": 120.0,
+        "marginMode": "isolated",
+    }
+    pos = CcxtClient._parse_position(raw)
+    assert isinstance(pos, Position)
+    assert pos.symbol == "BTC/USDT:USDT"
+    assert pos.side == "long"
+    assert pos.qty == pytest.approx(0.5)
+    assert pos.entry_price == pytest.approx(50000.0)
+    assert pos.leverage == 10
+    assert pos.margin_mode == "isolated"
+
+
+def test_parse_position_short_cross_margin() -> None:
+    """short + cross margin — 정확한 변환."""
+    raw: dict = {
+        "symbol": "ETH/USDT:USDT", "side": "short",
+        "contracts": 1.0, "entryPrice": 3000.0,
+        "leverage": 20, "unrealizedPnl": -50.0,
+        "marginMode": "cross",
+    }
+    pos = CcxtClient._parse_position(raw)
+    assert pos.side == "short"
+    assert pos.margin_mode == "cross"
+
+
+def test_parse_position_all_none_fallbacks() -> None:
+    """모든 값 None — 기본값 안전 fallback."""
+    pos = CcxtClient._parse_position({})
+    assert pos.symbol == ""
+    assert pos.side == "long"
+    assert pos.qty == pytest.approx(0.0)
+    assert pos.leverage == 1
+    assert pos.margin_mode == "isolated"
+
+
+def test_parse_closed_pnl_bybit_symbol_conversion() -> None:
+    """'BTCUSDT' → 'BTC/USDT:USDT' 변환."""
+    raw: dict = {
+        "symbol": "BTCUSDT", "side": "Sell",
+        "leverage": "10", "closedSize": "0.01",
+        "avgEntryPrice": "60000", "avgExitPrice": "61000",
+        "closedPnl": "10", "createdTime": "0", "updatedTime": "0",
+    }
+    cp = CcxtClient._parse_closed_pnl_bybit(raw)
+    assert isinstance(cp, ClosedPosition)
+    assert cp.symbol == "BTC/USDT:USDT"
+
+
+def test_parse_closed_pnl_bybit_side_mapping() -> None:
+    """Sell → direction=long / Buy → direction=short."""
+    base: dict = {
+        "symbol": "BTCUSDT", "leverage": "10", "closedSize": "0.01",
+        "avgEntryPrice": "60000", "avgExitPrice": "61000",
+        "closedPnl": "10", "createdTime": "0", "updatedTime": "0",
+    }
+    assert CcxtClient._parse_closed_pnl_bybit({**base, "side": "Sell"}).direction == "long"
+    assert CcxtClient._parse_closed_pnl_bybit({**base, "side": "Buy"}).direction == "short"
+
+
+def test_parse_closed_pnl_bybit_roi_calculation() -> None:
+    """ROI% = pnl / margin × 100 (margin = entry × qty / leverage)."""
+    raw: dict = {
+        "symbol": "BTCUSDT", "side": "Sell", "leverage": "10",
+        "closedSize": "0.01", "avgEntryPrice": "60000", "avgExitPrice": "61000",
+        "closedPnl": "10", "createdTime": "0", "updatedTime": "0",
+    }
+    cp = CcxtClient._parse_closed_pnl_bybit(raw)
+    # margin = (60000 × 0.01) / 10 = 60. ROI = 10 / 60 × 100 ≈ 16.67%
+    assert cp.roi_pct == pytest.approx(10.0 / 60.0 * 100.0, rel=1e-6)
+
+
+def test_parse_closed_pnl_bybit_zero_margin_guard() -> None:
+    """entry_price=0 → margin=0 → roi_pct=0.0 (ZeroDivision 방어)."""
+    raw: dict = {
+        "symbol": "BTCUSDT", "side": "Sell", "leverage": "10",
+        "closedSize": "0", "avgEntryPrice": "0", "avgExitPrice": "0",
+        "closedPnl": "0", "createdTime": "0", "updatedTime": "0",
+    }
+    cp = CcxtClient._parse_closed_pnl_bybit(raw)
+    assert cp.roi_pct == pytest.approx(0.0)
+
+
+def test_parse_order_maps_fields() -> None:
+    """ccxt order dict → Order dataclass 기본 매핑."""
+    raw: dict = {
+        "id": "ord-123", "symbol": "BTC/USDT:USDT",
+        "amount": 0.1, "price": 50000.0,
+        "status": "filled", "timestamp": 1_700_000_000_000,
+    }
+    order = CcxtClient._parse_order(raw, "BTC/USDT:USDT", "buy", 0.1, None)
+    assert isinstance(order, Order)
+    assert order.order_id == "ord-123"
+    assert order.status == "filled"
+    assert order.price == pytest.approx(50000.0)
+    assert order.timestamp_ms == 1_700_000_000_000
+
+
+def test_parse_order_none_price_falls_back_to_param() -> None:
+    """raw['price']=None → 파라미터 price 사용."""
+    raw: dict = {"id": "x", "symbol": "S", "amount": 1.0, "price": None,
+                 "status": "open", "timestamp": 0}
+    order = CcxtClient._parse_order(raw, "S", "sell", 1.0, price=99.0)
+    assert order.price == pytest.approx(99.0)
+
+
+def test_fake_order_paper_structure() -> None:
+    """paper 모드 가짜 Order — status=filled + order_id 'paper-' 접두사."""
+    order = CcxtClient._fake_order("BTC/USDT:USDT", "buy", 0.01, 50000.0)
+    assert isinstance(order, Order)
+    assert order.status == "filled"
+    assert order.order_id.startswith("paper-")
+    assert order.symbol == "BTC/USDT:USDT"
+    assert order.qty == pytest.approx(0.01)
+    assert order.price == pytest.approx(50000.0)

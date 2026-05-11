@@ -887,6 +887,42 @@ function _trendBadgeText(score, direction) {
 
 function _renderMarketCard(card, t) {
     if (!card) return;
+
+    // v0.2.25 (사용자 보고 2026-05-11 — ETH 측 모든 field None 본질):
+    // backend Coinalyze rate limit (429) 측 측 — fetch_trend 측 success 박아도
+    // 모든 field None 박는 케이스. 측 — 측 — 측 placeholder 박아 사용자 측 본질
+    // 인지 + 다음 fetch (5분 cache 측 측 회복) 측 자동 박힐 거 박는 안내.
+    const allNone = (
+        t.price == null && t.price_24h == null && t.oi == null &&
+        t.cvd_spot == null && t.cvd_futures == null && t.funding_rate == null
+    );
+    if (allNone) {
+        card.querySelector(".md-coin-price").textContent = "—";
+        const badge = card.querySelector(".md-trend-badge");
+        badge.className = "md-trend-badge trend-loading";
+        badge.textContent = "데이터 측 박힘 중";
+        // multi-tf badges 측 "—"
+        for (const sel of [".md-trend-short", ".md-trend-mid-short", ".md-trend-mid"]) {
+            const el = card.querySelector(sel);
+            if (el) {
+                el.textContent = "—";
+                el.className = sel.slice(1) + " md-trend-badge trend-loading";
+            }
+        }
+        // 측 가격 / 24h / OI / CVD / Funding 측 "—"
+        for (const sel of [".md-24h", ".md-oi", ".md-cvd-spot", ".md-cvd-futures", ".md-funding"]) {
+            const el = card.querySelector(sel);
+            if (el) {
+                el.textContent = "—";
+                el.className = sel.slice(1) + " mono";
+            }
+        }
+        // 갱신 시각 측 — Coinalyze 측 한도 회복 측 안내
+        const ts = card.querySelector(".md-updated-ts");
+        if (ts) ts.textContent = "Coinalyze 한도 — 잠시 후";
+        return;
+    }
+
     card.querySelector(".md-coin-price").textContent = _fmtPrice(t.price);
 
     const badge = card.querySelector(".md-trend-badge");

@@ -1664,6 +1664,13 @@ input[type="range"].slider-input:disabled {
     background: rgba(168, 162, 158, 0.14);
     color: var(--text-3);
 }
+/* v0.2.25: backend Coinalyze 한도 (429) 측 일시 fetch X 측 placeholder */
+.md-trend-badge.trend-loading {
+    background: rgba(96, 81, 155, 0.12);
+    color: var(--text-3);
+    border-color: rgba(96, 81, 155, 0.25);
+    font-style: italic;
+}
 
 .md-row {
     display: flex;

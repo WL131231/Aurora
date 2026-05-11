@@ -6,8 +6,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -754,6 +755,43 @@ def test_log_signal_evaluation_heartbeat_after_60s(monkeypatch) -> None:
     assert len(records) == 2
     # 두 번째는 (heartbeat) suffix
     assert "(heartbeat)" in records[1]
+
+
+# ============================================================
+# _compute_diagnostic_line — 지표 진단 1줄 포맷
+# ============================================================
+
+
+def test_compute_diagnostic_line_no_1h_returns_empty() -> None:
+    """df_by_tf 에 '1H' 없음 → 빈 문자열."""
+    bot = bot_instance.get_instance()
+    assert bot._compute_diagnostic_line({}, 50000.0) == ""
+
+
+def test_compute_diagnostic_line_empty_1h_returns_empty() -> None:
+    """'1H' df 가 빈 DataFrame → 빈 문자열."""
+    bot = bot_instance.get_instance()
+    assert bot._compute_diagnostic_line({"1H": pd.DataFrame()}, 50000.0) == ""
+
+
+def test_compute_diagnostic_line_missing_close_col_returns_empty() -> None:
+    """'1H' df 에 'close' 컬럼 없음 → 빈 문자열."""
+    bot = bot_instance.get_instance()
+    df = pd.DataFrame({"open": [100.0] * 25, "high": [101.0] * 25, "low": [99.0] * 25})
+    assert bot._compute_diagnostic_line({"1H": df}, 50000.0) == ""
+
+
+def test_compute_diagnostic_line_sufficient_data_contains_segments() -> None:
+    """500 봉 합성 데이터 → EMA200/480, BB, RSI 세그먼트 모두 포함."""
+    rng = np.random.default_rng(42)
+    prices = np.cumprod(1.0 + rng.normal(0.0, 0.001, 500)) * 50000.0
+    df = pd.DataFrame({"close": prices})
+    bot = bot_instance.get_instance()
+    result = bot._compute_diagnostic_line({"1H": df}, float(prices[-1]))
+    assert "EMA200@1H" in result
+    assert "EMA480@1H" in result
+    assert "BB@1H" in result
+    assert "RSI@1H" in result
 
 
 def test_log_signal_evaluation_emits_immediately_on_change(monkeypatch) -> None:

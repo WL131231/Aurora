@@ -12,6 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from aurora.exchange.team_aliases import (
+    _load_user_aliases,
     list_aliases,
     load_aliases,
     resolve_alias,
@@ -91,3 +92,57 @@ def test_load_aliases_skips_malformed_entries(tmp_path: Path):
     with patch("aurora.exchange.team_aliases._aliases_path", return_value=fake):
         aliases = load_aliases()
         assert aliases == {"장수": {"api_key": "k", "api_secret": "s"}}
+
+
+# ============================================================
+# _load_user_aliases — config_store 기반 사용자 매핑 파서
+# ============================================================
+
+
+def test_load_user_aliases_empty_config_returns_empty() -> None:
+    """config_store.load() → None → 빈 dict."""
+    with patch("aurora.interfaces.config_store.load", return_value=None):
+        assert _load_user_aliases() == {}
+
+
+def test_load_user_aliases_no_key_returns_empty() -> None:
+    """config_store 에 'user_aliases' 키 없음 → 빈 dict."""
+    with patch("aurora.interfaces.config_store.load", return_value={"other": "data"}):
+        assert _load_user_aliases() == {}
+
+
+def test_load_user_aliases_non_dict_value_returns_empty() -> None:
+    """'user_aliases' 값이 dict 가 아님 (리스트 등) → 빈 dict."""
+    with patch("aurora.interfaces.config_store.load",
+               return_value={"user_aliases": ["not", "a", "dict"]}):
+        assert _load_user_aliases() == {}
+
+
+def test_load_user_aliases_valid_entry_returned() -> None:
+    """유효한 nickname 엔트리 → api_key / api_secret 포함 dict 반환."""
+    raw = {"user_aliases": {"alice": {"api_key": "k1", "api_secret": "s1"}}}
+    with patch("aurora.interfaces.config_store.load", return_value=raw):
+        result = _load_user_aliases()
+    assert result == {"alice": {"api_key": "k1", "api_secret": "s1"}}
+
+
+def test_load_user_aliases_skips_missing_secret() -> None:
+    """api_secret 없는 entry 제외 — api_key 만 있는 항목 skip."""
+    raw = {
+        "user_aliases": {
+            "alice": {"api_key": "k1", "api_secret": "s1"},
+            "bob": {"api_key": "k2"},
+        },
+    }
+    with patch("aurora.interfaces.config_store.load", return_value=raw):
+        result = _load_user_aliases()
+    assert "alice" in result
+    assert "bob" not in result
+
+
+def test_load_user_aliases_skips_non_dict_entry() -> None:
+    """엔트리 값이 dict 가 아님 (문자열 등) → skip."""
+    raw = {"user_aliases": {"alice": {"api_key": "k", "api_secret": "s"}, "bad": "string"}}
+    with patch("aurora.interfaces.config_store.load", return_value=raw):
+        result = _load_user_aliases()
+    assert list(result.keys()) == ["alice"]

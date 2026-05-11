@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from aurora.core.indicators import HarmonicMatch
 from aurora.core.strategy import (
@@ -1617,3 +1618,128 @@ def test_classify_regime_default_module_constants() -> None:
     df_range = _make_4h_df(list(100.0 + rng.uniform(-0.05, 0.05, 250)), spread=0.1)
     assert classify_regime(df_range) == classify_regime(df_range, regime_config=cfg_default)
     assert classify_regime(df_range) == Regime.RANGE
+
+
+# ============================================================
+# _detect_bb_for_tf — BB reversal / wick reversal (v0.1.51)
+# ============================================================
+
+from aurora.core.strategy import _detect_bb_for_tf  # noqa: E402
+
+
+def _bb_base_closes(n: int = 32) -> list[float]:
+    """BB 확립용 기저 시계열 — even=101, odd=99 (period=20 충분히 초과)."""
+    return [101.0 if i % 2 == 0 else 99.0 for i in range(n)]
+
+
+def _bb_df_from_closes(
+    closes: list[float],
+    last_high: float | None = None,
+    last_low: float | None = None,
+) -> pd.DataFrame:
+    """BB 테스트용 OHLC DataFrame.
+
+    last_high/last_low 미입력 시 종가 ×0.1% — BB 안쪽 유지.
+    """
+    highs = [c * 1.001 for c in closes]
+    lows = [c * 0.999 for c in closes]
+    if last_high is not None:
+        highs[-1] = last_high
+    if last_low is not None:
+        lows[-1] = last_low
+    return pd.DataFrame({
+        "open": closes,
+        "high": highs,
+        "low": lows,
+        "close": closes,
+    })
+
+
+def test_detect_bb_for_tf_missing_close_column() -> None:
+    """close 컬럼 없으면 [] 반환."""
+    df = pd.DataFrame({"open": [100.0] * 22, "high": [101.0] * 22, "low": [99.0] * 22})
+    assert _detect_bb_for_tf(df, "1H", StrategyConfig()) == []
+
+
+def test_detect_bb_for_tf_missing_high_column() -> None:
+    """high 컬럼 없으면 [] 반환."""
+    df = pd.DataFrame({"open": [100.0] * 22, "close": [100.0] * 22, "low": [99.0] * 22})
+    assert _detect_bb_for_tf(df, "1H", StrategyConfig()) == []
+
+
+def test_detect_bb_for_tf_squeeze_returns_empty() -> None:
+    """완전 평탄 시계열 → std=0 → narrowness=0 → squeeze 보류 → []."""
+    closes = [100.0] * 22
+    df = _bb_df_from_closes(closes)
+    assert _detect_bb_for_tf(df, "1H", StrategyConfig()) == []
+
+
+def test_detect_bb_for_tf_reversal_short_upper() -> None:
+    """직전 봉이 BB 상단 + buffer 이탈, 현재 봉이 안쪽 회귀 → SHORT 신호."""
+    # prev=115 (BB 상단 ~107 대비 충분히 위), last=101 (BB 안쪽)
+    closes = _bb_base_closes() + [115.0, 101.0]
+    df = _bb_df_from_closes(closes)
+    signals = _detect_bb_for_tf(df, "1H", StrategyConfig())
+    assert len(signals) == 1
+    assert signals[0].direction == Direction.SHORT
+    assert signals[0].source == "bollinger_reversal_upper"
+    assert signals[0].timeframe == "1H"
+
+
+def test_detect_bb_for_tf_reversal_long_lower() -> None:
+    """직전 봉이 BB 하단 + buffer 이탈, 현재 봉이 안쪽 회귀 → LONG 신호."""
+    # prev=83 (BB 하단 ~91 대비 충분히 아래), last=99 (BB 안쪽)
+    closes = _bb_base_closes() + [83.0, 99.0]
+    df = _bb_df_from_closes(closes)
+    signals = _detect_bb_for_tf(df, "1H", StrategyConfig())
+    assert len(signals) == 1
+    assert signals[0].direction == Direction.LONG
+    assert signals[0].source == "bollinger_reversal_lower"
+
+
+def test_detect_bb_for_tf_wick_reversal_upper() -> None:
+    """단일 봉 wick 이 BB 상단 + buffer 이탈, close 는 안쪽 → SHORT."""
+    # prev/last close 모두 BB 안쪽이지만 last_high = 110 (upper_thr ~102 초과)
+    closes = _bb_base_closes() + [101.0, 101.0]
+    df = _bb_df_from_closes(closes, last_high=110.0)
+    signals = _detect_bb_for_tf(df, "4H", StrategyConfig())
+    assert len(signals) == 1
+    assert signals[0].direction == Direction.SHORT
+    assert signals[0].source == "bollinger_wick_reversal_upper"
+    assert signals[0].timeframe == "4H"
+
+
+def test_detect_bb_for_tf_wick_reversal_lower() -> None:
+    """단일 봉 wick 이 BB 하단 + buffer 이탈, close 는 안쪽 → LONG."""
+    closes = _bb_base_closes() + [101.0, 101.0]
+    df = _bb_df_from_closes(closes, last_low=85.0)
+    signals = _detect_bb_for_tf(df, "4H", StrategyConfig())
+    assert len(signals) == 1
+    assert signals[0].direction == Direction.LONG
+    assert signals[0].source == "bollinger_wick_reversal_lower"
+
+
+def test_detect_bb_for_tf_no_signal_inside_bb() -> None:
+    """직전/현재 봉 모두 BB 내부, wick 도 정상 → []."""
+    closes = _bb_base_closes()  # prev/last 모두 normal alternating, high/low tiny
+    df = _bb_df_from_closes(closes)
+    assert _detect_bb_for_tf(df, "1H", StrategyConfig()) == []
+
+
+def test_detect_bb_for_tf_meta_fields_present() -> None:
+    """BB reversal 신호 meta 에 bb_upper/bb_lower/bb_middle/buffer_pct 포함."""
+    closes = _bb_base_closes() + [115.0, 101.0]
+    df = _bb_df_from_closes(closes)
+    signals = _detect_bb_for_tf(df, "1H", StrategyConfig())
+    assert signals[0].meta is not None
+    for key in ("bb_upper", "bb_lower", "bb_middle", "buffer_pct"):
+        assert key in signals[0].meta
+    assert signals[0].meta["buffer_pct"] == pytest.approx(0.003)
+
+
+def test_detect_bb_for_tf_reversal_strength_is_1_5() -> None:
+    """BB reversal 신호 strength = 1.5."""
+    closes = _bb_base_closes() + [115.0, 101.0]
+    df = _bb_df_from_closes(closes)
+    signals = _detect_bb_for_tf(df, "1H", StrategyConfig())
+    assert signals[0].strength == pytest.approx(1.5)

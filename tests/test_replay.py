@@ -14,9 +14,12 @@ import pandas as pd
 import pytest
 
 from aurora.backtest.replay import (
+    AggregatedBar,
     TF_MINUTES,
     MultiTfAggregator,
     _bucket_open_time,
+    _new_bar,
+    _update_in_place,
 )
 
 # ============================================================
@@ -352,3 +355,110 @@ def test_weekly_anchored_to_monday() -> None:
     bucket2 = _bucket_open_time(pd.Timestamp("2024-01-15 12:00:00"), TF_MINUTES["1W"])
     assert bucket2 == pd.Timestamp("2024-01-15 00:00:00")
     assert bucket2.weekday() == 0
+
+
+# ============================================================
+# _new_bar — 1분봉으로 새 TF 봉 시작
+# ============================================================
+
+_OPEN_TIME = pd.Timestamp("2024-01-08 10:00:00")
+
+
+def _minute_bar(o=100.0, h=105.0, l=98.0, c=103.0, v=50.0) -> pd.Series:
+    """테스트용 1분봉 Series."""
+    return pd.Series({"open": o, "high": h, "low": l, "close": c, "volume": v})
+
+
+def test_new_bar_ohlcv_copied_from_minute_bar() -> None:
+    """1분봉 OHLCV 값이 AggregatedBar 로 그대로 복사됨."""
+    bar = _new_bar(_OPEN_TIME, _minute_bar(), tf_minutes=60)
+    assert bar.open == pytest.approx(100.0)
+    assert bar.high == pytest.approx(105.0)
+    assert bar.low == pytest.approx(98.0)
+    assert bar.close == pytest.approx(103.0)
+    assert bar.volume == pytest.approx(50.0)
+
+
+def test_new_bar_open_time_assigned() -> None:
+    """open_time 인자가 AggregatedBar.open_time 에 박힘."""
+    bar = _new_bar(_OPEN_TIME, _minute_bar(), tf_minutes=60)
+    assert bar.open_time == _OPEN_TIME
+
+
+def test_new_bar_close_ts_is_open_plus_tf() -> None:
+    """close_ts = open_time + tf_minutes."""
+    bar = _new_bar(_OPEN_TIME, _minute_bar(), tf_minutes=60)
+    assert bar.close_ts == _OPEN_TIME + pd.Timedelta(minutes=60)
+
+
+def test_new_bar_4h_close_ts() -> None:
+    """4H TF — close_ts 는 open_time + 240분."""
+    bar = _new_bar(_OPEN_TIME, _minute_bar(), tf_minutes=240)
+    assert bar.close_ts == _OPEN_TIME + pd.Timedelta(minutes=240)
+
+
+# ============================================================
+# _update_in_place — 진행 중 봉 갱신
+# ============================================================
+
+def _make_bar(h=105.0, l=98.0, c=103.0, v=50.0) -> AggregatedBar:
+    """테스트용 AggregatedBar."""
+    return AggregatedBar(
+        open_time=_OPEN_TIME, open=100.0,
+        high=h, low=l, close=c, volume=v,
+        close_ts=_OPEN_TIME + pd.Timedelta(minutes=60),
+    )
+
+
+def test_update_in_place_high_updates_when_higher() -> None:
+    """새 1분봉 high 가 기존보다 높으면 갱신."""
+    bar = _make_bar(h=105.0)
+    _update_in_place(bar, _minute_bar(h=110.0))
+    assert bar.high == pytest.approx(110.0)
+
+
+def test_update_in_place_high_unchanged_when_lower() -> None:
+    """새 1분봉 high 가 기존보다 낮으면 유지."""
+    bar = _make_bar(h=105.0)
+    _update_in_place(bar, _minute_bar(h=100.0))
+    assert bar.high == pytest.approx(105.0)
+
+
+def test_update_in_place_low_updates_when_lower() -> None:
+    """새 1분봉 low 가 기존보다 낮으면 갱신."""
+    bar = _make_bar(l=98.0)
+    _update_in_place(bar, _minute_bar(l=95.0))
+    assert bar.low == pytest.approx(95.0)
+
+
+def test_update_in_place_low_unchanged_when_higher() -> None:
+    """새 1분봉 low 가 기존보다 높으면 유지."""
+    bar = _make_bar(l=98.0)
+    _update_in_place(bar, _minute_bar(l=101.0))
+    assert bar.low == pytest.approx(98.0)
+
+
+def test_update_in_place_close_always_overwritten() -> None:
+    """close 는 항상 최신 1분봉 값으로 덮어쓰기."""
+    bar = _make_bar(c=103.0)
+    _update_in_place(bar, _minute_bar(c=108.0))
+    assert bar.close == pytest.approx(108.0)
+
+
+def test_update_in_place_volume_accumulated() -> None:
+    """volume 은 누적 합산."""
+    bar = _make_bar(v=50.0)
+    _update_in_place(bar, _minute_bar(v=30.0))
+    assert bar.volume == pytest.approx(80.0)
+
+
+def test_update_in_place_open_and_open_time_unchanged() -> None:
+    """open / open_time / close_ts 는 갱신하지 않음."""
+    bar = _make_bar()
+    original_open = bar.open
+    original_open_time = bar.open_time
+    original_close_ts = bar.close_ts
+    _update_in_place(bar, _minute_bar(o=999.0))
+    assert bar.open == pytest.approx(original_open)
+    assert bar.open_time == original_open_time
+    assert bar.close_ts == original_close_ts

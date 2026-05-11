@@ -388,26 +388,27 @@
                     <div class="section-title">지표 트리거 상태</div>
                     <div class="indicator-status-grid" id="indicator-status">
                         <!-- 7 카테고리 (v0.1.49 가격 매매 추가) — 상태 4값: 대기 / 활성-롱 / 활성-숏 / 비활성. hint = hover tooltip -->
+                        <!-- v0.2.29 (사용자 요청 2026-05-11): label 측 지표 이름 측 박음 (EMA → EMA Touch 등) -->
                         <div class="indicator-pill" data-cat="EMA" title="가동 조건: 가격이 EMA 라인 ±0.3% 터치 + 거래량 동반">
-                            <span class="ind-name">EMA</span><span class="ind-state">대기</span>
+                            <span class="ind-name">EMA Touch</span><span class="ind-state">대기</span>
                         </div>
                         <div class="indicator-pill" data-cat="RSI" title="가동 조건: 1H TF 다이버전스 발생 (regular/hidden × bull/bear)">
-                            <span class="ind-name">RSI</span><span class="ind-state">대기</span>
+                            <span class="ind-name">RSI Divergence</span><span class="ind-state">대기</span>
                         </div>
                         <div class="indicator-pill" data-cat="BB" title="가동 조건: 1H Bollinger 상/하단 터치 (횡보장 특화)">
-                            <span class="ind-name">BB</span><span class="ind-state">대기</span>
+                            <span class="ind-name">Bollinger Bands</span><span class="ind-state">대기</span>
                         </div>
                         <div class="indicator-pill" data-cat="MA" title="가동 조건: 골크/데크 (HTF 가중치 1H&lt;2H&lt;4H)">
-                            <span class="ind-name">MA</span><span class="ind-state">대기</span>
+                            <span class="ind-name">MA Cross</span><span class="ind-state">대기</span>
                         </div>
                         <div class="indicator-pill" data-cat="Ichimoku" title="가동 조건: 구름대 Span 터치 (S/R 강도 = 두께)">
-                            <span class="ind-name">Ichimoku</span><span class="ind-state">대기</span>
+                            <span class="ind-name">Ichimoku Cloud</span><span class="ind-state">대기</span>
                         </div>
                         <div class="indicator-pill" data-cat="Harmonic" title="가동 조건: 5종 패턴 D 도달 (Bat/Butterfly/Gartley/Crab/Deep Crab)">
-                            <span class="ind-name">Harmonic</span><span class="ind-state">대기</span>
+                            <span class="ind-name">Harmonic Pattern</span><span class="ind-state">대기</span>
                         </div>
                         <div class="indicator-pill" data-cat="가격 매매" title="가동 조건: BTC 1K 단위 zone (N.200~N.400 / N.600~N.800) 터치 + MA 추세 (PDF 나뇨띠)">
-                            <span class="ind-name">가격 매매</span><span class="ind-state">대기</span>
+                            <span class="ind-name">Zone Price</span><span class="ind-state">대기</span>
                         </div>
                     </div>
 
@@ -461,9 +462,10 @@
                             <button data-tf="4H">4H</button>
                         </span>
                         <span class="chart-overlay-toggle" id="chart-overlay-toggle">
-                            <button data-ind="ema" class="active">EMA</button>
-                            <button data-ind="bb" class="active">BB</button>
-                            <button data-ind="st" class="active">ST</button>
+                            <!-- v0.2.29 (사용자 요청): "EMA" → "MA Cross" 정정. 실제 측 fast/slow EMA cross 박힘 = MA Cross 본질. -->
+                            <button data-ind="ema" class="active" title="Fast EMA(20) + Slow EMA(50) cross">MA Cross</button>
+                            <button data-ind="bb" class="active" title="Bollinger Bands (20, 2σ)">Bollinger</button>
+                            <button data-ind="st" class="active" title="Supertrend (ATR-based)">Supertrend</button>
                         </span>
                     </div>
                     <div class="metric-card chart-card" id="bot-chart-section">

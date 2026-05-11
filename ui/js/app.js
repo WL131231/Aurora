@@ -107,6 +107,36 @@ function closeSidebar() {
 document.getElementById("sidebar-toggle")?.addEventListener("click", openSidebar);
 document.getElementById("sidebar-overlay")?.addEventListener("click", closeSidebar);
 
+// v0.3.4: 데스크탑 사이드바 collapse / expand (localStorage 박힘)
+const SIDEBAR_COLLAPSED_KEY = "aurora.sidebar.collapsed";
+
+function applySidebarCollapsed(collapsed) {
+    const sb = document.getElementById("sidebar");
+    if (!sb) return;
+    sb.classList.toggle("sidebar-collapsed", collapsed);
+    document.body.classList.toggle("sidebar-is-collapsed", collapsed);
+}
+
+function collapseSidebar() {
+    applySidebarCollapsed(true);
+    try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, "1"); } catch (_) { /* ignore */ }
+}
+
+function expandSidebar() {
+    applySidebarCollapsed(false);
+    try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, "0"); } catch (_) { /* ignore */ }
+}
+
+document.getElementById("sidebar-collapse")?.addEventListener("click", collapseSidebar);
+document.getElementById("sidebar-expand")?.addEventListener("click", expandSidebar);
+
+// 초기 상태 — localStorage 박힌 상태 복원
+try {
+    if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1") {
+        applySidebarCollapsed(true);
+    }
+} catch (_) { /* ignore */ }
+
 // ============================================================
 // 2. 슬라이더 라이브 업데이트 (값 표시)
 // ============================================================
@@ -1366,8 +1396,8 @@ async function refreshDashboardRatios() {
         meta.textContent = `5분 snapshot · ${Math.max(0, Math.floor(ageMs / 1000))}초 전`;
     }
 
-    // v0.2.28 (사용자 요청 2026-05-11): source 측 row 측 측 빼고 — 하단 별도 list 박음.
-    // ex) "WHALE NOTIONAL: BINANCE, BYBIT..." 측 — 측 — 측 — 측 — 측 — 측 — 측 — 측 별도 박음.
+    // v0.3.4 (사용자 요청 2026-05-11): row 우측에 L/S ratio 숫자 (참고자료 양식).
+    // long_pct / short_pct → ratio = long_pct / short_pct.
     const rowsHtml = data.segments.map(seg => {
         if (seg.long_pct == null || seg.short_pct == null) {
             return `
@@ -1376,10 +1406,14 @@ async function refreshDashboardRatios() {
                     <div class="dflow-ratio-bar">
                         <span class="dflow-ratio-pct empty">— 데이터 없음 —</span>
                     </div>
+                    <span class="dflow-ratio-ls empty">—</span>
                 </div>`;
         }
         const longPct = seg.long_pct * 100;
         const shortPct = seg.short_pct * 100;
+        const ratio = seg.short_pct > 0 ? seg.long_pct / seg.short_pct : null;
+        const ratioStr = ratio != null ? ratio.toFixed(2) : "—";
+        const ratioCls = ratio == null ? "empty" : (ratio >= 1 ? "long" : "short");
         const sample = seg.sample_size != null ? ` · ${seg.sample_size}건` : "";
         return `
             <div class="dflow-ratio-row" title="${seg.label}${sample}">
@@ -1392,6 +1426,7 @@ async function refreshDashboardRatios() {
                         <span>${shortPct.toFixed(1)}%</span>
                     </span>
                 </div>
+                <span class="dflow-ratio-ls ${ratioCls}">L/S ${ratioStr}</span>
             </div>`;
     }).join("");
 

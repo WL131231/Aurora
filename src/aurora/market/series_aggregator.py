@@ -1,10 +1,10 @@
-"""Phase 3 Dashboard Series — 14D 시계열 합본 (v0.1.115).
+"""Phase 3 Dashboard Series — 14D × 1H 시계열 합본 (v0.3.4: 1H interval).
 
 거래소별 ``ExchangeSeriesProvider`` 등록 → 매 fetch 시 병렬 호출 + cache.
 ``DashboardFlowAggregator`` (snapshot, 60초 cache) 측 별개 — 시계열 측 5분 cache
-박힘 (daily 봉 측 빨리 안 변함, API 부담 ↓).
+박힘 (1H 봉 측 자주 안 변함, API 부담 ↓).
 
-합본 정책:
+합본 정책 (bucket 단위 = 1H, hour-floor ts_ms):
 - price_close: OI 가중 평균 (큰 거래소 영향 ↑)
 - perp_cvd: 거래소별 (taker_buy - taker_sell) 측 봉 단위 sum → cumulative
 - oi_usd: sum (None 제외)
@@ -33,8 +33,9 @@ from aurora.timeouts import (
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TTL_SEC = 300  # 5분 — daily 봉 측 빨리 안 변함
+_DEFAULT_TTL_SEC = 300  # 5분 — 1H 봉 측 자주 안 변함
 _DAY_MS = 86_400_000
+_HOUR_MS = 3_600_000
 
 
 @dataclass(slots=True)
@@ -68,15 +69,18 @@ class DashboardSeries:
     def from_series_list(
         cls, coin: str, days: int, series_list: list[ExchangeSeries],
     ) -> DashboardSeries:
-        """거래소 시계열 list → 합본 (day_ms 정렬, OI 가중 평균 등)."""
-        # day_ms × exchange → SeriesBar 추출
-        all_days: set[int] = set()
+        """거래소 시계열 list → 합본 (hour_ms 정렬, OI 가중 평균 등).
+
+        v0.3.4: bucket 단위 1H — ts_ms 측 거래소별 hour-floor 박힘.
+        """
+        # hour_ms × exchange → SeriesBar 추출
+        all_hours: set[int] = set()
         for s in series_list:
             for b in s.bars:
-                all_days.add(b.ts_ms)
-        sorted_days = sorted(all_days)
+                all_hours.add(b.ts_ms)
+        sorted_hours = sorted(all_hours)
 
-        # 거래소별 day_ms → bar lookup
+        # 거래소별 hour_ms → bar lookup
         bars_by_ex: dict[str, dict[int, object]] = {}
         for s in series_list:
             bars_by_ex[s.exchange] = {b.ts_ms: b for b in s.bars}
@@ -91,52 +95,52 @@ class DashboardSeries:
         cumulative_cvd = 0.0
         cvd_seen = False
 
-        for day in sorted_days:
-            # 해당 day 측 거래소별 bar list
-            day_bars = []
+        for hour in sorted_hours:
+            # 해당 hour 측 거래소별 bar list
+            hour_bars = []
             for s in series_list:
-                bar = bars_by_ex.get(s.exchange, {}).get(day)
+                bar = bars_by_ex.get(s.exchange, {}).get(hour)
                 if bar is not None:
-                    day_bars.append((s.exchange, bar))
+                    hour_bars.append((s.exchange, bar))
 
             # price_close — OI 가중 평균
-            price_val = _weighted_avg(day_bars, "close", "oi_usd")
-            price_close.append(SeriesPoint(ts_ms=day, value=price_val))
+            price_val = _weighted_avg(hour_bars, "close", "oi_usd")
+            price_close.append(SeriesPoint(ts_ms=hour, value=price_val))
 
             # taker_delta — sum (buy - sell)
             delta_sum: float | None = None
-            for _, bar in day_bars:
+            for _, bar in hour_bars:
                 buy = getattr(bar, "taker_buy_usd", None)
                 sell = getattr(bar, "taker_sell_usd", None)
                 if buy is None or sell is None:
                     continue
                 delta_sum = (delta_sum or 0.0) + (buy - sell)
-            taker_delta.append(SeriesPoint(ts_ms=day, value=delta_sum))
+            taker_delta.append(SeriesPoint(ts_ms=hour, value=delta_sum))
 
             # perp_cvd — cumulative sum 측 delta
             if delta_sum is not None:
                 cumulative_cvd += delta_sum
                 cvd_seen = True
             perp_cvd.append(
-                SeriesPoint(ts_ms=day, value=cumulative_cvd if cvd_seen else None),
+                SeriesPoint(ts_ms=hour, value=cumulative_cvd if cvd_seen else None),
             )
 
             # oi_usd — sum
             oi_vals = [
                 getattr(bar, "oi_usd", None)
-                for _, bar in day_bars
+                for _, bar in hour_bars
                 if getattr(bar, "oi_usd", None) is not None
             ]
             oi_sum = sum(oi_vals) if oi_vals else None
-            oi_usd.append(SeriesPoint(ts_ms=day, value=oi_sum))
+            oi_usd.append(SeriesPoint(ts_ms=hour, value=oi_sum))
 
             # funding_rate — OI 가중 평균
-            funding_val = _weighted_avg(day_bars, "funding_rate_avg", "oi_usd")
-            funding_rate.append(SeriesPoint(ts_ms=day, value=funding_val))
+            funding_val = _weighted_avg(hour_bars, "funding_rate_avg", "oi_usd")
+            funding_rate.append(SeriesPoint(ts_ms=hour, value=funding_val))
 
             # ls_global_timeline — OI 가중 평균
-            ls_val = _weighted_avg(day_bars, "ls_ratio_global", "oi_usd")
-            ls_timeline.append(SeriesPoint(ts_ms=day, value=ls_val))
+            ls_val = _weighted_avg(hour_bars, "ls_ratio_global", "oi_usd")
+            ls_timeline.append(SeriesPoint(ts_ms=hour, value=ls_val))
 
         return cls(
             coin=coin,
@@ -155,16 +159,16 @@ class DashboardSeries:
 
 
 def _weighted_avg(
-    day_bars: list[tuple[str, object]], field_name: str, weight_field: str,
+    hour_bars: list[tuple[str, object]], field_name: str, weight_field: str,
 ) -> float | None:
-    """day_bars 측 ``field_name`` 측 ``weight_field`` 가중 평균 (None 제외).
+    """hour_bars 측 ``field_name`` 측 ``weight_field`` 가중 평균 (None 제외).
 
     가중치 측 모두 None / 0 측 단순 평균.
     """
     num = 0.0
     den = 0.0
     simple_vals: list[float] = []
-    for _, bar in day_bars:
+    for _, bar in hour_bars:
         val = getattr(bar, field_name, None)
         if val is None:
             continue

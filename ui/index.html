@@ -94,7 +94,12 @@
         </div>
         <div class="release-alert-actions">
             <button id="release-alert-open" class="release-alert-btn">자세히 보기</button>
-            <button id="release-alert-restart" class="release-alert-btn release-alert-btn-primary">재시작하기</button>
+        </div>
+        <!-- v0.2.27 (사용자 보고 2026-05-11): "재시작하기" 측 fail 케이스 박혀 버튼 측
+             빼고 단순 안내 박음. 사용자 측 launcher 측 직접 종료 + 재시작 박으면
+             v0.2.21+ launcher 측 release fetch → 자동 update + 본체 spawn 박힘. -->
+        <div class="release-alert-hint">
+            업데이트 측 적용 박으려면 — Launcher 측 종료 + 다시 실행 부탁 (작업표시줄 우클릭 → 종료 → Aurora-launcher 측 다시 시작).
         </div>
     </div>
 

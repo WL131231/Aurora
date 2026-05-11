@@ -820,20 +820,15 @@ async function refreshReleaseAlert() {
             const dlRow = document.getElementById("release-alert-dl");
             const dlBar = document.getElementById("release-alert-dl-bar");
             const dlText = document.getElementById("release-alert-dl-text");
-            const restartBtn = document.getElementById("release-alert-restart");
+            // v0.2.27: restart button 측 제거 박혀 측 — restart 측 갱신 흐름 측 X
             if (dlRow) {
                 if (apk.status === "downloading") {
                     const pct = apk.download_pct ?? 0;
                     dlRow.style.display = "flex";
                     if (dlBar) dlBar.style.width = pct + "%";
                     if (dlText) dlText.textContent = pct + "%";
-                    if (restartBtn) { restartBtn.disabled = true; restartBtn.textContent = `다운로드 ${pct}%`; }
                 } else {
                     dlRow.style.display = "none";
-                    if (restartBtn) {
-                        restartBtn.disabled = false;
-                        restartBtn.textContent = apk.status === "done" ? "설치하기" : "재시작하기";
-                    }
                 }
             }
         } catch (_) { /* 네트워크 오류 — 진행바 숨김 유지 */ }
@@ -1585,95 +1580,10 @@ document.getElementById("release-alert-open")?.addEventListener("click", () => {
     if (url) window.open(url, "_blank", "noopener");
 });
 
-// "재시작하기" — 플랫폼 분기:
-//   Android (window.Android 있음): APK 다운로드 완료 여부 확인 후 설치 Intent 기동
-//   Desktop: POST /relaunch — launcher 다시 spawn + 본체 자기 종료
-//
-// v0.1.46 fix (데스크탑): 무한 로딩 방지 — success=False 즉시 alert, 2초 후 button reset
-document.getElementById("release-alert-restart")?.addEventListener("click", async () => {
-    const btn = document.getElementById("release-alert-restart");
-    if (!btn) return;
-
-    // ── Android 플로우 ──────────────────────────────────────────
-    if (window.Android) {
-        if (!confirm("새 버전 APK 를 설치합니다.\n설치 후 앱이 재시작됩니다.")) return;
-        btn.disabled = true;
-        btn.textContent = "설치 준비 중...";
-        try {
-            const r = await fetch("/update/apk-status");
-            const data = await r.json();
-            if (data.has_update && data.apk_path) {
-                btn.textContent = "설치 중...";
-                window.Android.installApk(data.apk_path);
-                // 시스템 설치 다이얼로그 뜨면 앱이 background → button reset
-                setTimeout(() => {
-                    if (btn.isConnected) {
-                        btn.disabled = false;
-                        btn.textContent = "재시작하기";
-                    }
-                }, 3000);
-            } else {
-                // status 기반 피드백 — 진행률 표시 (v0.1.58)
-                const status = data.status || "idle";
-                const pct = data.download_pct ?? 0;
-                if (status === "downloading") {
-                    btn.textContent = `다운로드 ${pct}%`;
-                    setTimeout(() => {
-                        if (btn.isConnected) { btn.disabled = false; btn.textContent = "설치하기"; }
-                    }, 2000);
-                } else if (status === "error") {
-                    alert(`다운로드 실패: ${data.error_msg || "알 수 없는 오류"}`);
-                    btn.disabled = false;
-                    btn.textContent = "재시작하기";
-                } else {
-                    alert("APK 아직 다운로드 중입니다.\n잠시 후 다시 시도해 주세요.");
-                    btn.disabled = false;
-                    btn.textContent = "재시작하기";
-                }
-            }
-        } catch (e) {
-            alert("APK 상태 확인 실패: " + e.message);
-            btn.disabled = false;
-            btn.textContent = "재시작하기";
-        }
-        return;
-    }
-
-    // ── Desktop 플로우 ─────────────────────────────────────────
-    if (!confirm("Aurora 를 재시작합니다.\n현재 봇이 실행 중이면 자동으로 중지됩니다.")) return;
-    btn.disabled = true;
-    btn.textContent = "재시작 중...";
-
-    let responseError = null;
-    try {
-        const ctrl = new AbortController();
-        const tid = setTimeout(() => ctrl.abort(), 2000);
-        const r = await fetch("/relaunch", { method: "POST", signal: ctrl.signal });
-        clearTimeout(tid);
-        try {
-            const data = await r.json();
-            if (data && data.success === false) {
-                responseError = data.message || "재시작 실패";
-            }
-        } catch (_) { /* JSON 파싱 실패 무시 */ }
-    } catch (_) {
-        // 정상 — 서버 종료 직전 connection drop / timeout 가능
-    }
-
-    if (responseError) {
-        alert(`재시작 불가 — ${responseError}\n\nlauncher 통해 봇을 켜야 재시작 버튼 사용 가능합니다.`);
-        btn.disabled = false;
-        btn.textContent = "재시작하기";
-        return;
-    }
-
-    setTimeout(() => {
-        if (btn.isConnected) {
-            btn.disabled = false;
-            btn.textContent = "재시작하기";
-        }
-    }, 2000);
-});
+// v0.2.27 (사용자 보고 2026-05-11): "재시작하기" 버튼 측 fail 케이스 박혀 제거.
+// 사용자 측 launcher 측 직접 종료 + 재시작 박으면 v0.2.21+ launcher 측 자동 update +
+// 본체 spawn 박힘. 단순 안내 박음. POST /relaunch 흐름 측 측 backend 측 그대로 둠
+// (Android 측 측 — 또는 향후 직접 사용 case).
 
 // ============================================================
 // 6b. PnL 공유 카드 (v0.1.21) — 모달 + html2canvas PNG 다운로드

@@ -352,3 +352,54 @@ def test_weekly_anchored_to_monday() -> None:
     bucket2 = _bucket_open_time(pd.Timestamp("2024-01-15 12:00:00"), TF_MINUTES["1W"])
     assert bucket2 == pd.Timestamp("2024-01-15 00:00:00")
     assert bucket2.weekday() == 0
+
+
+# ============================================================
+# 14. _bucket_open_time — 1H / 4H / 1D 정렬 회귀
+# ============================================================
+
+from aurora.backtest.replay import _bucket_open_time  # noqa: E402 (already imported above)
+
+
+def test_bucket_1h_exact_start_unchanged() -> None:
+    """1H bucket — 정각에 시작하는 봉은 그 자신이 open_time."""
+    ts = pd.Timestamp("2024-01-08 14:00:00")
+    assert _bucket_open_time(ts, TF_MINUTES["1H"]) == ts
+
+
+def test_bucket_1h_mid_hour_returns_hour_start() -> None:
+    """1H bucket — 14:37 → 14:00 으로 floor."""
+    ts = pd.Timestamp("2024-01-08 14:37:00")
+    expected = pd.Timestamp("2024-01-08 14:00:00")
+    assert _bucket_open_time(ts, TF_MINUTES["1H"]) == expected
+
+
+def test_bucket_4h_returns_correct_window_start() -> None:
+    """4H bucket — 14:30 → 12:00 bucket (12:00~16:00 구간)."""
+    ts = pd.Timestamp("2024-01-08 14:30:00")
+    result = _bucket_open_time(ts, TF_MINUTES["4H"])
+    expected = pd.Timestamp("2024-01-08 12:00:00")
+    assert result == expected
+
+
+def test_bucket_1d_exact_midnight_unchanged() -> None:
+    """1D bucket — 자정 00:00 은 그 날 자정 그대로."""
+    ts = pd.Timestamp("2024-01-08 00:00:00")
+    assert _bucket_open_time(ts, TF_MINUTES["1D"]) == ts
+
+
+def test_bucket_1d_noon_returns_midnight() -> None:
+    """1D bucket — 12:00 → 그 날 00:00 으로 floor."""
+    ts = pd.Timestamp("2024-01-08 12:00:00")
+    expected = pd.Timestamp("2024-01-08 00:00:00")
+    assert _bucket_open_time(ts, TF_MINUTES["1D"]) == expected
+
+
+def test_bucket_result_is_multiple_of_tf_minutes() -> None:
+    """결과 open_time 은 항상 tf_minutes 배수 (epoch 기준)."""
+    from aurora.backtest.replay import _BUCKET_EPOCH
+    for tf in ("1H", "4H", "1D"):
+        ts = pd.Timestamp("2024-01-10 17:23:00")
+        result = _bucket_open_time(ts, TF_MINUTES[tf])
+        delta_minutes = int((result - _BUCKET_EPOCH).total_seconds() // 60)
+        assert delta_minutes % TF_MINUTES[tf] == 0

@@ -62,3 +62,40 @@ def test_emit_without_event_loop_silent_skip() -> None:
 
     # buffer 측 새 record 박힘 (3 entries)
     assert len(log_buffer.get_recent(10)) >= 3
+
+
+def test_get_recent_limit_zero_returns_empty() -> None:
+    """limit=0 → 빈 리스트."""
+    log_buffer._buffer.append({"ts": "x", "level": "INFO", "logger": "t", "message": "hi"})
+    assert log_buffer.get_recent(0) == []
+
+
+def test_get_recent_limit_larger_than_buffer_returns_all() -> None:
+    """limit > buffer 크기 → 전부 반환."""
+    for i in range(5):
+        log_buffer._buffer.append({"ts": "x", "level": "INFO", "logger": "t", "message": str(i)})
+    result = log_buffer.get_recent(999)
+    assert len(result) == 5
+
+
+def test_install_idempotent_no_duplicate_handler() -> None:
+    """install() 두 번 호출해도 BufferHandler 는 한 번만 부착."""
+    from aurora.interfaces.log_buffer import BufferHandler
+    log_buffer.install()
+    log_buffer.install()
+    root = logging.getLogger()
+    count = sum(1 for h in root.handlers if isinstance(h, BufferHandler))
+    assert count == 1
+
+
+def test_emit_with_exc_info_includes_traceback() -> None:
+    """exc_info 있는 레코드 → message 에 traceback 포함."""
+    log_buffer.install()
+    try:
+        raise ValueError("test error for aurora")
+    except ValueError:
+        logging.getLogger("test.exc").exception("caught!")
+    recent = log_buffer.get_recent(1)
+    assert len(recent) == 1
+    assert "ValueError" in recent[0]["message"]
+    assert "test error for aurora" in recent[0]["message"]

@@ -182,6 +182,34 @@ def test_check_download_success(tmp_path, monkeypatch):
     assert (tmp_path / "update" / "Aurora-android.apk.tag").read_text(encoding="utf-8") == "v999.0.0"
 
 
+# ============================================================
+# _apk_dir
+# ============================================================
+
+
+def test_apk_dir_uses_aurora_data_dir_env(tmp_path, monkeypatch) -> None:
+    """AURORA_DATA_DIR 환경변수 설정 시 → 해당 경로 / 'update'."""
+    monkeypatch.setenv("AURORA_DATA_DIR", str(tmp_path))
+    result = apk_updater._apk_dir()
+    assert result == tmp_path / "update"
+
+
+def test_apk_dir_fallback_when_env_absent(monkeypatch) -> None:
+    """AURORA_DATA_DIR 미설정 → /tmp/aurora_update 폴백."""
+    from pathlib import Path
+    monkeypatch.delenv("AURORA_DATA_DIR", raising=False)
+    result = apk_updater._apk_dir()
+    assert result == Path("/tmp/aurora_update")
+
+
+def test_apk_dir_fallback_when_env_empty(monkeypatch) -> None:
+    """AURORA_DATA_DIR='' (빈 문자열) → 폴백."""
+    from pathlib import Path
+    monkeypatch.setenv("AURORA_DATA_DIR", "")
+    result = apk_updater._apk_dir()
+    assert result == Path("/tmp/aurora_update")
+
+
 def test_check_download_tmp_not_left_on_success(tmp_path, monkeypatch):
     """.tmp 파일이 rename 으로 정리되어 잔재 없음."""
     monkeypatch.setenv("AURORA_DATA_DIR", str(tmp_path))

@@ -800,7 +800,7 @@ def test_dashboard_series_error_returns_empty_dto() -> None:
 def test_dashboard_series_clamps_days_to_valid_range() -> None:
     """days=0 → clamp to 1, days=100 → clamp to 60."""
     from aurora.market import series_aggregator as sa_mod
-    from aurora.market.series_aggregator import DashboardSeriesAggregator, DashboardSeries
+    from aurora.market.series_aggregator import DashboardSeries, DashboardSeriesAggregator
 
     sa_mod.reset_for_test()
     received: list[int] = []

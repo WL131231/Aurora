@@ -416,3 +416,237 @@ def test_update_in_place_high_not_updated_when_lower() -> None:
     _update_in_place(bar, _minute_series(105.0, 107.0, 96.0, 106.0, 5.0))
     assert bar.high == 110.0  # 유지
     assert bar.low == 95.0    # 유지 (96 > 95)
+
+
+# ============================================================
+# 14. _bucket_open_time — 1H / 4H / 1D 정렬 회귀
+# ============================================================
+
+
+def test_bucket_1h_exact_start_unchanged() -> None:
+    """1H bucket — 정각에 시작하는 봉은 그 자신이 open_time."""
+    ts = pd.Timestamp("2024-01-08 14:00:00")
+    assert _bucket_open_time(ts, TF_MINUTES["1H"]) == ts
+
+
+def test_bucket_1h_mid_hour_returns_hour_start() -> None:
+    """1H bucket — 14:37 → 14:00 으로 floor."""
+    ts = pd.Timestamp("2024-01-08 14:37:00")
+    expected = pd.Timestamp("2024-01-08 14:00:00")
+    assert _bucket_open_time(ts, TF_MINUTES["1H"]) == expected
+
+
+def test_bucket_4h_returns_correct_window_start() -> None:
+    """4H bucket — 14:30 → 12:00 bucket (12:00~16:00 구간)."""
+    ts = pd.Timestamp("2024-01-08 14:30:00")
+    result = _bucket_open_time(ts, TF_MINUTES["4H"])
+    expected = pd.Timestamp("2024-01-08 12:00:00")
+    assert result == expected
+
+
+def test_bucket_1d_exact_midnight_unchanged() -> None:
+    """1D bucket — 자정 00:00 은 그 날 자정 그대로."""
+    ts = pd.Timestamp("2024-01-08 00:00:00")
+    assert _bucket_open_time(ts, TF_MINUTES["1D"]) == ts
+
+
+def test_bucket_1d_noon_returns_midnight() -> None:
+    """1D bucket — 12:00 → 그 날 00:00 으로 floor."""
+    ts = pd.Timestamp("2024-01-08 12:00:00")
+    expected = pd.Timestamp("2024-01-08 00:00:00")
+    assert _bucket_open_time(ts, TF_MINUTES["1D"]) == expected
+
+
+def test_bucket_result_is_multiple_of_tf_minutes() -> None:
+    """결과 open_time 은 항상 tf_minutes 배수 (epoch 기준)."""
+    from aurora.backtest.replay import _BUCKET_EPOCH
+    for tf in ("1H", "4H", "1D"):
+        ts = pd.Timestamp("2024-01-10 17:23:00")
+        result = _bucket_open_time(ts, TF_MINUTES[tf])
+        delta_minutes = int((result - _BUCKET_EPOCH).total_seconds() // 60)
+        assert delta_minutes % TF_MINUTES[tf] == 0
+
+
+# ============================================================
+# _new_bar — 추가 케이스 (#253)
+# ============================================================
+
+_OPEN_TIME = pd.Timestamp("2024-01-08 10:00:00")
+
+
+def _minute_bar(o=100.0, h=105.0, low=98.0, c=103.0, v=50.0) -> pd.Series:
+    """테스트용 1분봉 Series."""
+    return pd.Series({"open": o, "high": h, "low": low, "close": c, "volume": v})
+
+
+def test_new_bar_ohlcv_copied_from_minute_bar() -> None:
+    """1분봉 OHLCV 값이 AggregatedBar 로 그대로 복사됨."""
+    bar = _new_bar(_OPEN_TIME, _minute_bar(), tf_minutes=60)
+    assert bar.open == pytest.approx(100.0)
+    assert bar.high == pytest.approx(105.0)
+    assert bar.low == pytest.approx(98.0)
+    assert bar.close == pytest.approx(103.0)
+    assert bar.volume == pytest.approx(50.0)
+
+
+def test_new_bar_open_time_assigned() -> None:
+    """open_time 인자가 AggregatedBar.open_time 에 박힘."""
+    bar = _new_bar(_OPEN_TIME, _minute_bar(), tf_minutes=60)
+    assert bar.open_time == _OPEN_TIME
+
+
+def test_new_bar_close_ts_is_open_plus_tf() -> None:
+    """close_ts = open_time + tf_minutes."""
+    bar = _new_bar(_OPEN_TIME, _minute_bar(), tf_minutes=60)
+    assert bar.close_ts == _OPEN_TIME + pd.Timedelta(minutes=60)
+
+
+def test_new_bar_4h_close_ts() -> None:
+    """4H TF — close_ts 는 open_time + 240분."""
+    bar = _new_bar(_OPEN_TIME, _minute_bar(), tf_minutes=240)
+    assert bar.close_ts == _OPEN_TIME + pd.Timedelta(minutes=240)
+
+
+# ============================================================
+# _update_in_place — 추가 케이스 (#253)
+# ============================================================
+
+def _make_bar(h=105.0, low=98.0, c=103.0, v=50.0) -> AggregatedBar:
+    """테스트용 AggregatedBar."""
+    return AggregatedBar(
+        open_time=_OPEN_TIME, open=100.0,
+        high=h, low=low, close=c, volume=v,
+        close_ts=_OPEN_TIME + pd.Timedelta(minutes=60),
+    )
+
+
+def test_update_in_place_high_updates_when_higher() -> None:
+    """새 1분봉 high 가 기존보다 높으면 갱신."""
+    bar = _make_bar(h=105.0)
+    _update_in_place(bar, _minute_bar(h=110.0))
+    assert bar.high == pytest.approx(110.0)
+
+
+def test_update_in_place_high_unchanged_when_lower() -> None:
+    """새 1분봉 high 가 기존보다 낮으면 유지."""
+    bar = _make_bar(h=105.0)
+    _update_in_place(bar, _minute_bar(h=100.0))
+    assert bar.high == pytest.approx(105.0)
+
+
+def test_update_in_place_low_updates_when_lower() -> None:
+    """새 1분봉 low 가 기존보다 낮으면 갱신."""
+    bar = _make_bar(low=98.0)
+    _update_in_place(bar, _minute_bar(low=95.0))
+    assert bar.low == pytest.approx(95.0)
+
+
+def test_update_in_place_low_unchanged_when_higher() -> None:
+    """새 1분봉 low 가 기존보다 높으면 유지."""
+    bar = _make_bar(low=98.0)
+    _update_in_place(bar, _minute_bar(low=101.0))
+    assert bar.low == pytest.approx(98.0)
+
+
+def test_update_in_place_close_always_overwritten() -> None:
+    """close 는 항상 최신 1분봉 값으로 덮어쓰기."""
+    bar = _make_bar(c=103.0)
+    _update_in_place(bar, _minute_bar(c=108.0))
+    assert bar.close == pytest.approx(108.0)
+
+
+def test_update_in_place_volume_accumulated() -> None:
+    """volume 은 누적 합산."""
+    bar = _make_bar(v=50.0)
+    _update_in_place(bar, _minute_bar(v=30.0))
+    assert bar.volume == pytest.approx(80.0)
+
+
+def test_update_in_place_open_and_open_time_unchanged() -> None:
+    """open / open_time / close_ts 는 갱신하지 않음."""
+    bar = _make_bar()
+    original_open = bar.open
+    original_open_time = bar.open_time
+    original_close_ts = bar.close_ts
+    _update_in_place(bar, _minute_bar(o=999.0))
+    assert bar.open == pytest.approx(original_open)
+    assert bar.open_time == original_open_time
+    assert bar.close_ts == original_close_ts
+
+
+# ============================================================
+# _new_bar / _update_in_place — 추가 케이스 (#254)
+# ============================================================
+
+
+def test_new_bar_copies_ohlcv_from_minute_bar() -> None:
+    """1분봉 OHLCV 값이 AggregatedBar 에 그대로 복사된다."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    minute = make_minute_bar("2024-01-08 09:00:00", o=100.0, h=102.0, lo=99.0, c=101.0, v=50.0)
+    bar = _new_bar(open_time, minute, tf_minutes=60)
+    assert bar.open == 100.0
+    assert bar.high == 102.0
+    assert bar.low == 99.0
+    assert bar.close == 101.0
+    assert bar.volume == 50.0
+
+
+def test_new_bar_open_time_and_close_ts() -> None:
+    """open_time 그대로, close_ts = open_time + tf_minutes."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    minute = make_minute_bar("2024-01-08 09:00:00", o=1.0, h=1.0, lo=1.0, c=1.0, v=1.0)
+    bar = _new_bar(open_time, minute, tf_minutes=240)
+    assert bar.open_time == open_time
+    assert bar.close_ts == open_time + pd.Timedelta(minutes=240)
+
+
+def test_new_bar_returns_aggregated_bar_instance() -> None:
+    """반환 타입이 AggregatedBar."""
+    open_time = pd.Timestamp("2024-01-08 00:00:00")
+    minute = make_minute_bar("2024-01-08 00:00:00", o=1.0, h=1.0, lo=1.0, c=1.0, v=1.0)
+    assert isinstance(_new_bar(open_time, minute, tf_minutes=15), AggregatedBar)
+
+
+def test_update_in_place_extends_high() -> None:
+    """새 분봉 high > 기존 high → 교체."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    bar = _new_bar(open_time, make_minute_bar("", 100.0, 102.0, lo=99.0, c=100.0, v=10.0), 60)
+    _update_in_place(bar, make_minute_bar("", 101.0, 105.0, lo=100.0, c=103.0, v=5.0))
+    assert bar.high == 105.0
+
+
+def test_update_in_place_extends_low() -> None:
+    """새 분봉 low < 기존 low → 교체."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    bar = _new_bar(open_time, make_minute_bar("", 100.0, 102.0, lo=99.0, c=100.0, v=10.0), 60)
+    _update_in_place(bar, make_minute_bar("", 99.0, 100.0, lo=96.0, c=97.0, v=5.0))
+    assert bar.low == 96.0
+
+
+def test_update_in_place_close_is_latest() -> None:
+    """close 는 항상 마지막 분봉의 close 로 덮어씀."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    bar = _new_bar(open_time, make_minute_bar("", 100.0, 102.0, 99.0, 101.0, 10.0), 60)
+    _update_in_place(bar, make_minute_bar("", 101.0, 103.0, lo=100.5, c=102.5, v=7.0))
+    assert bar.close == 102.5
+
+
+def test_update_in_place_volume_accumulates() -> None:
+    """volume 은 누적 합산."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    bar = _new_bar(open_time, make_minute_bar("", 100.0, 100.0, lo=100.0, c=100.0, v=10.0), 60)
+    _update_in_place(bar, make_minute_bar("", 100.0, 100.0, lo=100.0, c=100.0, v=20.0))
+    _update_in_place(bar, make_minute_bar("", 100.0, 100.0, lo=100.0, c=100.0, v=5.0))
+    assert bar.volume == 35.0
+
+
+def test_update_in_place_does_not_change_open_or_open_time() -> None:
+    """open / open_time / close_ts 는 갱신하지 않음."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    bar = _new_bar(open_time, make_minute_bar("", 100.0, 102.0, 99.0, 101.0, 10.0), 60)
+    orig_open = bar.open
+    orig_close_ts = bar.close_ts
+    _update_in_place(bar, make_minute_bar("", 200.0, 210.0, lo=198.0, c=205.0, v=30.0))
+    assert bar.open == orig_open
+    assert bar.open_time == open_time
+    assert bar.close_ts == orig_close_ts

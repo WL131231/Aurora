@@ -806,6 +806,38 @@ def test_atr_wilder_gap_uses_prev_close_in_tr() -> None:
 
 
 # ============================================================
+# dual_supertrend_alignment — 두 SuperTrend 정렬 신호
+# ============================================================
+
+
+def _ohlc_trend(closes: list[float], spread: float = 0.5) -> pd.DataFrame:
+    """합성 OHLC DataFrame (high = close + spread, low = close - spread)."""
+    return pd.DataFrame({
+        "high":  [c + spread for c in closes],
+        "low":   [c - spread for c in closes],
+        "close": closes,
+    })
+
+
+def test_dual_st_alignment_both_bull_returns_plus_one() -> None:
+    """강한 상승 추세 → 두 ST 모두 bull → +1."""
+    closes = list(np.linspace(80.0, 120.0, 60))
+    assert dual_supertrend_alignment(_ohlc_trend(closes)) == 1
+
+
+def test_dual_st_alignment_both_bear_returns_minus_one() -> None:
+    """강한 하락 추세 → 두 ST 모두 bear → -1."""
+    closes = list(np.linspace(120.0, 80.0, 60))
+    assert dual_supertrend_alignment(_ohlc_trend(closes)) == -1
+
+
+def test_dual_st_alignment_insufficient_data_returns_zero() -> None:
+    """데이터 부족 (< period + 2) → 0."""
+    closes = [100.0] * 5
+    assert dual_supertrend_alignment(_ohlc_trend(closes), period_fast=14, period_slow=14) == 0
+
+
+# ============================================================
 # _within / _within_any — 하모닉 tolerance 헬퍼
 # ============================================================
 

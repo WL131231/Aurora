@@ -15,8 +15,11 @@ import pytest
 
 from aurora.backtest.replay import (
     TF_MINUTES,
+    AggregatedBar,
     MultiTfAggregator,
     _bucket_open_time,
+    _new_bar,
+    _update_in_place,
 )
 
 # ============================================================
@@ -352,3 +355,64 @@ def test_weekly_anchored_to_monday() -> None:
     bucket2 = _bucket_open_time(pd.Timestamp("2024-01-15 12:00:00"), TF_MINUTES["1W"])
     assert bucket2 == pd.Timestamp("2024-01-15 00:00:00")
     assert bucket2.weekday() == 0
+
+
+# ============================================================
+# _new_bar / _update_in_place
+# ============================================================
+
+
+def _minute_series(
+    open_: float, high: float, low: float, close: float, volume: float,
+) -> pd.Series:
+    return pd.Series({"open": open_, "high": high, "low": low, "close": close, "volume": volume})
+
+
+def test_new_bar_initialises_all_ohlcv() -> None:
+    """_new_bar — 1분봉 값을 그대로 AggregatedBar 에 복사."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    bar = _new_bar(open_time, _minute_series(100.0, 105.0, 98.0, 103.0, 10.0), 60)
+    assert bar.open_time == open_time
+    assert bar.open == 100.0
+    assert bar.high == 105.0
+    assert bar.low == 98.0
+    assert bar.close == 103.0
+    assert bar.volume == 10.0
+    assert bar.close_ts == open_time + pd.Timedelta(minutes=60)
+
+
+def test_new_bar_close_ts_matches_tf_minutes() -> None:
+    """4H TF → close_ts = open_time + 240분."""
+    open_time = pd.Timestamp("2024-01-08 08:00:00")
+    bar = _new_bar(open_time, _minute_series(50.0, 52.0, 49.0, 51.0, 5.0), 240)
+    assert bar.close_ts == open_time + pd.Timedelta(minutes=240)
+
+
+def test_update_in_place_updates_high_low_close_volume() -> None:
+    """_update_in_place — high/low/close/volume 갱신, open/open_time 불변."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    bar = AggregatedBar(
+        open_time=open_time,
+        open=100.0, high=105.0, low=98.0, close=103.0, volume=10.0,
+        close_ts=open_time + pd.Timedelta(minutes=60),
+    )
+    _update_in_place(bar, _minute_series(103.0, 110.0, 97.0, 108.0, 20.0))
+    assert bar.open == 100.0         # 불변
+    assert bar.open_time == open_time  # 불변
+    assert bar.high == 110.0         # 갱신
+    assert bar.low == 97.0           # 갱신
+    assert bar.close == 108.0        # 최신 close
+    assert bar.volume == 30.0        # 누적
+
+
+def test_update_in_place_high_not_updated_when_lower() -> None:
+    """새 봉 high 가 기존보다 낮으면 high 유지."""
+    open_time = pd.Timestamp("2024-01-08 09:00:00")
+    bar = AggregatedBar(
+        open_time=open_time,
+        open=100.0, high=110.0, low=95.0, close=105.0, volume=10.0,
+        close_ts=open_time + pd.Timedelta(minutes=60),
+    )
+    _update_in_place(bar, _minute_series(105.0, 107.0, 96.0, 106.0, 5.0))
+    assert bar.high == 110.0  # 유지
+    assert bar.low == 95.0    # 유지 (96 > 95)

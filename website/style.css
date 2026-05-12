@@ -663,6 +663,31 @@ body {
     transform: translateY(0);
 }
 
+/* Aurora-ICT 모델 — 빌드 박힐 때까지 Coming Soon (disabled 톤) */
+.hero-download-btn-soon {
+    background: linear-gradient(135deg, rgba(96, 81, 155, 0.35) 0%, rgba(122, 104, 181, 0.35) 50%, rgba(191, 192, 209, 0.35) 100%);
+    color: rgba(30, 32, 44, 0.65);
+    cursor: not-allowed;
+    pointer-events: none;
+    position: relative;
+    box-shadow: none;
+}
+.hero-download-btn-soon:hover {
+    transform: none;
+    filter: none;
+    box-shadow: none;
+}
+.hero-download-btn-badge {
+    margin-left: 0.4rem;
+    padding: 2px 6px;
+    background: rgba(30, 32, 44, 0.7);
+    color: rgba(191, 192, 209, 0.95);
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
 /* Nav 우측 작은 Download 링크 — Hero CTA 와 톤 다르게 (subtle) */
 .nav-download-link {
     font-size: 11px;

@@ -8,7 +8,6 @@ from aurora.market.ratios_aggregator import (
     compute_ratios,
 )
 
-
 # ============================================================
 # _ratio_to_long_pct
 # ============================================================

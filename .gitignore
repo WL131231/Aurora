@@ -8,6 +8,9 @@ credentials.json
 config_secret.*
 secrets/
 
+# ===== 로컬 백업 (PR/issue 덤프 등) =====
+backup/
+
 # ===== Python =====
 __pycache__/
 *.py[cod]

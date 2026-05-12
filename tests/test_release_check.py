@@ -153,6 +153,39 @@ def test_start_polling_without_event_loop_falls_back_to_check_only():
     assert release_check.get_last_check_ts() is not None
 
 
+# ============================================================
+# stop_polling
+# ============================================================
+
+
+def test_stop_polling_clears_task_field() -> None:
+    """stop_polling 호출 후 내부 task 필드 None."""
+    from unittest.mock import MagicMock
+    mock_task = MagicMock()
+    mock_task.done.return_value = False
+    release_check._state["task"] = mock_task
+    release_check.stop_polling()
+    mock_task.cancel.assert_called_once()
+    assert release_check._state["task"] is None
+
+
+def test_stop_polling_noop_when_no_task() -> None:
+    """task 없으면 stop_polling 은 예외 없이 noop."""
+    release_check._state["task"] = None
+    release_check.stop_polling()  # 예외 없어야 함
+
+
+def test_stop_polling_skips_cancel_when_task_done() -> None:
+    """이미 완료된 task — cancel 미호출."""
+    from unittest.mock import MagicMock
+    mock_task = MagicMock()
+    mock_task.done.return_value = True
+    release_check._state["task"] = mock_task
+    release_check.stop_polling()
+    mock_task.cancel.assert_not_called()
+    assert release_check._state["task"] is None
+
+
 def test_start_polling_with_loop_creates_task():
     """이벤트 루프 있는 환경 — task 생성 확인."""
     import asyncio

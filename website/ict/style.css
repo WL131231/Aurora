@@ -1,15 +1,23 @@
 /* ============================================================
-   AURORA · ICT — Landing page (Space Exploration inspired)
-   ============================================================ */
+   AURORA · ICT — Landing page (Red palette, noguchi design)
+   ============================================================
+   Palette:
+     #19171b — base (거의 검정, 살짝 푸른 회색)
+     #75020f — bright deep red (액센트)
+     #51080d — mid deep red
+     #2b0307 — darkest red (거의 검정)
+*/
 
 :root {
-  --bg: #06060a;
-  --bg-2: #0a0a12;
+  --bg: #19171b;
+  --bg-2: #0e0c10;
   --text-1: #f4f4f5;
   --text-2: #a1a1aa;
-  --text-3: #52525b;
-  --accent: #a855f7;
-  --accent-2: #fbbf24;
+  --text-3: #6b6970;
+  --accent: #75020f;
+  --accent-2: #c11926;       /* 밝은 강조 (link hover 등) */
+  --accent-deep: #51080d;
+  --accent-darkest: #2b0307;
   --line: rgba(255, 255, 255, 0.06);
 }
 
@@ -25,18 +33,14 @@ body {
   overflow-x: hidden;
 }
 
-/* 박힌 별 배경 */
+/* 배경 — 별 대신 미세 레드 그라데이션 */
 .bg-stars {
   position: fixed;
   inset: 0;
   background:
-    radial-gradient(2px 2px at 20% 30%, rgba(255,255,255,0.4), transparent),
-    radial-gradient(1px 1px at 70% 20%, rgba(255,255,255,0.3), transparent),
-    radial-gradient(1.5px 1.5px at 40% 70%, rgba(255,255,255,0.5), transparent),
-    radial-gradient(1px 1px at 85% 60%, rgba(255,255,255,0.3), transparent),
-    radial-gradient(1.5px 1.5px at 10% 80%, rgba(255,255,255,0.4), transparent),
-    radial-gradient(1px 1px at 55% 45%, rgba(255,255,255,0.25), transparent),
-    radial-gradient(2px 2px at 90% 90%, rgba(255,255,255,0.35), transparent),
+    radial-gradient(circle at 20% 30%, rgba(117, 2, 15, 0.18), transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(81, 8, 13, 0.22), transparent 55%),
+    radial-gradient(circle at 50% 50%, rgba(43, 3, 7, 0.4), transparent 70%),
     var(--bg);
   z-index: -1;
 }
@@ -55,7 +59,7 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   justify-content: space-between;
   z-index: 50;
-  background: rgba(6, 6, 10, 0.5);
+  background: rgba(14, 12, 16, 0.65);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
 }
@@ -92,7 +96,7 @@ a { color: inherit; text-decoration: none; }
 }
 .nav-download:hover {
   border-color: var(--accent);
-  background: rgba(168, 85, 247, 0.08);
+  background: rgba(117, 2, 15, 0.18);
 }
 
 /* ============================================================
@@ -107,29 +111,40 @@ a { color: inherit; text-decoration: none; }
   position: relative;
 }
 
+/* 손 이미지 — 좌측 영역 가득. 박스 / animation X. */
 .hero-image {
   height: calc(100vh - 64px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   position: relative;
   overflow: hidden;
 }
 
 .hero-image img {
-  width: 95%;
-  max-width: 720px;
-  height: auto;
-  object-fit: contain;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center center;
+  /* 이미지 자체가 검정 배경 → 본 배경(#19171b) 과 자연 블렌딩 */
+  mix-blend-mode: screen;
   filter:
-    drop-shadow(0 0 60px rgba(168, 85, 247, 0.25))
-    drop-shadow(0 0 120px rgba(168, 85, 247, 0.15));
-  animation: float 8s ease-in-out infinite;
+    drop-shadow(0 0 80px rgba(193, 25, 38, 0.3))
+    contrast(1.05);
 }
 
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-12px); }
+/* 우측 텍스트 영역으로 자연 페이드 */
+.hero-image::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    transparent 60%,
+    rgba(25, 23, 27, 0.4) 85%,
+    var(--bg) 100%
+  );
+  pointer-events: none;
 }
 
 .hero-content {
@@ -164,7 +179,7 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: -0.02em;
 }
 .hero-title .accent {
-  background: linear-gradient(135deg, #a855f7, #22d3ee);
+  background: linear-gradient(135deg, #c11926 0%, #75020f 50%, #51080d 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -184,19 +199,20 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   gap: 12px;
   padding: 14px 24px;
-  background: linear-gradient(135deg, #60519b 0%, #7a68b5 50%, #bfc0d1 100%);
-  color: #1e202c;
+  background: linear-gradient(135deg, #75020f 0%, #51080d 50%, #2b0307 100%);
+  color: #f4f4f5;
   font-size: 12px;
   letter-spacing: 0.25em;
   font-weight: 500;
   border-radius: 6px;
+  border: 1px solid rgba(193, 25, 38, 0.5);
   transition: transform 0.2s, box-shadow 0.2s, filter 0.2s;
-  box-shadow: 0 0 28px -6px rgba(168, 85, 247, 0.4);
+  box-shadow: 0 0 28px -6px rgba(117, 2, 15, 0.6);
 }
 .hero-cta:hover {
   transform: translateY(-2px);
-  filter: brightness(1.08);
-  box-shadow: 0 0 40px -6px rgba(168, 85, 247, 0.55);
+  filter: brightness(1.15);
+  box-shadow: 0 0 40px -6px rgba(193, 25, 38, 0.7);
 }
 
 /* ============================================================
@@ -212,15 +228,16 @@ a { color: inherit; text-decoration: none; }
 }
 
 .card {
-  background: rgba(20, 20, 28, 0.5);
+  background: rgba(14, 12, 16, 0.7);
   backdrop-filter: blur(8px);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 24px;
-  transition: border-color 0.2s, transform 0.2s;
+  transition: border-color 0.2s, transform 0.2s, background 0.2s;
 }
 .card:hover {
-  border-color: rgba(168, 85, 247, 0.3);
+  border-color: rgba(193, 25, 38, 0.5);
+  background: rgba(43, 3, 7, 0.5);
   transform: translateY(-4px);
 }
 
@@ -320,17 +337,20 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   gap: 12px;
   padding: 14px 28px;
-  background: linear-gradient(135deg, #60519b 0%, #7a68b5 50%, #bfc0d1 100%);
-  color: #1e202c;
+  background: linear-gradient(135deg, #75020f 0%, #51080d 50%, #2b0307 100%);
+  color: #f4f4f5;
   font-size: 12px;
   letter-spacing: 0.25em;
   font-weight: 500;
   border-radius: 6px;
-  transition: transform 0.2s, filter 0.2s;
+  border: 1px solid rgba(193, 25, 38, 0.5);
+  box-shadow: 0 0 20px -6px rgba(117, 2, 15, 0.6);
+  transition: transform 0.2s, filter 0.2s, box-shadow 0.2s;
 }
 .dl-btn:hover {
   transform: translateY(-2px);
-  filter: brightness(1.08);
+  filter: brightness(1.15);
+  box-shadow: 0 0 32px -6px rgba(193, 25, 38, 0.75);
 }
 
 .latest-info {
@@ -339,7 +359,7 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: 0.15em;
 }
 .latest-info a {
-  color: var(--accent);
+  color: var(--accent-2);
   transition: color 0.2s;
 }
 .latest-info a:hover {
@@ -348,7 +368,8 @@ a { color: inherit; text-decoration: none; }
 
 code {
   font-family: "JetBrains Mono", monospace;
-  background: rgba(168, 85, 247, 0.08);
+  background: rgba(193, 25, 38, 0.12);
+  color: #f1c4c8;
   padding: 2px 6px;
   border-radius: 3px;
   font-size: 12px;

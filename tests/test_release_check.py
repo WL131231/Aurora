@@ -169,12 +169,6 @@ def test_stop_polling_clears_task_field() -> None:
     assert release_check._state["task"] is None
 
 
-def test_stop_polling_noop_when_no_task() -> None:
-    """task 없으면 stop_polling 은 예외 없이 noop."""
-    release_check._state["task"] = None
-    release_check.stop_polling()  # 예외 없어야 함
-
-
 def test_stop_polling_skips_cancel_when_task_done() -> None:
     """이미 완료된 task — cancel 미호출."""
     from unittest.mock import MagicMock

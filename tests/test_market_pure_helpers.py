@@ -10,9 +10,8 @@ from __future__ import annotations
 
 import pytest
 
+from aurora.market.coinalyze import _coin_from_symbol, _interval_to_seconds
 from aurora.market.ratios_aggregator import _ratio_to_long_pct
-from aurora.market.coinalyze import _interval_to_seconds, _coin_from_symbol
-
 
 # ── _ratio_to_long_pct ────────────────────────────────────────────────
 

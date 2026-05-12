@@ -358,7 +358,6 @@ def test_weekly_anchored_to_monday() -> None:
 # 14. _bucket_open_time — 1H / 4H / 1D 정렬 회귀
 # ============================================================
 
-from aurora.backtest.replay import _bucket_open_time  # noqa: E402 (already imported above)
 
 
 def test_bucket_1h_exact_start_unchanged() -> None:

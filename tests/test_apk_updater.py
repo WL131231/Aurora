@@ -5,6 +5,7 @@
     - get_status: 복사본 반환 (state 직접 노출 방지)
     - _check_and_download: fetch 실패 / 버전 skip / asset 없음 / 이미 완료 / 정상 다운 / 네트워크 오류
     - start(): 플랫폼 가드 (android 아니면 thread 안 띄움)
+    - _apk_dir: AURORA_DATA_DIR 환경변수 유무에 따른 경로 반환
 
 외부 네트워크 호출 없음 — urllib.request.urlretrieve + fetch_latest 합성 stub 교체.
 파일 I/O 는 pytest tmp_path 로 격리.
@@ -251,3 +252,27 @@ def test_start_launches_daemon_thread_on_android(monkeypatch):
     with patch("aurora.interfaces.apk_updater.threading.Thread", return_value=mock_thread):
         apk_updater.start()
     mock_thread.start.assert_called_once()
+
+
+# ── _apk_dir ─────────────────────────────────────────────────────
+
+
+def test_apk_dir_uses_data_dir_env(monkeypatch, tmp_path):
+    """AURORA_DATA_DIR 설정 시 해당 경로 / 'update' 반환."""
+    monkeypatch.setenv("AURORA_DATA_DIR", str(tmp_path))
+    result = apk_updater._apk_dir()
+    assert result == tmp_path / "update"
+
+
+def test_apk_dir_fallback_when_env_unset(monkeypatch):
+    """AURORA_DATA_DIR 미설정 시 /tmp/aurora_update 반환."""
+    monkeypatch.delenv("AURORA_DATA_DIR", raising=False)
+    result = apk_updater._apk_dir()
+    assert result == Path("/tmp/aurora_update")
+
+
+def test_apk_dir_fallback_when_env_empty(monkeypatch):
+    """AURORA_DATA_DIR 빈 문자열 → falsy → 폴백 경로 반환."""
+    monkeypatch.setenv("AURORA_DATA_DIR", "")
+    result = apk_updater._apk_dir()
+    assert result == Path("/tmp/aurora_update")

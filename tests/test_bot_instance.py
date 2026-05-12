@@ -13,6 +13,7 @@ import pytest
 
 from aurora.exchange.base import Balance, Order
 from aurora.interfaces import bot_instance
+from aurora.interfaces.bot_instance import _categorize_source
 
 
 @pytest.fixture(autouse=True)
@@ -1018,3 +1019,56 @@ async def test_restore_active_position_paper_skipped(monkeypatch) -> None:
     assert active_position_store.load() is not None
 
     await bot.stop()
+
+
+# ============================================================
+# _categorize_source — signal.source → UI 카테고리 매핑
+# ============================================================
+
+
+def test_categorize_source_ema() -> None:
+    """ema_ prefix → 'EMA'."""
+    assert _categorize_source("ema_touch_200") == "EMA"
+    assert _categorize_source("ema_touch_480") == "EMA"
+
+
+def test_categorize_source_rsi() -> None:
+    """rsi_ prefix → 'RSI'."""
+    assert _categorize_source("rsi_div_regular_bull") == "RSI"
+    assert _categorize_source("rsi_div_hidden_bear") == "RSI"
+
+
+def test_categorize_source_bb() -> None:
+    """bollinger_ prefix → 'BB'."""
+    assert _categorize_source("bollinger_reversal_upper") == "BB"
+    assert _categorize_source("bollinger_reversal_lower") == "BB"
+
+
+def test_categorize_source_ma() -> None:
+    """ma_cross_ prefix → 'MA'."""
+    assert _categorize_source("ma_cross_golden") == "MA"
+    assert _categorize_source("ma_cross_dead") == "MA"
+
+
+def test_categorize_source_ichimoku() -> None:
+    """ichimoku_ prefix → 'Ichimoku'."""
+    assert _categorize_source("ichimoku_cloud_upper") == "Ichimoku"
+
+
+def test_categorize_source_harmonic() -> None:
+    """harmonic_ prefix → 'Harmonic'."""
+    assert _categorize_source("harmonic_bat") == "Harmonic"
+    assert _categorize_source("harmonic_butterfly") == "Harmonic"
+
+
+def test_categorize_source_2468() -> None:
+    """zone_2468_ prefix → '가격 매매'."""
+    assert _categorize_source("zone_2468_short") == "가격 매매"
+    assert _categorize_source("zone_2468_long") == "가격 매매"
+
+
+def test_categorize_source_unknown_returns_none() -> None:
+    """알 수 없는 source → None."""
+    assert _categorize_source("twin_trend") is None
+    assert _categorize_source("unknown_signal") is None
+    assert _categorize_source("") is None

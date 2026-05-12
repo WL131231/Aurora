@@ -166,6 +166,7 @@ def test_on_trade_alert_entry_calls_send():
 def test_kst_now_str_format() -> None:
     """_kst_now_str → 'YYYY-MM-DD HH:MM KST' 포맷."""
     import re
+
     from aurora.interfaces.telegram import _kst_now_str
     result = _kst_now_str()
     assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2} KST$", result), f"Unexpected: {result!r}"
@@ -210,6 +211,7 @@ def test_launch_in_background_noop_when_no_token() -> None:
     """TELEGRAM_BOT_TOKEN 미설정 → 스레드 안 띄움."""
     import threading
     from unittest.mock import patch
+
     import aurora.interfaces.telegram as tg_module
     tg_module._bot = None
 

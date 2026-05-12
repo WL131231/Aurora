@@ -14,8 +14,8 @@ import pandas as pd
 import pytest
 
 from aurora.backtest.replay import (
-    AggregatedBar,
     TF_MINUTES,
+    AggregatedBar,
     MultiTfAggregator,
     _bucket_open_time,
     _new_bar,
@@ -364,9 +364,9 @@ def test_weekly_anchored_to_monday() -> None:
 _OPEN_TIME = pd.Timestamp("2024-01-08 10:00:00")
 
 
-def _minute_bar(o=100.0, h=105.0, l=98.0, c=103.0, v=50.0) -> pd.Series:
+def _minute_bar(o=100.0, h=105.0, low=98.0, c=103.0, v=50.0) -> pd.Series:
     """테스트용 1분봉 Series."""
-    return pd.Series({"open": o, "high": h, "low": l, "close": c, "volume": v})
+    return pd.Series({"open": o, "high": h, "low": low, "close": c, "volume": v})
 
 
 def test_new_bar_ohlcv_copied_from_minute_bar() -> None:
@@ -401,11 +401,11 @@ def test_new_bar_4h_close_ts() -> None:
 # _update_in_place — 진행 중 봉 갱신
 # ============================================================
 
-def _make_bar(h=105.0, l=98.0, c=103.0, v=50.0) -> AggregatedBar:
+def _make_bar(h=105.0, low=98.0, c=103.0, v=50.0) -> AggregatedBar:
     """테스트용 AggregatedBar."""
     return AggregatedBar(
         open_time=_OPEN_TIME, open=100.0,
-        high=h, low=l, close=c, volume=v,
+        high=h, low=low, close=c, volume=v,
         close_ts=_OPEN_TIME + pd.Timedelta(minutes=60),
     )
 
@@ -426,15 +426,15 @@ def test_update_in_place_high_unchanged_when_lower() -> None:
 
 def test_update_in_place_low_updates_when_lower() -> None:
     """새 1분봉 low 가 기존보다 낮으면 갱신."""
-    bar = _make_bar(l=98.0)
-    _update_in_place(bar, _minute_bar(l=95.0))
+    bar = _make_bar(low=98.0)
+    _update_in_place(bar, _minute_bar(low=95.0))
     assert bar.low == pytest.approx(95.0)
 
 
 def test_update_in_place_low_unchanged_when_higher() -> None:
     """새 1분봉 low 가 기존보다 높으면 유지."""
-    bar = _make_bar(l=98.0)
-    _update_in_place(bar, _minute_bar(l=101.0))
+    bar = _make_bar(low=98.0)
+    _update_in_place(bar, _minute_bar(low=101.0))
     assert bar.low == pytest.approx(98.0)
 
 

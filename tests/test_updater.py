@@ -142,6 +142,58 @@ def test_find_ui_asset_url_returns_browser_download_url():
     assert updater.find_ui_asset_url(release) == "https://example.com/ui.zip"
 
 
+# ============================================================
+# _is_frozen
+# ============================================================
+
+
+def test_is_frozen_returns_false_in_dev() -> None:
+    """pytest / dev 환경에서는 sys.frozen 없음 → False."""
+    assert updater._is_frozen() is False
+
+
+def test_is_frozen_returns_true_when_frozen() -> None:
+    """sys.frozen = True 로 patch → True."""
+    import sys
+    with patch.object(sys, "frozen", True, create=True):
+        assert updater._is_frozen() is True
+
+
+def test_is_frozen_returns_false_when_frozen_false() -> None:
+    """sys.frozen = False 명시 시에도 False."""
+    import sys
+    with patch.object(sys, "frozen", False, create=True):
+        assert updater._is_frozen() is False
+
+
+# ============================================================
+# _launched_from_launcher
+# ============================================================
+
+
+def test_launched_from_launcher_returns_true_when_env_set() -> None:
+    """AURORA_FROM_LAUNCHER=1 → True."""
+    import os
+    with patch.dict(os.environ, {"AURORA_FROM_LAUNCHER": "1"}):
+        assert updater._launched_from_launcher() is True
+
+
+def test_launched_from_launcher_returns_false_when_env_absent() -> None:
+    """AURORA_FROM_LAUNCHER 미설정 → False."""
+    import os
+    env = {k: v for k, v in os.environ.items() if k != "AURORA_FROM_LAUNCHER"}
+    with patch("os.environ", env):
+        assert updater._launched_from_launcher() is False
+
+
+def test_launched_from_launcher_returns_false_for_other_values() -> None:
+    """AURORA_FROM_LAUNCHER=0 / yes 등 비-'1' 값 → False."""
+    import os
+    for val in ("0", "yes", "true", ""):
+        with patch.dict(os.environ, {"AURORA_FROM_LAUNCHER": val}):
+            assert updater._launched_from_launcher() is False
+
+
 def test_find_ui_asset_url_returns_none_when_missing():
     release = {"tag_name": "v0.1.2", "assets": [
         {"name": "Aurora-windows.exe", "browser_download_url": "https://example.com/exe"},

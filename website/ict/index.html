@@ -55,9 +55,9 @@
     </h1>
 
     <p class="hero-sub">
-      Inner Circle Trader 전략을 알고리즘으로 옮긴 자동매매 봇.
-      Smart Money가 남긴 유동성, FVG, Market Structure Shift —
-      24시간 추적하다가 유효한 setup이 나오면 자동으로 진입합니다.
+      ICT는 <strong>Inner Circle Trader</strong> — 시장은 기관 알고리즘이 유동성을
+      사냥하며 움직인다고 보는 매매 방법론입니다. Aurora-ICT는 그 룰을 100% 코드로
+      옮겨 24시간 차트를 감시하고, 7개 핵심 지표가 정렬된 자리에서만 진입합니다.
     </p>
 
     <a href="#download" class="hero-cta">
@@ -69,7 +69,7 @@
   </div>
 </section>
 
-<!-- ─── 3 카드 (스크롤 hint) ───────────────────────────────── -->
+<!-- ─── 7개 핵심 지표 ──────────────────────────────────── -->
 <section class="hero-cards">
   <div class="card">
     <div class="card-label">_FVG</div>
@@ -84,7 +84,27 @@
   <div class="card">
     <div class="card-label">_MSS</div>
     <h3>Market Structure Shift</h3>
-    <p>기존 추세가 꺾이면서 반대 방향 swing이 형성되는 순간. ICT 진입의 핵심 confirmation.</p>
+    <p>기존 추세가 꺾이며 반대 방향 swing이 형성되는 순간. 진입의 핵심 confirmation.</p>
+  </div>
+  <div class="card">
+    <div class="card-label">_KILLZONE</div>
+    <h3>Killzone</h3>
+    <p>London · NY AM · PM — 변동성이 집중되는 시간대. <em>TIME first, PRICE second.</em></p>
+  </div>
+  <div class="card">
+    <div class="card-label">_BSL / SSL</div>
+    <h3>Buy / Sell-side Liquidity</h3>
+    <p>이전 고점 위·저점 아래에 쌓인 stop loss 군집. 알고리즘이 노리는 1차 타겟.</p>
+  </div>
+  <div class="card">
+    <div class="card-label">_PD ZONE</div>
+    <h3>Premium / Discount</h3>
+    <p>최근 swing의 50% 라인 기준. Discount에서 롱, Premium에서 숏 — 손익비의 핵심.</p>
+  </div>
+  <div class="card">
+    <div class="card-label">_SMT DIV.</div>
+    <h3>SMT Divergence</h3>
+    <p>상관 자산(BTC ↔ ETH 등)이 서로 다른 방향으로 갈라지는 순간. 기관 흐름의 누설.</p>
   </div>
 </section>
 
@@ -94,18 +114,37 @@
   <h2>왜 ICT인가?</h2>
   <div class="section-body">
     <p>
-      ICT (Inner Circle Trader)는 Michael J. Huddleston이 정립한 매매 방법론입니다.
-      가격은 단순 수급이 아니라 알고리즘(IPDA)이 유동성을 사냥하는 방식으로 움직인다 —
-      이게 전체 프레임의 출발점.
+      ICT (Inner Circle Trader)는 Michael J. Huddleston이 20여 년의 실전 경험을
+      기반으로 정립한 매매 방법론입니다. 출발점은 단순합니다 —
+      <strong>시장은 무작위가 아니다.</strong>
+      가격은 수급의 결과가 아니라, <em>Interbank Price Delivery Algorithm</em> (IPDA)
+      이라 불리는 기관 단위 알고리즘이 유동성을 사냥하는 방식으로 움직인다는 것.
     </p>
     <p>
-      <strong>핵심은 TIME first, PRICE second.</strong>
-      London · NY AM · PM Killzone 같은 특정 시간대의 setup만 추리고,
-      나머지 시간의 노이즈는 전부 걸러냅니다.
+      개인 트레이더의 손절(stop loss)은 차트 위 가장 명확한 자리에 쌓입니다 —
+      이전 고점 위, 이전 저점 아래. 이게 곧 <strong>유동성(liquidity)</strong>입니다.
+      알고리즘은 이 유동성을 먼저 회수한 뒤 진짜 방향으로 가격을 이동시키죠.
+      ICT는 이 과정을 FVG · Liquidity Sweep · MSS 같은 흔적으로 읽어내고,
+      개인 트레이더가 알고리즘과 <em>같은 편</em>에 설 수 있도록 룰을 제공합니다.
     </p>
     <p>
-      Aurora-ICT는 이 전략을 100% 룰 기반으로 옮긴 자동매매 봇입니다.
-      AI 추정 없음, 재량 진입 없음 — 알고리즘이 본 신호 그대로 진입하고 청산합니다.
+      <strong>핵심 명제는 TIME first, PRICE second.</strong>
+      가격은 아무 때나 움직이지 않습니다. London Open · NY AM · NY PM —
+      변동성이 집중되는 Killzone 안에서만 의미 있는 setup이 형성됩니다.
+      Aurora-ICT는 그 외 시간의 노이즈를 모두 차단하고,
+      Killzone 안에서 형성된 첫 FVG · 첫 Sweep · 첫 MSS만 추적합니다.
+    </p>
+    <p>
+      재량 매매의 가장 큰 적은 트레이더 본인의 감정입니다.
+      차트가 흔들릴 때마다 손이 먼저 움직이고, 룰은 뒤늦게 변명을 만듭니다.
+      Aurora-ICT는 그 고리를 끊습니다 — <strong>AI 추정 없음, 재량 진입 없음.</strong>
+      7개 핵심 지표가 정렬된 자리에서만 자동으로 진입하고, 정의된 SL/TP/RR에서만
+      자동으로 청산합니다. 사람이 끼어들 자리는 toggle on/off 뿐입니다.
+    </p>
+    <p class="muted">
+      ICT는 만능이 아닙니다. 작동하지 않는 시장 환경도 분명히 존재합니다.
+      하지만 룰을 명확히 정의하고, 검증된 setup에서만 일관되게 실행한다는 점에서 —
+      그것만으로도 대부분의 재량 매매보다 한 발 앞섭니다.
     </p>
   </div>
 </section>

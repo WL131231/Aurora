@@ -560,3 +560,153 @@ def test_launcher_new_path_macos_ends_with_zip_new(tmp_path) -> None:
     ):
         result = launcher._launcher_new_path()
     assert result == tmp_path / "Aurora-launcher-macOS.zip.new"
+# find_launcher_url — 플랫폼별 launcher asset URL 반환
+# ============================================================
+
+
+def _release_with(*names: str) -> dict:
+    """헬퍼 — 지정 이름들의 asset 목록을 가진 release dict 생성."""
+    return {
+        "tag_name": "v0.3.0",
+        "assets": [
+            {"name": n, "browser_download_url": f"https://example.com/{n}"}
+            for n in names
+        ],
+    }
+
+
+def test_find_launcher_url_windows_returns_exe_url(monkeypatch):
+    """Windows 환경 — Aurora-launcher.exe asset URL 반환."""
+    monkeypatch.setattr("aurora_launcher.launcher.platform.system", lambda: "Windows")
+    release = _release_with("Aurora-windows.exe", "Aurora-launcher.exe", "Aurora-launcher-macOS.zip")
+    result = launcher.find_launcher_url(release)
+    assert result == "https://example.com/Aurora-launcher.exe"
+
+
+def test_find_launcher_url_macos_returns_zip_url(monkeypatch):
+    """macOS 환경 — Aurora-launcher-macOS.zip asset URL 반환."""
+    monkeypatch.setattr("aurora_launcher.launcher.platform.system", lambda: "Darwin")
+    release = _release_with("Aurora-windows.exe", "Aurora-launcher.exe", "Aurora-launcher-macOS.zip")
+    result = launcher.find_launcher_url(release)
+    assert result == "https://example.com/Aurora-launcher-macOS.zip"
+
+
+def test_find_launcher_url_returns_none_when_asset_missing(monkeypatch):
+    """해당 asset 없음 → None."""
+    monkeypatch.setattr("aurora_launcher.launcher.platform.system", lambda: "Windows")
+    release = _release_with("Aurora-windows.exe")  # launcher.exe 없음
+    assert launcher.find_launcher_url(release) is None
+
+
+def test_find_launcher_url_empty_assets(monkeypatch):
+    """assets 빈 리스트 → None."""
+    monkeypatch.setattr("aurora_launcher.launcher.platform.system", lambda: "Windows")
+    assert launcher.find_launcher_url({"tag_name": "v0.3.0", "assets": []}) is None
+
+
+# ============================================================
+# get_local_aurora_version — .aurora_version 파일 읽기
+# ============================================================
+
+
+def test_get_local_aurora_version_returns_stripped_text(tmp_path, monkeypatch):
+    """버전 파일 존재 → stripped text 반환."""
+    monkeypatch.setattr(
+        "aurora_launcher.launcher._aurora_data_dir", lambda: tmp_path,
+    )
+    (tmp_path / ".aurora_version").write_text("v0.3.1\n", encoding="utf-8")
+    assert launcher.get_local_aurora_version() == "v0.3.1"
+
+
+def test_get_local_aurora_version_returns_none_when_file_missing(tmp_path, monkeypatch):
+    """버전 파일 없음 → None."""
+    monkeypatch.setattr(
+        "aurora_launcher.launcher._aurora_data_dir", lambda: tmp_path,
+    )
+    assert launcher.get_local_aurora_version() is None
+
+
+def test_get_local_aurora_version_returns_none_on_oserror(tmp_path, monkeypatch):
+    """파일 읽기 OSError → None (예외 전파 X)."""
+    monkeypatch.setattr(
+        "aurora_launcher.launcher._aurora_data_dir", lambda: tmp_path,
+    )
+    version_file = tmp_path / ".aurora_version"
+    version_file.write_text("v0.3.0", encoding="utf-8")
+    # read_text 측 OSError 강제
+    monkeypatch.setattr(
+        "pathlib.Path.read_text",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("permission denied")),
+    )
+    assert launcher.get_local_aurora_version() is None
+
+
+# ============================================================
+# _body_local_target — 플랫폼별 본체 경로
+# ============================================================
+
+
+def test_body_local_target_windows_returns_exe(tmp_path, monkeypatch):
+    """Windows — AURORA_EXE_NAME 파일명 반환."""
+    monkeypatch.setattr("aurora_launcher.launcher.platform.system", lambda: "Windows")
+    monkeypatch.setattr("aurora_launcher.launcher._aurora_data_dir", lambda: tmp_path)
+    result = launcher._body_local_target()
+    assert result == tmp_path / launcher.AURORA_EXE_NAME
+
+
+def test_body_local_target_macos_returns_app_bundle(tmp_path, monkeypatch):
+    """macOS — .app 번들 경로 반환."""
+    monkeypatch.setattr("aurora_launcher.launcher.platform.system", lambda: "Darwin")
+    monkeypatch.setattr("aurora_launcher.launcher._aurora_data_dir", lambda: tmp_path)
+    result = launcher._body_local_target()
+    assert result == tmp_path / "Aurora.app"
+
+
+# ============================================================
+# _launcher_dir — frozen/dev 환경 분기
+# ============================================================
+
+
+def test_launcher_dir_dev_returns_repo_root():
+    """dev 환경 (not frozen) — launcher.py 위치 기반 repo root 반환."""
+    import sys
+    from pathlib import Path
+    assert not getattr(sys, "frozen", False)
+    result = launcher._launcher_dir()
+    expected = Path(launcher.__file__).resolve().parents[2]
+    assert result == expected
+
+
+def test_launcher_dir_frozen_returns_exe_parent(tmp_path, monkeypatch):
+    """frozen 환경 — sys.executable 부모 디렉토리 반환."""
+    import sys
+    fake_exe = tmp_path / "Aurora-launcher.exe"
+    fake_exe.touch()
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(fake_exe))
+    result = launcher._launcher_dir()
+    assert result == tmp_path.resolve()
+
+
+# ============================================================
+# _ui_index_path (launcher) — PyInstaller _MEIPASS / dev 분기
+# ============================================================
+
+
+def test_launcher_ui_index_path_dev_returns_source_tree():
+    """dev 환경 (sys._MEIPASS 없음) — launcher.py 옆 ui/index.html 반환."""
+    import sys
+    from pathlib import Path
+    assert not hasattr(sys, "_MEIPASS")
+    result = launcher._ui_index_path()
+    expected = Path(launcher.__file__).resolve().parent / "ui" / "index.html"
+    assert result == expected
+
+
+def test_launcher_ui_index_path_frozen_uses_meipass(tmp_path, monkeypatch):
+    """frozen (PyInstaller) 환경 — sys._MEIPASS / ui / index.html 반환."""
+    import sys
+    from pathlib import Path
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    result = launcher._ui_index_path()
+    assert result == Path(str(tmp_path)) / "ui" / "index.html"

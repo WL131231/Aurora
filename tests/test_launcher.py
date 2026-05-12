@@ -660,3 +660,53 @@ def test_body_local_target_macos_returns_app_bundle(tmp_path, monkeypatch):
     monkeypatch.setattr("aurora_launcher.launcher._aurora_data_dir", lambda: tmp_path)
     result = launcher._body_local_target()
     assert result == tmp_path / "Aurora.app"
+
+
+# ============================================================
+# _launcher_dir — frozen/dev 환경 분기
+# ============================================================
+
+
+def test_launcher_dir_dev_returns_repo_root():
+    """dev 환경 (not frozen) — launcher.py 위치 기반 repo root 반환."""
+    import sys
+    from pathlib import Path
+    assert not getattr(sys, "frozen", False)
+    result = launcher._launcher_dir()
+    expected = Path(launcher.__file__).resolve().parents[2]
+    assert result == expected
+
+
+def test_launcher_dir_frozen_returns_exe_parent(tmp_path, monkeypatch):
+    """frozen 환경 — sys.executable 부모 디렉토리 반환."""
+    import sys
+    fake_exe = tmp_path / "Aurora-launcher.exe"
+    fake_exe.touch()
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(fake_exe))
+    result = launcher._launcher_dir()
+    assert result == tmp_path.resolve()
+
+
+# ============================================================
+# _ui_index_path (launcher) — PyInstaller _MEIPASS / dev 분기
+# ============================================================
+
+
+def test_launcher_ui_index_path_dev_returns_source_tree():
+    """dev 환경 (sys._MEIPASS 없음) — launcher.py 옆 ui/index.html 반환."""
+    import sys
+    from pathlib import Path
+    assert not hasattr(sys, "_MEIPASS")
+    result = launcher._ui_index_path()
+    expected = Path(launcher.__file__).resolve().parent / "ui" / "index.html"
+    assert result == expected
+
+
+def test_launcher_ui_index_path_frozen_uses_meipass(tmp_path, monkeypatch):
+    """frozen (PyInstaller) 환경 — sys._MEIPASS / ui / index.html 반환."""
+    import sys
+    from pathlib import Path
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    result = launcher._ui_index_path()
+    assert result == Path(str(tmp_path)) / "ui" / "index.html"

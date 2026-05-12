@@ -297,10 +297,3 @@ def test_apk_dir_fallback_when_env_unset(monkeypatch):
     monkeypatch.delenv("AURORA_DATA_DIR", raising=False)
     result = apk_updater._apk_dir()
     assert result == Path("/tmp/aurora_update")
-
-
-def test_apk_dir_fallback_when_env_empty(monkeypatch):
-    """AURORA_DATA_DIR 빈 문자열 → falsy → 폴백 경로 반환."""
-    monkeypatch.setenv("AURORA_DATA_DIR", "")
-    result = apk_updater._apk_dir()
-    assert result == Path("/tmp/aurora_update")

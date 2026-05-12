@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>AURORA · ICT — ICT를 정복하다</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="bg-stars"></div>
+
+<!-- ─── Top Nav ─────────────────────────────────────── -->
+<header class="nav">
+  <a href="../" class="logo" aria-label="홈으로">
+    <svg width="22" height="22" viewBox="0 0 28 28" fill="none">
+      <defs>
+        <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#a855f7"/>
+          <stop offset="50%" stop-color="#6366f1"/>
+          <stop offset="100%" stop-color="#22d3ee"/>
+        </linearGradient>
+      </defs>
+      <path d="M14 2 L26 14 L14 26 L2 14 Z" stroke="url(#g)" stroke-width="1.5" fill="none"/>
+      <path d="M14 8 L20 14 L14 20 L8 14 Z" fill="url(#g)" opacity="0.6"/>
+    </svg>
+    <span>AURORA · ICT</span>
+  </a>
+
+  <nav class="nav-center">
+    <a href="#about">_ABOUT</a>
+    <a href="#strategy">_STRATEGY</a>
+    <a href="#download">_DOWNLOAD</a>
+  </nav>
+
+  <a href="#download" class="nav-download">↓ DOWNLOAD</a>
+</header>
+
+<!-- ─── Hero ───────────────────────────────────────── -->
+<section class="hero">
+  <!-- 좌측 손 이미지 -->
+  <div class="hero-image">
+    <img src="assets/ict-hand.png" alt="ICT — Smart Money Manipulation" />
+  </div>
+
+  <!-- 우측 텍스트 -->
+  <div class="hero-content">
+    <div class="hero-counter">01 — 03</div>
+
+    <h1 class="hero-title">
+      ICT를 <br/><span class="accent">정복하다.</span>
+    </h1>
+
+    <p class="hero-sub">
+      Inner Circle Trader 전략을 알고리즘으로 박은 자동매매 봇.
+      Smart Money가 박은 유동성, FVG, Market Structure Shift —
+      24시간 감지하고 박힌 setup에서 자동 진입.
+    </p>
+
+    <a href="#download" class="hero-cta">
+      <span>DOWNLOAD</span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 5v14M5 12l7 7 7-7"/>
+      </svg>
+    </a>
+  </div>
+</section>
+
+<!-- ─── 3 카드 (스크롤 hint) ───────────────────────────────── -->
+<section class="hero-cards">
+  <div class="card">
+    <div class="card-label">_FVG</div>
+    <h3>Fair Value Gap</h3>
+    <p>3봉 패턴으로 박힌 imbalance. 가격이 다시 박을 retest 자리 — 진입 trigger.</p>
+  </div>
+  <div class="card">
+    <div class="card-label">_SWEEP</div>
+    <h3>Liquidity Sweep</h3>
+    <p>옛 swing high/low 위로 wick만 박고 close 안 박힌 패턴. 반전 신호.</p>
+  </div>
+  <div class="card">
+    <div class="card-label">_MSS</div>
+    <h3>Market Structure Shift</h3>
+    <p>박힌 추세 반대로 swing 박힘. ICT 진입의 핵심 confirmation.</p>
+  </div>
+</section>
+
+<!-- ─── About ──────────────────────────────────────── -->
+<section id="about" class="section">
+  <div class="section-num">_01</div>
+  <h2>왜 ICT인가?</h2>
+  <div class="section-body">
+    <p>
+      ICT (Inner Circle Trader)는 Michael J. Huddleston이 박은 매매 방법론.
+      가격은 수급이 박은 게 아니라 알고리즘(IPDA)이 박힌 유동성을 사냥하는 방식으로 움직인다는
+      전제로 박힘.
+    </p>
+    <p>
+      <strong>핵심 = TIME first, PRICE second.</strong>
+      특정 시간대 (London / NY AM / PM Killzone)에 박힌 setup만 진입 — 노이즈를 거른다.
+    </p>
+    <p>
+      Aurora-ICT는 이 전략을 100% 룰 기반으로 박은 자동매매 봇. AI 박은 거 X, 사람 박은 거 X —
+      알고리즘이 본 그대로 박은 진입/청산.
+    </p>
+  </div>
+</section>
+
+<!-- ─── Strategy ───────────────────────────────────── -->
+<section id="strategy" class="section">
+  <div class="section-num">_02</div>
+  <h2>박힌 전략 — Silver Bullet</h2>
+  <div class="section-body">
+    <p>매일 박은 3개 1시간 윈도우 — 박혀있는 첫 FVG에서 진입:</p>
+    <ul class="strategy-list">
+      <li><span class="time">03:00 — 04:00 NY</span><span>London Silver Bullet</span></li>
+      <li><span class="time">10:00 — 11:00 NY</span><span>AM Silver Bullet</span></li>
+      <li><span class="time">14:00 — 15:00 NY</span><span>PM Silver Bullet</span></li>
+    </ul>
+    <p>
+      <strong>SL</strong> = FVG 봉 wick 너머 · <strong>TP</strong> = 다음 unswept BSL/SSL ·
+      <strong>RR</strong> ≥ 1:2
+    </p>
+    <p class="muted">백테스트 win rate 60-75% (NQ 박은 기준, 시장별 편차 큼).</p>
+  </div>
+</section>
+
+<!-- ─── Download ───────────────────────────────────── -->
+<section id="download" class="section section-download">
+  <div class="section-num">_03</div>
+  <h2>다운로드</h2>
+  <div class="section-body">
+    <p>데모 트레이딩 박은 거 기본. 실매매는 toggle on/off — 직접 박힌 키 박혀야 활성화.</p>
+
+    <div class="download-buttons">
+      <a href="https://github.com/WL131231/Aurora-ICT-releases/releases/latest/download/Aurora-ICT-windows.exe" class="dl-btn">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M3 5.5L10 4.5v7.5H3V5.5zm8-1.15L21 3v9h-10V4.35zM3 12.5h7v7.5L3 18.5v-6zm8 0h10V21l-10-1.35V12.5z"/>
+        </svg>
+        <span>WINDOWS</span>
+      </a>
+      <a href="https://github.com/WL131231/Aurora-ICT-releases/releases/latest/download/Aurora-ICT-macOS.dmg" class="dl-btn">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/>
+        </svg>
+        <span>MAC&nbsp;OS</span>
+      </a>
+    </div>
+
+    <p class="muted">
+      처음 실행 후 <code>.env</code> 박은 거 박혀야 Bybit 키 등록. 기본 = Demo Trading 모드.
+    </p>
+
+    <div class="latest-info">
+      <a href="https://github.com/WL131231/Aurora-ICT-releases/releases/latest" target="_blank" rel="noopener">
+        모든 버전 보기 →
+      </a>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div>AURORA · ICT</div>
+  <div class="footer-links">
+    <a href="../">← AURORA 본체로</a>
+    <a href="https://github.com/WL131231/Aurora-ICT-releases" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</footer>
+
+</body>
+</html>

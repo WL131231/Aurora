@@ -10,6 +10,7 @@ from unittest.mock import patch
 def _candidates(**env_overrides) -> tuple[str, ...]:
     """환경변수 조작 후 _env_file_candidates() 호출."""
     import os
+
     from aurora.config import _env_file_candidates
     env = dict(os.environ)
     env.update(env_overrides)
@@ -50,6 +51,7 @@ def test_localappdata_path_absent_when_not_set(monkeypatch) -> None:
     """LOCALAPPDATA 미설정 → Aurora/Local AppData 경로 없음."""
     monkeypatch.delenv("LOCALAPPDATA", raising=False)
     import os
+
     from aurora.config import _env_file_candidates
     with patch.dict("os.environ", {k: v for k, v in os.environ.items() if k != "LOCALAPPDATA"}, clear=True):
         result = _env_file_candidates()

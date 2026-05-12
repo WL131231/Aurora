@@ -19,9 +19,9 @@
     <svg width="22" height="22" viewBox="0 0 28 28" fill="none">
       <defs>
         <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#c11926"/>
-          <stop offset="50%" stop-color="#75020f"/>
-          <stop offset="100%" stop-color="#2b0307"/>
+          <stop offset="0%" stop-color="#ffffff"/>
+          <stop offset="50%" stop-color="#DBDBDE"/>
+          <stop offset="100%" stop-color="#8b8b90"/>
         </linearGradient>
       </defs>
       <path d="M14 2 L26 14 L14 26 L2 14 Z" stroke="url(#g)" stroke-width="1.5" fill="none"/>
@@ -55,9 +55,9 @@
     </h1>
 
     <p class="hero-sub">
-      Inner Circle Trader 전략을 알고리즘으로 박은 자동매매 봇.
-      Smart Money가 박은 유동성, FVG, Market Structure Shift —
-      24시간 감지하고 박힌 setup에서 자동 진입.
+      Inner Circle Trader 전략을 알고리즘으로 옮긴 자동매매 봇.
+      Smart Money가 남긴 유동성, FVG, Market Structure Shift —
+      24시간 추적하다가 유효한 setup이 나오면 자동으로 진입합니다.
     </p>
 
     <a href="#download" class="hero-cta">
@@ -74,17 +74,17 @@
   <div class="card">
     <div class="card-label">_FVG</div>
     <h3>Fair Value Gap</h3>
-    <p>3봉 패턴으로 박힌 imbalance. 가격이 다시 박을 retest 자리 — 진입 trigger.</p>
+    <p>3봉 사이에 생긴 imbalance. 가격이 되돌아와 채우는 자리가 곧 진입 trigger입니다.</p>
   </div>
   <div class="card">
     <div class="card-label">_SWEEP</div>
     <h3>Liquidity Sweep</h3>
-    <p>옛 swing high/low 위로 wick만 박고 close 안 박힌 패턴. 반전 신호.</p>
+    <p>이전 swing high/low를 wick으로만 찍고 close는 못 넘긴 형태. 전형적인 반전 신호.</p>
   </div>
   <div class="card">
     <div class="card-label">_MSS</div>
     <h3>Market Structure Shift</h3>
-    <p>박힌 추세 반대로 swing 박힘. ICT 진입의 핵심 confirmation.</p>
+    <p>기존 추세가 꺾이면서 반대 방향 swing이 형성되는 순간. ICT 진입의 핵심 confirmation.</p>
   </div>
 </section>
 
@@ -94,17 +94,18 @@
   <h2>왜 ICT인가?</h2>
   <div class="section-body">
     <p>
-      ICT (Inner Circle Trader)는 Michael J. Huddleston이 박은 매매 방법론.
-      가격은 수급이 박은 게 아니라 알고리즘(IPDA)이 박힌 유동성을 사냥하는 방식으로 움직인다는
-      전제로 박힘.
+      ICT (Inner Circle Trader)는 Michael J. Huddleston이 정립한 매매 방법론입니다.
+      가격은 단순 수급이 아니라 알고리즘(IPDA)이 유동성을 사냥하는 방식으로 움직인다 —
+      이게 전체 프레임의 출발점.
     </p>
     <p>
-      <strong>핵심 = TIME first, PRICE second.</strong>
-      특정 시간대 (London / NY AM / PM Killzone)에 박힌 setup만 진입 — 노이즈를 거른다.
+      <strong>핵심은 TIME first, PRICE second.</strong>
+      London · NY AM · PM Killzone 같은 특정 시간대의 setup만 추리고,
+      나머지 시간의 노이즈는 전부 걸러냅니다.
     </p>
     <p>
-      Aurora-ICT는 이 전략을 100% 룰 기반으로 박은 자동매매 봇. AI 박은 거 X, 사람 박은 거 X —
-      알고리즘이 본 그대로 박은 진입/청산.
+      Aurora-ICT는 이 전략을 100% 룰 기반으로 옮긴 자동매매 봇입니다.
+      AI 추정 없음, 재량 진입 없음 — 알고리즘이 본 신호 그대로 진입하고 청산합니다.
     </p>
   </div>
 </section>
@@ -112,9 +113,9 @@
 <!-- ─── Strategy ───────────────────────────────────── -->
 <section id="strategy" class="section">
   <div class="section-num">_02</div>
-  <h2>박힌 전략 — Silver Bullet</h2>
+  <h2>핵심 전략 — Silver Bullet</h2>
   <div class="section-body">
-    <p>매일 박은 3개 1시간 윈도우 — 박혀있는 첫 FVG에서 진입:</p>
+    <p>매일 정해진 3개의 1시간 윈도우 — 그 안에서 형성된 첫 FVG에서 진입합니다:</p>
     <ul class="strategy-list">
       <li><span class="time">03:00 — 04:00 NY</span><span>London Silver Bullet</span></li>
       <li><span class="time">10:00 — 11:00 NY</span><span>AM Silver Bullet</span></li>
@@ -124,7 +125,7 @@
       <strong>SL</strong> = FVG 봉 wick 너머 · <strong>TP</strong> = 다음 unswept BSL/SSL ·
       <strong>RR</strong> ≥ 1:2
     </p>
-    <p class="muted">백테스트 win rate 60-75% (NQ 박은 기준, 시장별 편차 큼).</p>
+    <p class="muted">백테스트 기준 win rate 60–75% (NQ 기준, 시장별 편차 있음).</p>
   </div>
 </section>
 
@@ -133,7 +134,7 @@
   <div class="section-num">_03</div>
   <h2>다운로드</h2>
   <div class="section-body">
-    <p>데모 트레이딩 박은 거 기본. 실매매는 toggle on/off — 직접 박힌 키 박혀야 활성화.</p>
+    <p>기본은 Demo 모드입니다. 실매매는 toggle로 전환 — 본인 API 키를 등록해야 활성화됩니다.</p>
 
     <div class="download-buttons">
       <a href="https://github.com/WL131231/Aurora-ICT-releases/releases/latest/download/Aurora-ICT-windows.exe" class="dl-btn">
@@ -151,7 +152,7 @@
     </div>
 
     <p class="muted">
-      처음 실행 후 <code>.env</code> 박은 거 박혀야 Bybit 키 등록. 기본 = Demo Trading 모드.
+      최초 실행 후 <code>.env</code> 파일에 Bybit API 키를 등록하세요. 기본은 Demo Trading 모드입니다.
     </p>
 
     <div class="latest-info">

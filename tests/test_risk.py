@@ -15,6 +15,7 @@ from aurora.core.risk import (
     calc_position_size,
     min_sl_pct_by_leverage,
     sl_pct_for_leverage,
+    tp_pct_4_levels_for_leverage,
     tp_pct_range_for_leverage,
     update_trailing_sl,
 )
@@ -653,3 +654,46 @@ def test_min_sl_pct_by_leverage_matches_sl_pct_high() -> None:
 def test_min_sl_pct_by_leverage_returns_float() -> None:
     """반환 타입이 float."""
     assert isinstance(min_sl_pct_by_leverage(20), float)
+
+
+# ============================================================
+# tp_pct_4_levels_for_leverage
+# ============================================================
+
+
+def test_tp_pct_4_levels_length() -> None:
+    """항상 4단계 반환."""
+    for lev in (10, 20, 37, 38, 50):
+        assert len(tp_pct_4_levels_for_leverage(lev)) == 4
+
+
+def test_tp_pct_4_levels_ascending() -> None:
+    """TP1 < TP2 < TP3 < TP4 오름차순."""
+    for lev in (10, 25, 37, 38, 50):
+        levels = tp_pct_4_levels_for_leverage(lev)
+        assert levels[0] < levels[1] < levels[2] < levels[3]
+
+
+def test_tp_pct_4_levels_10x_matches_range() -> None:
+    """10x: 레인지 min/max 가 TP1/TP4."""
+    tp_min, tp_max = tp_pct_range_for_leverage(10)
+    levels = tp_pct_4_levels_for_leverage(10)
+    assert abs(levels[0] - tp_min) < 1e-9
+    assert abs(levels[-1] - tp_max) < 1e-9
+
+
+def test_tp_pct_4_levels_50x_matches_range() -> None:
+    """50x: 레인지 min/max 가 TP1/TP4."""
+    tp_min, tp_max = tp_pct_range_for_leverage(50)
+    levels = tp_pct_4_levels_for_leverage(50)
+    assert abs(levels[0] - tp_min) < 1e-9
+    assert abs(levels[-1] - tp_max) < 1e-9
+
+
+def test_tp_pct_4_levels_equal_step() -> None:
+    """4단계 간격이 동일 (3등분)."""
+    for lev in (10, 37, 50):
+        levels = tp_pct_4_levels_for_leverage(lev)
+        step = (levels[-1] - levels[0]) / 3
+        assert abs(levels[1] - (levels[0] + step)) < 1e-9
+        assert abs(levels[2] - (levels[0] + 2 * step)) < 1e-9

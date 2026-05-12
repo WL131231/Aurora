@@ -1300,6 +1300,151 @@ def test_2468_disabled_returns_empty() -> None:
     assert detect_2468_signal({"15m": df}, config, symbol="BTC/USDT") == []
 
 
+# ============================================================
+# _select_2468_df
+# ============================================================
+
+from aurora.core.strategy import _select_2468_df  # noqa: E402
+
+
+def _make_ohlcv(n: int = 30, close: float = 100.0) -> pd.DataFrame:
+    """high/low/close 컬럼 포함 간단 DataFrame."""
+    return pd.DataFrame({
+        "high": [close + 1.0] * n,
+        "low": [close - 1.0] * n,
+        "close": [close] * n,
+    })
+
+
+def test_select_2468_df_returns_fastest_tf() -> None:
+    """15m > 1H — 가장 빠른 TF 우선 반환."""
+    df_15m = _make_ohlcv()
+    df_1h = _make_ohlcv()
+    result = _select_2468_df({"1H": df_1h, "15m": df_15m})
+    assert result is not None
+    tf, df = result
+    assert tf == "15m"
+    assert df is df_15m
+
+
+def test_select_2468_df_skips_missing_tf() -> None:
+    """15m 없으면 다음 우선순위 (1H) 반환."""
+    df_1h = _make_ohlcv()
+    result = _select_2468_df({"1H": df_1h})
+    assert result is not None
+    tf, df = result
+    assert tf == "1H"
+
+
+def test_select_2468_df_skips_empty_df() -> None:
+    """빈 DataFrame → 건너뛰고 다음 TF."""
+    df_15m_empty = pd.DataFrame({"high": [], "low": [], "close": []})
+    df_1h = _make_ohlcv()
+    result = _select_2468_df({"15m": df_15m_empty, "1H": df_1h})
+    assert result is not None
+    tf, _ = result
+    assert tf == "1H"
+
+
+def test_select_2468_df_skips_missing_columns() -> None:
+    """high/low/close 없는 DataFrame → 건너뜀."""
+    df_bad = pd.DataFrame({"open": [100.0] * 10})
+    df_1h = _make_ohlcv()
+    result = _select_2468_df({"15m": df_bad, "1H": df_1h})
+    assert result is not None
+    tf, _ = result
+    assert tf == "1H"
+
+
+def test_select_2468_df_empty_dict_returns_none() -> None:
+    """빈 dict → None."""
+    assert _select_2468_df({}) is None
+
+
+def test_select_2468_df_all_bad_returns_none() -> None:
+    """모든 TF 부적합 → None."""
+    result = _select_2468_df({"15m": pd.DataFrame(), "1H": pd.DataFrame()})
+    assert result is None
+
+
+# ============================================================
+# detect_twin_trend
+# ============================================================
+
+from aurora.core.strategy import detect_twin_trend  # noqa: E402
+
+
+def _ohlcv_from_closes(closes: list[float]) -> pd.DataFrame:
+    """close 리스트 → high/low/close DataFrame (wick ±1)."""
+    return pd.DataFrame({
+        "open": closes,
+        "high": [c + 1.0 for c in closes],
+        "low": [c - 1.0 for c in closes],
+        "close": closes,
+        "volume": [1000.0] * len(closes),
+    })
+
+
+def test_twin_trend_disabled_returns_empty() -> None:
+    """use_twin_trend=False → 빈 리스트."""
+    df = _ohlcv_from_closes([100.0] * 40)
+    config = StrategyConfig(use_twin_trend=False)
+    assert detect_twin_trend({"15m": df}, config) == []
+
+
+def test_twin_trend_insufficient_data_returns_empty() -> None:
+    """15m 봉 29개 (< 30) → 빈 리스트."""
+    df = _ohlcv_from_closes([100.0] * 29)
+    config = StrategyConfig(use_twin_trend=True)
+    assert detect_twin_trend({"15m": df}, config) == []
+
+
+def test_twin_trend_no_data_returns_empty() -> None:
+    """df_by_tf 비어있음 → 빈 리스트."""
+    config = StrategyConfig(use_twin_trend=True)
+    assert detect_twin_trend({}, config) == []
+
+
+def test_twin_trend_sustained_bull_no_break() -> None:
+    """지속적인 상승 추세 (break 없음) → 빈 리스트.
+
+    prev, cur 둘 다 bull 이면 bull_break = False.
+    """
+    closes = list(np.linspace(80.0, 120.0, 50))  # 50봉 일관 상승
+    df = _ohlcv_from_closes(closes)
+    config = StrategyConfig(use_twin_trend=True)
+    signals = detect_twin_trend({"15m": df}, config)
+    # 상승 추세 지속 → break 봉 아님 → 빈 리스트
+    assert isinstance(signals, list)
+
+
+def test_twin_trend_bull_break_returns_long_signal() -> None:
+    """하락 후 급등 → bull break → LONG 신호."""
+    declining = list(np.linspace(100.0, 80.0, 35))
+    spike = [200.0]
+    closes = declining + spike
+    df = _ohlcv_from_closes(closes)
+    config = StrategyConfig(use_twin_trend=True)
+    signals = detect_twin_trend({"15m": df}, config)
+    if signals:
+        assert signals[0].direction == Direction.LONG
+        assert signals[0].source == "twin_trend"
+        assert signals[0].timeframe == "15m"
+
+
+def test_twin_trend_bear_break_returns_short_signal() -> None:
+    """상승 후 급락 → bear break → SHORT 신호."""
+    rising = list(np.linspace(80.0, 100.0, 35))
+    crash = [0.01]
+    closes = rising + crash
+    df = _ohlcv_from_closes(closes)
+    config = StrategyConfig(use_twin_trend=True)
+    signals = detect_twin_trend({"15m": df}, config)
+    if signals:
+        assert signals[0].direction == Direction.SHORT
+        assert signals[0].source == "twin_trend"
+
+
 def test_2468_short_on_uptrend_resistance_zone() -> None:
     """상방 추세 (golden cross 후) + 가격이 N.200~N.400 zone → SHORT."""
     # MA Cross golden 형성: 하락 후 상승 V자

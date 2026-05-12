@@ -766,6 +766,128 @@ def test_apply_ui_returns_failure_in_dev_env() -> None:
 
 
 # ============================================================
+# Dashboard Series (v0.1.115) — GET /dashboard-flow/series
+# ============================================================
+
+
+def test_dashboard_series_error_returns_empty_dto() -> None:
+    """fetch 실패 → coin/days 보존 + 빈 시계열."""
+    from aurora.market import series_aggregator as sa_mod
+    from aurora.market.series_aggregator import DashboardSeriesAggregator
+
+    sa_mod.reset_for_test()
+
+    class _FailAgg(DashboardSeriesAggregator):
+        def __init__(self):
+            super().__init__([])
+
+        async def fetch(self, coin: str, days: int = 14):  # noqa: ARG002
+            raise RuntimeError("network down")
+
+    sa_mod._singleton = _FailAgg()
+
+    r = _client().get("/dashboard-flow/series?coin=ETH&days=7")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["coin"] == "ETH"
+    assert body["days"] == 7
+    assert body["price_close"] == []
+    assert body["perp_cvd"] == []
+
+    sa_mod.reset_for_test()
+
+
+def test_dashboard_series_clamps_days_to_valid_range() -> None:
+    """days=0 → clamp to 1, days=100 → clamp to 60."""
+    from aurora.market import series_aggregator as sa_mod
+    from aurora.market.series_aggregator import DashboardSeries, DashboardSeriesAggregator
+
+    sa_mod.reset_for_test()
+    received: list[int] = []
+
+    class _CaptureDays(DashboardSeriesAggregator):
+        def __init__(self):
+            super().__init__([])
+
+        async def fetch(self, coin: str, days: int = 14) -> DashboardSeries:  # noqa: ARG002
+            received.append(days)
+            return DashboardSeries(coin=coin, days=days, fetched_at_ms=0)
+
+    sa_mod._singleton = _CaptureDays()
+    _client().get("/dashboard-flow/series?coin=BTC&days=0")
+    _client().get("/dashboard-flow/series?coin=BTC&days=100")
+    assert received[0] == 1
+    assert received[1] == 60
+
+    sa_mod.reset_for_test()
+
+
+# ============================================================
+# Dashboard Ratios (v0.1.115) — GET /dashboard-flow/ratios
+# ============================================================
+
+
+def test_dashboard_ratios_error_returns_empty_segments() -> None:
+    """fetch 실패 → segments=[]."""
+    from aurora.market import dashboard_flow as df_mod
+    from aurora.market.dashboard_flow import DashboardFlowAggregator
+
+    df_mod.reset_for_test()
+
+    class _FailAgg(DashboardFlowAggregator):
+        def __init__(self):
+            super().__init__([])
+
+        async def fetch(self, coin: str):  # noqa: ARG002
+            raise RuntimeError("network down")
+
+    df_mod._singleton = _FailAgg()
+
+    r = _client().get("/dashboard-flow/ratios?coin=BTC")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["coin"] == "BTC"
+    assert body["segments"] == []
+
+    df_mod.reset_for_test()
+
+
+def test_dashboard_ratios_with_whale_data_returns_segments() -> None:
+    """whale buy/sell 데이터 있으면 segments 박힘."""
+    from aurora.market import dashboard_flow as df_mod
+    from aurora.market.dashboard_flow import DashboardFlow, DashboardFlowAggregator
+
+    df_mod.reset_for_test()
+
+    class _WhaleAgg(DashboardFlowAggregator):
+        def __init__(self):
+            super().__init__([])
+
+        async def fetch(self, coin: str) -> DashboardFlow:  # noqa: ARG002
+            return DashboardFlow(
+                coin=coin,
+                fetched_at_ms=0,
+                total_whale_buy_5m_usd=700_000.0,
+                total_whale_sell_5m_usd=300_000.0,
+            )
+
+    df_mod._singleton = _WhaleAgg()
+
+    r = _client().get("/dashboard-flow/ratios?coin=BTC")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["coin"] == "BTC"
+    assert len(body["segments"]) > 0
+    whale_seg = next(
+        (s for s in body["segments"] if s.get("label") == "WHALE NOTIONAL"), None
+    )
+    assert whale_seg is not None
+    assert abs(whale_seg["long_pct"] - 0.7) < 0.01
+
+    df_mod.reset_for_test()
+
+
+# ============================================================
 # _find_bot_match — 순수 매칭 헬퍼
 # ============================================================
 

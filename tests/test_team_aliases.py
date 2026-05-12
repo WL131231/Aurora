@@ -137,3 +137,17 @@ def test_load_user_aliases_wrong_type_returns_empty(tmp_path, monkeypatch) -> No
     cfg = {"user_aliases": "not a dict"}
     (tmp_path / "cfg.json").write_text(json.dumps(cfg), encoding="utf-8")
     assert _load_user_aliases() == {}
+
+
+def test_load_user_aliases_empty_config_returns_empty() -> None:
+    """config_store.load() → None → 빈 dict."""
+    with patch("aurora.interfaces.config_store.load", return_value=None):
+        assert _load_user_aliases() == {}
+
+
+def test_load_user_aliases_skips_non_dict_entry() -> None:
+    """엔트리 값이 dict 가 아님 (문자열 등) → skip."""
+    raw = {"user_aliases": {"alice": {"api_key": "k", "api_secret": "s"}, "bad": "string"}}
+    with patch("aurora.interfaces.config_store.load", return_value=raw):
+        result = _load_user_aliases()
+    assert list(result.keys()) == ["alice"]

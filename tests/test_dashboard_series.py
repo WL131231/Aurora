@@ -316,3 +316,75 @@ async def test_binance_series_partial_endpoint_failure_isolated() -> None:
     assert series.bars[0].ls_ratio_global is not None
     # 에러 박힘
     assert any("oi_hist" in e for e in series.errors)
+
+
+# ============================================================
+# _weighted_avg — 가중 평균 헬퍼 단위 테스트
+# ============================================================
+
+from types import SimpleNamespace  # noqa: E402
+
+from aurora.market.series_aggregator import _weighted_avg  # noqa: E402
+
+
+def _wt_bar(value: float | None, weight: float | None) -> object:
+    """_weighted_avg 테스트용 더미 bar 객체 — val / wt 속성."""
+    return SimpleNamespace(val=value, wt=weight)
+
+
+def test_weighted_avg_all_weights_set() -> None:
+    """가중치 전부 있음 → 가중 평균 반환."""
+    bars = [
+        ("binance", _wt_bar(10.0, 100.0)),
+        ("okx", _wt_bar(20.0, 300.0)),
+    ]
+    # (10×100 + 20×300) / (100+300) = 7000 / 400 = 17.5
+    result = _weighted_avg(bars, "val", "wt")
+    assert result == pytest.approx(17.5)
+
+
+def test_weighted_avg_no_weights_simple_mean() -> None:
+    """가중치 모두 None → 단순 평균."""
+    bars = [
+        ("binance", _wt_bar(10.0, None)),
+        ("okx", _wt_bar(20.0, None)),
+        ("bybit", _wt_bar(30.0, None)),
+    ]
+    result = _weighted_avg(bars, "val", "wt")
+    assert result == pytest.approx(20.0)
+
+
+def test_weighted_avg_zero_weight_treated_as_no_weight() -> None:
+    """weight=0 → 분모에 미포함 → 단순 평균 경로."""
+    bars = [
+        ("binance", _wt_bar(10.0, 0.0)),
+        ("okx", _wt_bar(20.0, 0.0)),
+    ]
+    result = _weighted_avg(bars, "val", "wt")
+    assert result == pytest.approx(15.0)
+
+
+def test_weighted_avg_all_values_none_returns_none() -> None:
+    """모든 val 이 None → None 반환."""
+    bars = [
+        ("binance", _wt_bar(None, 100.0)),
+        ("okx", _wt_bar(None, 200.0)),
+    ]
+    result = _weighted_avg(bars, "val", "wt")
+    assert result is None
+
+
+def test_weighted_avg_partial_none_skips_none_bars() -> None:
+    """일부 val=None 인 bar 는 스킵하고 나머지로 평균."""
+    bars = [
+        ("binance", _wt_bar(None, 100.0)),
+        ("okx", _wt_bar(40.0, 200.0)),
+    ]
+    # None bar 제외 → 40.0 × 200 / 200 = 40.0
+    result = _weighted_avg(bars, "val", "wt")
+    assert result == pytest.approx(40.0)
+
+
+def test_weighted_avg_empty_bars_returns_none() -> None:
+    """빈 day_bars → None."""
+    assert _weighted_avg([], "val", "wt") is None

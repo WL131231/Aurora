@@ -181,19 +181,46 @@
     <p>기본은 Demo 모드입니다. 실매매는 toggle로 전환 — 본인 API 키를 등록해야 활성화됩니다.</p>
 
     <div class="download-buttons">
-      <a href="https://github.com/WL131231/Aurora-ICT-releases/releases/latest/download/Aurora-ICT-launcher.exe" class="dl-btn">
+      <a id="dl-win" href="https://github.com/WL131231/Aurora-ICT-releases/releases/latest/download/Aurora-ICT-launcher.exe" class="dl-btn" data-platform="windows">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
           <path d="M3 5.5L10 4.5v7.5H3V5.5zm8-1.15L21 3v9h-10V4.35zM3 12.5h7v7.5L3 18.5v-6zm8 0h10V21l-10-1.35V12.5z"/>
         </svg>
         <span>WINDOWS</span>
+        <span class="dl-tag" id="dl-tag-win"></span>
       </a>
-      <a href="https://github.com/WL131231/Aurora-ICT-releases/releases/latest/download/Aurora-ICT-launcher-macOS.zip" class="dl-btn">
+      <a id="dl-mac" href="https://github.com/WL131231/Aurora-ICT-releases/releases/latest/download/Aurora-ICT-launcher-macOS.zip" class="dl-btn" data-platform="mac">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
           <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/>
         </svg>
         <span>MAC&nbsp;OS</span>
+        <span class="dl-tag" id="dl-tag-mac"></span>
       </a>
     </div>
+
+    <script>
+      // 캐시 우회 — GitHub API 로 latest tag 박은 거 받아서 specific URL 박은 거.
+      // latest/download/... redirect 박은 거 박혀있어서 브라우저/CDN 측 캐시 시 옛 .exe 박는 거 문제 해결.
+      (async function setLatestIctDownloads() {
+        const api = "https://api.github.com/repos/WL131231/Aurora-ICT-releases/releases/latest";
+        try {
+          const res = await fetch(api, { headers: { "Accept": "application/vnd.github+json" } });
+          if (!res.ok) return;
+          const data = await res.json();
+          const tag = data.tag_name;
+          if (!tag) return;
+          const win = document.getElementById("dl-win");
+          const mac = document.getElementById("dl-mac");
+          const winTag = document.getElementById("dl-tag-win");
+          const macTag = document.getElementById("dl-tag-mac");
+          if (win) win.href = `https://github.com/WL131231/Aurora-ICT-releases/releases/download/${tag}/Aurora-ICT-launcher.exe`;
+          if (mac) mac.href = `https://github.com/WL131231/Aurora-ICT-releases/releases/download/${tag}/Aurora-ICT-launcher-macOS.zip`;
+          if (winTag) winTag.textContent = ` (${tag})`;
+          if (macTag) macTag.textContent = ` (${tag})`;
+        } catch (e) {
+          // fallback: latest/download URL 그대로 사용 (HTML href 박혀있는 거)
+        }
+      })();
+    </script>
 
     <p class="muted">
       최초 실행 후 <code>.env</code> 파일에 Bybit API 키를 등록하세요. 기본은 Demo Trading 모드입니다.

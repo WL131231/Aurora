@@ -356,6 +356,13 @@ a { color: inherit; text-decoration: none; }
   background: #ffffff;
   box-shadow: 0 0 32px -6px rgba(219, 219, 222, 0.5);
 }
+.dl-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: #5a5a60;
+  font-weight: 500;
+}
 
 .latest-info {
   margin-top: 24px;

@@ -360,7 +360,7 @@ def test_build_risk_plan_structural_sl_price_override_v0_1_44() -> None:
     )
     assert plan_l.sl_price == pytest.approx(80_000.0)
 
-    # 우선순위 — structural_sl_price 가 BB 인자보다 우선
+    # 우선순위 — structural_sl_price 가 BB 인자보다 우선 (SHORT)
     plan_p = build_risk_plan(
         entry_price=80_500.0, direction="short",
         leverage=34, equity_usd=1000.0,
@@ -369,6 +369,18 @@ def test_build_risk_plan_structural_sl_price_override_v0_1_44() -> None:
         structural_sl_price=81_500.0,            # structural 이 우선
     )
     assert plan_p.sl_price == pytest.approx(81_500.0)
+
+    # 우선순위 — structural_sl_price 가 bb_lower 보다 우선 (LONG)
+    # Why: v0.1.44 priority 정책 LONG 방향 검증 (SHORT 는 위에서 확인).
+    # bb_lower × (1 - 0.003) = 79,958.4 vs structural = 80,000 → structural 채택.
+    plan_l_combined = build_risk_plan(
+        entry_price=80_500.0, direction="long",
+        leverage=34, equity_usd=1000.0,
+        config=cfg, risk_pct=0.01,
+        bb_upper=80_650.0, bb_lower=80_200.0,  # BB 하단 제공되지만
+        structural_sl_price=80_000.0,            # structural 이 우선
+    )
+    assert plan_l_combined.sl_price == pytest.approx(80_000.0)
 
 
 def test_build_risk_plan_sl_noise_floor_v0_1_45() -> None:

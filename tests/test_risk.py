@@ -593,6 +593,56 @@ def test_trailing_percent_below_triggers_long() -> None:
     assert new_sl == pytest.approx(123.5)
 
 
+def test_trailing_percent_below_triggers_short() -> None:
+    """PERCENT_BELOW_TRIGGERS 숏: trigger 후 lowest 대비 trailing_pct% 위."""
+    plan = _make_short_plan()
+    cfg = TpSlConfig(
+        trailing_mode=TrailingMode.PERCENT_BELOW_TRIGGERS,
+        trailing_trigger_target=2,
+        trailing_pct=5.0,
+    )
+    # trigger 미달 → 그대로
+    assert update_trailing_sl(105.0, plan, cfg, tp_hits=1,
+                               highest_since_entry=100.0, lowest_since_entry=80.0) == 105.0
+    # trigger 도달 → lowest × (1 + 0.05) = 80 × 1.05 = 84
+    # min(105, 84) = 84 (SL 하향, 숏에 유리)
+    new_sl = update_trailing_sl(105.0, plan, cfg, tp_hits=2,
+                                 highest_since_entry=100.0, lowest_since_entry=80.0)
+    assert new_sl == pytest.approx(84.0)
+
+
+def test_trailing_moving_target_last_tp_and_overflow() -> None:
+    """MOVING_TARGET: tp_hits=5 → tp_prices[3] / tp_hits=6 (overflow) → tp_prices[-1] 유지."""
+    plan = _make_long_plan()  # tp=[110, 120, 130, 140], 4개
+    cfg = TpSlConfig(trailing_mode=TrailingMode.MOVING_TARGET)
+
+    # tp_hits=5 → target_idx=3 → tp_prices[3]=140 (마지막 TP, 정상 범위)
+    new_sl_5 = update_trailing_sl(95.0, plan, cfg, tp_hits=5,
+                                   highest_since_entry=145.0, lowest_since_entry=100.0)
+    assert new_sl_5 == pytest.approx(140.0)
+
+    # tp_hits=6 → target_idx=4 → out-of-bounds → tp_prices[-1]=140 유지
+    new_sl_6 = update_trailing_sl(95.0, plan, cfg, tp_hits=6,
+                                   highest_since_entry=150.0, lowest_since_entry=100.0)
+    assert new_sl_6 == pytest.approx(140.0)
+
+
+def test_trailing_moving_2_target_higher_steps_and_overflow() -> None:
+    """MOVING_2_TARGET: tp_hits=4 → tp_prices[1] / overflow → tp_prices[-1] 유지."""
+    plan = _make_long_plan()  # tp=[110, 120, 130, 140]
+    cfg = TpSlConfig(trailing_mode=TrailingMode.MOVING_2_TARGET)
+
+    # tp_hits=4 → target_idx=1 → tp_prices[1]=120
+    new_sl_4 = update_trailing_sl(95.0, plan, cfg, tp_hits=4,
+                                   highest_since_entry=135.0, lowest_since_entry=100.0)
+    assert new_sl_4 == pytest.approx(120.0)
+
+    # tp_hits=7 → target_idx=4 → out-of-bounds → tp_prices[-1]=140
+    new_sl_7 = update_trailing_sl(95.0, plan, cfg, tp_hits=7,
+                                   highest_since_entry=150.0, lowest_since_entry=100.0)
+    assert new_sl_7 == pytest.approx(140.0)
+
+
 def test_trailing_percent_below_highest_long() -> None:
     """PERCENT_BELOW_HIGHEST 롱: trigger 없이 진입 직후부터."""
     plan = _make_long_plan()

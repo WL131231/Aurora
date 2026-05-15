@@ -1018,3 +1018,86 @@ def test_step_enters_on_trend_up_with_skip_enabled(
     # (2) 9b 가드 미발동 (VOLATILE 한정) → _open 호출 → trade 1
     assert len(trades) >= 1
     assert trades[0].regime == "TREND_UP"
+
+
+# ============================================================
+# Group K — _check_exits 갭 (4, B 그룹 보충)
+# ============================================================
+
+
+def test_check_exits_no_position_returns_none() -> None:
+    """포지션 없을 때 _check_exits → None (초기 가드)."""
+    engine = BacktestEngine(BacktestConfig())
+    assert engine.position is None
+    result = engine._check_exits(
+        ts_ms=1_700_000_010_000, open_=100.0, high=100.5, low=99.5,
+    )
+    assert result is None
+
+
+def test_check_exits_short_gap_fill_unfavorable_sl() -> None:
+    """SHORT gap-fill — open(>SL) 통과 시 fill = max(open_, SL) (replay 패턴)."""
+    engine = BacktestEngine(BacktestConfig())
+    _open_short(engine, entry=100.0)
+    sl_price = engine.position.plan.sl_price         # ≈ 100.2 (SL 0.2% price)
+    # open 이 SL 위로 통과 → 불리한 체결 (SHORT 청산 = 매수, 위로 뜨면 비쌈)
+    open_ = sl_price + 1.0
+    high = sl_price + 1.5
+    low = sl_price - 0.5
+    engine._last_high = high
+    engine._last_low = low
+    engine._last_close = open_
+    trade = engine._check_exits(
+        ts_ms=1_700_000_010_000, open_=open_, high=high, low=low,
+    )
+    assert trade is not None
+    # gap-fill 적용 → exit_price > SL (open 부근 + slip, 불리)
+    assert trade.exit_price > sl_price
+    assert engine.position is None
+
+
+def test_check_exits_long_tp_gap_fill() -> None:
+    """LONG TP 갭업 — open > TP1 시 fill = max(open_, tp1) (유리한 체결)."""
+    engine = BacktestEngine(BacktestConfig())
+    _open_long(engine, entry=100.0)
+    tp1_price = engine.position.plan.tp_prices[0]    # ≈ 100.28
+    # open 이 TP1 위로 갭업 → max(open_, tp1) = open_ (더 유리한 fill)
+    open_ = tp1_price + 0.1
+    high = tp1_price + 0.5
+    low = 100.1
+    engine._last_high = high
+    engine._last_low = low
+    engine._last_close = open_
+    trade = engine._check_exits(
+        ts_ms=1_700_000_010_000, open_=open_, high=high, low=low,
+    )
+    assert trade is not None
+    # partial close (TP1, idx=0) — fill = open_ > tp1_price
+    assert trade.exit_price > tp1_price * 0.999      # slip 여유분 (0.1%)
+    # 포지션 유지 (partial close 이후)
+    assert engine.position is not None
+    assert engine.position.tp_hits == 1
+
+
+def test_check_exits_short_be_reason() -> None:
+    """SHORT BE 분기 — tp_hits≥1 후 SL 도달 시 consec_sl 미증가 (D-2 정합)."""
+    engine = BacktestEngine(BacktestConfig())
+    _open_short(engine, entry=100.0)
+    # TP1 hit 시뮬: tp_hits=1, current_sl=entry(breakeven) 수동 박음
+    engine.position.tp_hits = 1
+    engine.position.current_sl = 100.0              # breakeven
+    engine.consec_sl = 0
+    # HIGH > current_sl(100.0) → SL 도달, tp_hits=1 → BE 분류
+    open_ = 99.8
+    high = 100.1
+    low = 99.5
+    engine._last_high = high
+    engine._last_low = low
+    engine._last_close = open_
+    trade = engine._check_exits(
+        ts_ms=1_700_000_010_000, open_=open_, high=high, low=low,
+    )
+    assert trade is not None
+    # BE 청산 → consec_sl 증가 X (SL = +1, BE = 유지)
+    assert engine.consec_sl == 0
+    assert engine.position is None

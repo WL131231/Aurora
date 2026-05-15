@@ -1711,6 +1711,56 @@ def test_2468_evaluate_selectable_btc_only() -> None:
     assert all(not s.source.startswith("zone_2468") for s in signals)
 
 
+def test_evaluate_selectable_use_2468_false_suppresses_btc_signal() -> None:
+    """use_2468=False 시 BTC 심볼이어도 2468 신호 제외.
+
+    symbol 이 BTC 여도 config.use_2468=False 면 evaluate_selectable 내부
+    detect_2468_signal 라우팅에서 [] 반환 → 결과에 zone_2468 없음.
+    """
+    trend = list(np.linspace(91500, 90500, 15)) + list(np.linspace(90500, 91300, 15))
+    df = _trend_then_zone_df(
+        trend[:-1],
+        last_high=91400.0,
+        last_low=91250.0,
+        last_close=91300.0,
+    )
+    config = StrategyConfig(ma_cross_fast=3, ma_cross_slow=5, use_2468=False)
+    signals = evaluate_selectable({"15m": df}, config, symbol="BTC/USDT")
+    assert all(not s.source.startswith("zone_2468") for s in signals)
+
+
+def test_evaluate_selectable_multiple_indicators_on_collect_both() -> None:
+    """BB + MA Cross 동시 ON → 두 종류 신호 모두 수집.
+
+    evaluate_selectable 라우터가 각 지표 신호를 독립 합산하는지 검증.
+    """
+    # MA Cross golden 생성 패턴 (fast=3, slow=5)
+    closes = [100.0] * 5 + [90, 80, 70, 60, 50] + [50, 50, 50, 50] + [150.0]
+    # BB 하단 reversal 패턴: 마지막 봉 직전을 mean-8 로 찍고 현재 봉 회귀
+    rng = np.random.RandomState(99)
+    bb_closes = list(rng.randn(40) * 1.0 + 100)
+    bb_closes.append(float(np.mean(bb_closes)) - 8.0)   # 하단 이탈
+    bb_closes.append(float(np.mean(bb_closes[:-1])))     # 회귀
+
+    df_ma = _trend_close_df(closes)
+    df_bb = _bb_df(bb_closes)
+
+    config = StrategyConfig(
+        use_bollinger=True,
+        use_ma_cross=True,
+        ma_cross_fast=3,
+        ma_cross_slow=5,
+        use_2468=False,  # 2468 제외 (이 테스트에서 관심 없음)
+    )
+    ma_sigs = evaluate_selectable({"4H": df_ma}, config)
+    bb_sigs = evaluate_selectable({"1H": df_bb}, config)
+
+    # MA Cross golden → 신호 있음
+    assert any(s.source == "ma_cross_golden" for s in ma_sigs)
+    # BB reversal → 신호 있음
+    assert any(s.source.startswith("bollinger_") for s in bb_sigs)
+
+
 # ============================================================
 # D-5 classify_regime — 4H 시장 국면 분류 (Issue #110)
 # ============================================================

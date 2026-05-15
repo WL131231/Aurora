@@ -709,3 +709,108 @@ def test_tp_pct_4_levels_equal_step() -> None:
         step = (levels[-1] - levels[0]) / 3
         assert abs(levels[1] - (levels[0] + step)) < 1e-9
         assert abs(levels[2] - (levels[0] + 2 * step)) < 1e-9
+
+
+# ============================================================
+# build_risk_plan — 에러 경로 (lines 344, 374, 402)
+# ============================================================
+
+
+def test_build_risk_plan_entry_price_zero_raises() -> None:
+    """entry_price <= 0 → ValueError (line 344)."""
+    with pytest.raises(ValueError, match="entry_price"):
+        build_risk_plan(
+            config=TpSlConfig(),
+            direction="long",
+            entry_price=0.0,
+            leverage=10,
+            equity_usd=1000.0,
+        )
+
+
+def test_build_risk_plan_unknown_mode_raises() -> None:
+    """알 수 없는 TpSlMode → ValueError (line 374).
+
+    dataclass(slots=True) 는 런타임 타입 강제 X → 직접 할당으로 else 분기 유도.
+    """
+    config = TpSlConfig()
+    config.mode = "not_a_mode"  # type: ignore[assignment]
+    with pytest.raises(ValueError, match="unknown TpSlMode"):
+        build_risk_plan(
+            config=config,
+            direction="long",
+            entry_price=100.0,
+            leverage=10,
+            equity_usd=1000.0,
+        )
+
+
+def test_build_risk_plan_sl_at_entry_uses_fallback_distance() -> None:
+    """structural_sl_price == entry_price → sl_distance_pct = 0 → fallback (line 402)."""
+    plan = build_risk_plan(
+        config=TpSlConfig(),
+        direction="long",
+        entry_price=100.0,
+        leverage=10,
+        equity_usd=1000.0,
+        structural_sl_price=100.0,  # entry 와 같음 → sl_distance_pct = 0
+    )
+    # fallback 적용 후 position size 계산이 정상 완료돼야 함
+    assert plan.sl_price == pytest.approx(100.0)
+    assert plan.position.coin_amount > 0
+
+
+# ============================================================
+# update_trailing_sl — 미커버 경로 (lines 506, 513-516, 528)
+# ============================================================
+
+
+def test_trailing_moving_target_beyond_last_tp_uses_last() -> None:
+    """MOVING_TARGET: target_idx >= len(tp_prices) → tp[-1] 고정 (line 506)."""
+    plan = _make_long_plan()  # tp=[110, 120, 130, 140]
+    cfg = TpSlConfig(trailing_mode=TrailingMode.MOVING_TARGET)
+    # tp_hits=6 → target_idx=4 ≥ len(4) → tp[-1]=140
+    new_sl = update_trailing_sl(
+        95.0, plan, cfg, tp_hits=6,
+        highest_since_entry=150.0, lowest_since_entry=100.0,
+    )
+    assert new_sl == pytest.approx(140.0)
+
+
+def test_trailing_moving_2_target_step_3_first_tp() -> None:
+    """MOVING_2_TARGET: tp_hits=3 → target_idx=0 → tp[0] (lines 513-514)."""
+    plan = _make_long_plan()  # tp=[110, 120, 130, 140]
+    cfg = TpSlConfig(trailing_mode=TrailingMode.MOVING_2_TARGET)
+    new_sl = update_trailing_sl(
+        95.0, plan, cfg, tp_hits=3,
+        highest_since_entry=130.0, lowest_since_entry=100.0,
+    )
+    assert new_sl == pytest.approx(110.0)
+
+
+def test_trailing_moving_2_target_beyond_last_tp_uses_last() -> None:
+    """MOVING_2_TARGET: target_idx >= len(tp_prices) → tp[-1] 고정 (lines 515-516)."""
+    plan = _make_long_plan()  # tp=[110, 120, 130, 140]
+    cfg = TpSlConfig(trailing_mode=TrailingMode.MOVING_2_TARGET)
+    # tp_hits=7 → target_idx=4 ≥ len(4) → tp[-1]=140
+    new_sl = update_trailing_sl(
+        95.0, plan, cfg, tp_hits=7,
+        highest_since_entry=150.0, lowest_since_entry=100.0,
+    )
+    assert new_sl == pytest.approx(140.0)
+
+
+def test_trailing_percent_below_triggers_short() -> None:
+    """PERCENT_BELOW_TRIGGERS 숏: trigger 후 lowest × (1 + pct/100) (line 528)."""
+    plan = _make_short_plan()  # entry 100, sl 105
+    cfg = TpSlConfig(
+        trailing_mode=TrailingMode.PERCENT_BELOW_TRIGGERS,
+        trailing_trigger_target=2,
+        trailing_pct=5.0,
+    )
+    # trigger 도달 → lowest × 1.05 = 70 × 1.05 = 73.5
+    new_sl = update_trailing_sl(
+        105.0, plan, cfg, tp_hits=2,
+        highest_since_entry=100.0, lowest_since_entry=70.0,
+    )
+    assert new_sl == pytest.approx(73.5)

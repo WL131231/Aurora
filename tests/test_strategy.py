@@ -166,13 +166,33 @@ def test_ema_touch_attaches_structural_sl_meta_v0_1_45() -> None:
 
 
 # ============================================================
-# detect_rsi_divergence (단순 smoke + 빈 DF 처리)
+# detect_rsi_divergence
 # ============================================================
 
 
 def test_rsi_divergence_empty_df() -> None:
     config = StrategyConfig()
     assert detect_rsi_divergence(pd.DataFrame(), config) == []
+
+
+def test_rsi_divergence_none_df_returns_empty() -> None:
+    """df=None → []."""
+    config = StrategyConfig()
+    assert detect_rsi_divergence(None, config) == []  # type: ignore[arg-type]
+
+
+def test_rsi_divergence_missing_close_returns_empty() -> None:
+    """close 컬럼 누락 → []."""
+    config = StrategyConfig()
+    df = pd.DataFrame({"open": [100.0], "high": [101.0], "low": [99.0]})
+    assert detect_rsi_divergence(df, config) == []
+
+
+def test_rsi_divergence_missing_low_returns_empty() -> None:
+    """low 컬럼 누락 → []."""
+    config = StrategyConfig()
+    df = pd.DataFrame({"open": [100.0], "high": [101.0], "close": [100.0]})
+    assert detect_rsi_divergence(df, config) == []
 
 
 def test_rsi_divergence_runs_on_random_data() -> None:
@@ -192,6 +212,84 @@ def test_rsi_divergence_runs_on_random_data() -> None:
     for s in result:
         assert isinstance(s, EntrySignal)
         assert s.timeframe == "1H"
+
+
+def _build_regular_bull_df() -> pd.DataFrame:
+    """regular_bull 시그널용 합성 OHLC (118봉).
+
+    설계 근거:
+      Phase 1 (0-79):   완만한 상승 100→110  — RSI 안정, avg_gain 축적
+      Phase 2 (80-94):  급격한 하락 110→72, 15봉 — RSI 피벗1 (~16), all-loss
+      Phase 3 (95-104): 반등 72→95, 10봉  — avg_gain 재충전
+      Phase 4 (105-112):단기 하락 95→68, 8봉  — RSI 피벗2 (~28, Phase3 avg_gain 잔존)
+        → low LL: 67 < 71.5 / RSI HL: ~28 > ~16  ⇒ regular_bull
+      Phase 5 (113-117):소폭 반등 68→72, 5봉  — lb_right 확인봉 (마지막 봉=index 117)
+    """
+    p1 = np.linspace(100.0, 110.0, 81)[1:]
+    p2 = np.linspace(110.0, 72.0, 16)[1:]
+    p3 = np.linspace(72.0, 95.0, 11)[1:]
+    p4 = np.linspace(95.0, 68.0, 9)[1:]
+    p5 = np.linspace(68.0, 72.0, 6)[1:]
+
+    close = np.concatenate([p1, p2, p3, p4, p5])
+    low = close * 0.998
+    low[94] = 71.5   # Phase 2 피벗 저가 (pivot1)
+    low[112] = 67.0  # Phase 4 피벗 저가 (pivot2, LL ✓)
+    high = close * 1.002
+    return pd.DataFrame({"open": close, "high": high, "low": low, "close": close})
+
+
+def test_detect_rsi_divergence_regular_bull_returns_long_signal() -> None:
+    """합성 데이터: regular_bull → Direction.LONG, source='rsi_div_regular_bull'."""
+    df = _build_regular_bull_df()
+    config = StrategyConfig()
+    result = detect_rsi_divergence(df, config)
+
+    assert len(result) == 1
+    sig = result[0]
+    assert sig.direction == Direction.LONG
+    assert sig.source == "rsi_div_regular_bull"
+    assert sig.timeframe == "1H"
+    assert sig.strength == 1.0
+
+
+def _build_regular_bear_df() -> pd.DataFrame:
+    """regular_bear 시그널용 합성 OHLC (118봉).
+
+    설계 근거:
+      Phase 1 (0-79):   완만한 하락 110→100  — RSI 안정, avg_loss 축적
+      Phase 2 (80-94):  급격한 상승 100→138, 15봉 — RSI 피벗1 (~84), all-gain
+      Phase 3 (95-104): 되돌림 138→115, 10봉  — avg_loss 재충전
+      Phase 4 (105-112):단기 상승 115→142, 8봉  — RSI 피벗2 (~72, Phase3 avg_loss 잔존)
+        → high HH: 143 > 138.5 / RSI LH: ~72 < ~84  ⇒ regular_bear
+      Phase 5 (113-117):소폭 하락 142→138, 5봉  — lb_right 확인봉 (마지막 봉=index 117)
+    """
+    p1 = np.linspace(110.0, 100.0, 81)[1:]
+    p2 = np.linspace(100.0, 138.0, 16)[1:]
+    p3 = np.linspace(138.0, 115.0, 11)[1:]
+    p4 = np.linspace(115.0, 142.0, 9)[1:]
+    p5 = np.linspace(142.0, 138.0, 6)[1:]
+
+    close = np.concatenate([p1, p2, p3, p4, p5])
+    high = close * 1.002
+    high[94] = 138.5   # Phase 2 피벗 고가 (pivot1)
+    high[112] = 143.0  # Phase 4 피벗 고가 (pivot2, HH ✓)
+    low = close * 0.998
+    return pd.DataFrame({"open": close, "high": high, "low": low, "close": close})
+
+
+def test_detect_rsi_divergence_regular_bear_returns_short_signal() -> None:
+    """합성 데이터: regular_bear → Direction.SHORT, source='rsi_div_regular_bear'."""
+    df = _build_regular_bear_df()
+    config = StrategyConfig()
+    result = detect_rsi_divergence(df, config)
+
+    assert len(result) == 1
+    sig = result[0]
+    assert sig.direction == Direction.SHORT
+    assert sig.source == "rsi_div_regular_bear"
+    assert sig.timeframe == "1H"
+    assert sig.strength == 1.0
 
 
 # ============================================================

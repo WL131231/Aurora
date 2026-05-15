@@ -221,6 +221,67 @@ def test_rsi_divergence_invalid_range_raises() -> None:
         rsi_divergence(s, s, s, range_lower=10, range_upper=5)
 
 
+def test_rsi_divergence_detects_hidden_bull() -> None:
+    """은닉 강세 다이버전스: 가격 HL (두 번째 저점 높음) + RSI LL (두 번째 RSI 저점 낮음).
+
+    Why: CLAUDE.md 4종 모두 검출 정합 회귀 — regular_bull/bear 만 테스트됐던 갭 보충.
+    rsi_series 직접 주입 + V자 단조 패턴 2개 → 중간 피벗 없이 idx=5/15 에만 피벗 생성.
+
+    피벗1 (idx=5): low=60, rsi=25
+    피벗2 (idx=15): low=70 (HL), rsi=20 (LL)
+    → hidden_bull 조건 (curr_low > last_pl_low AND curr_rsi < last_pl_rsi) 충족.
+    """
+    # W자 RSI: 50→25→50 (피벗1 at idx=5), 50→20→50 (피벗2 at idx=15)
+    # 단조 패턴이라 각 구간 내 중간 피벗 불발
+    seg_a = list(np.linspace(50, 25, 6))   # idx 0-5: [50,45,40,35,30,25]
+    seg_b = list(np.linspace(25, 50, 6))   # idx 5-10: [25,30,35,40,45,50]
+    seg_c = list(np.linspace(50, 20, 6))   # idx 10-15: [50,44,38,32,26,20]
+    seg_d = list(np.linspace(20, 50, 6))   # idx 15-20: [20,24,28,32,36,40]
+    rsi_vals = seg_a + seg_b[1:] + seg_c[1:] + seg_d[1:] + [50.0] * 5  # len=26
+
+    # 가격 low: 피벗2 저가 > 피벗1 저가 (HL) — 나머지는 충분히 높게
+    low_vals = [80.0] * len(rsi_vals)
+    low_vals[5] = 60.0   # 피벗1 저가
+    low_vals[15] = 70.0  # 피벗2 저가 (HL, 70 > 60)
+
+    rsi_s = pd.Series(rsi_vals)
+    low_s = pd.Series(low_vals)
+    high_s = low_s + 5.0
+
+    result = rsi_divergence(low_s, high_s, rsi_s, lb_left=2, lb_right=2, range_lower=5)
+    assert "hidden_bull" in result.values, (
+        f"hidden_bull 미검출. 결과: {result.dropna().tolist()}"
+    )
+
+
+def test_rsi_divergence_detects_hidden_bear() -> None:
+    """은닉 약세 다이버전스: 가격 LH (두 번째 고점 낮음) + RSI HH (두 번째 RSI 고점 높음).
+
+    RSI M자 패턴: 40→75→40→80→40 — 피벗1 rsi=75, 피벗2 rsi=80 (HH).
+    가격 high: 피벗1=100, 피벗2=90 (LH).
+    → hidden_bear 조건 (curr_high < last_ph_high AND curr_rsi > last_ph_rsi) 충족.
+    """
+    seg_a = list(np.linspace(40, 75, 6))   # idx 0-5: [40,47,54,61,68,75]
+    seg_b = list(np.linspace(75, 40, 6))   # idx 5-10: [75,68,61,54,47,40]
+    seg_c = list(np.linspace(40, 80, 6))   # idx 10-15: [40,48,56,64,72,80]
+    seg_d = list(np.linspace(80, 40, 6))   # idx 15-20: [80,72,64,56,48,40]
+    rsi_vals = seg_a + seg_b[1:] + seg_c[1:] + seg_d[1:] + [40.0] * 5  # len=26
+
+    # 가격 high: 피벗2 고가 < 피벗1 고가 (LH) — 나머지는 충분히 낮게
+    high_vals = [60.0] * len(rsi_vals)
+    high_vals[5] = 100.0  # 피벗1 고가
+    high_vals[15] = 90.0  # 피벗2 고가 (LH, 90 < 100)
+
+    rsi_s = pd.Series(rsi_vals)
+    high_s = pd.Series(high_vals)
+    low_s = high_s - 5.0
+
+    result = rsi_divergence(low_s, high_s, rsi_s, lb_left=2, lb_right=2, range_lower=5)
+    assert "hidden_bear" in result.values, (
+        f"hidden_bear 미검출. 결과: {result.dropna().tolist()}"
+    )
+
+
 # ============================================================
 # Bollinger Bands
 # ============================================================

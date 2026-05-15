@@ -97,3 +97,34 @@ def test_load_handles_corrupt_json():
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("not-json {{{", encoding="utf-8")
     assert trades_store.load() == []
+
+
+def test_load_json_not_list_returns_empty(caplog) -> None:
+    """JSON 이 list 가 아닌 경우 (dict 등) — 빈 리스트 반환 + WARNING."""
+    import logging
+    p = trades_store._path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text('{"key": "value"}', encoding="utf-8")
+    with caplog.at_level(logging.WARNING):
+        result = trades_store.load()
+    assert result == []
+    assert any("list 아님" in r.message for r in caplog.records)
+
+
+def test_load_non_dict_items_skipped() -> None:
+    """list 내 비-dict 항목 (정수 등) — skip 하고 유효 record 만 복원."""
+    p = trades_store._path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    valid_json = (
+        '['
+        '42,'
+        '{"symbol":"BTC/USDT:USDT","direction":"long","leverage":10,'
+        '"qty":0.01,"entry_price":60000,"exit_price":61000,'
+        '"opened_at_ts":1,"closed_at_ts":2,"reason":"tp_full",'
+        '"pnl_usd":10,"roi_pct":16.67,"triggered_by":[]}'
+        ']'
+    )
+    p.write_text(valid_json, encoding="utf-8")
+    result = trades_store.load()
+    assert len(result) == 1
+    assert result[0].symbol == "BTC/USDT:USDT"

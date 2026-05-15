@@ -32,6 +32,20 @@ def test_parse_version_v_prefix():
     assert release_check._parse_version("0.1.5") == (0, 1, 5)
 
 
+def test_parse_version_stops_at_invalid_chunk() -> None:
+    """비정수 chunk 에서 중단 — '1.0a' → (1,) (ValueError break 경로)."""
+    assert release_check._parse_version("1.0a") == (1,)
+    assert release_check._parse_version("v2.0x.1") == (2,)
+
+
+def test_check_once_empty_tag_name_returns_early() -> None:
+    """tag_name 빈 문자열 — 즉시 return, pending 변경 X."""
+    fake = {"tag_name": "", "assets": []}
+    with patch("aurora.interfaces.release_check.fetch_latest", return_value=fake):
+        release_check.check_once()
+    assert release_check.get_pending_release() is None
+
+
 def test_check_once_no_release_keeps_pending_none():
     """fetch 실패 (None) — pending 변경 X."""
     with patch("aurora.interfaces.release_check.fetch_latest", return_value=None):

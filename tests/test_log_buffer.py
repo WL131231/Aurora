@@ -99,3 +99,97 @@ def test_emit_with_exc_info_includes_traceback() -> None:
     assert len(recent) == 1
     assert "ValueError" in recent[0]["message"]
     assert "test error for aurora" in recent[0]["message"]
+
+
+# ============================================================
+# v0.1.106 broadcaster + event_loop 활성 경로 (lines 75-87)
+# ============================================================
+
+
+@pytest.fixture(autouse=False)
+def _reset_broadcast_state():
+    """broadcaster / event_loop 전역 상태 초기화 — broadcast 경로 테스트 격리."""
+    yield
+    log_buffer.set_broadcaster(None)
+    log_buffer.set_event_loop(None)
+
+
+def test_emit_broadcasts_when_loop_and_broadcaster_set(_reset_broadcast_state) -> None:
+    """broadcaster + event_loop 모두 박혀있을 때 call_soon_threadsafe 경로 실행.
+
+    line 75 (inner try), 76 (is_closed), 79-83 (call_soon_threadsafe + ensure_future) 커버.
+    """
+    import asyncio
+
+    received: list[dict] = []
+
+    async def _broadcaster(item: dict) -> None:
+        received.append(item)
+
+    loop = asyncio.new_event_loop()
+    try:
+        log_buffer.set_event_loop(loop)
+        log_buffer.set_broadcaster(_broadcaster)
+        log_buffer.install()
+        logging.getLogger("test.broadcast").info("broadcast test")
+
+        # call_soon_threadsafe 콜백 처리 → ensure_future task 생성 → task 실행
+        async def _drain() -> None:
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+        loop.run_until_complete(_drain())
+    finally:
+        loop.close()
+
+    assert len(received) >= 1
+    assert received[0]["message"] == "broadcast test"
+
+
+def test_emit_broadcast_inner_exception_swallowed(_reset_broadcast_state) -> None:
+    """call_soon_threadsafe 가 raise 해도 emit 측 raise X — line 84-85 커버.
+
+    실제 loop 대신 is_closed() 는 False 반환하지만 call_soon_threadsafe 가
+    RuntimeError 를 raise 하는 가짜 loop 로 inner except 경로 유도.
+    """
+
+    class _BrokenLoop:
+        def is_closed(self) -> bool:
+            return False
+
+        def call_soon_threadsafe(self, _fn) -> None:  # noqa: ANN001
+            raise RuntimeError("loop boom")
+
+    async def _broadcaster(item: dict) -> None:
+        pass
+
+    log_buffer.set_event_loop(_BrokenLoop())
+    log_buffer.set_broadcaster(_broadcaster)
+    log_buffer.install()
+
+    # RuntimeError 가 emit 밖으로 새어나오지 않아야 함
+    logging.getLogger("test.broadcast_err").info("should buffer silently")
+
+    recent = log_buffer.get_recent(5)
+    assert any(r["message"] == "should buffer silently" for r in recent)
+
+
+def test_emit_outer_exception_swallowed(_reset_broadcast_state) -> None:
+    """emit 내부에서 broadcaster block 밖 예외도 raise X — line 86-87 커버.
+
+    _buffer 를 None 으로 교체해 append 시 AttributeError 유발 →
+    outer except 가 삼키고 정상 종료.
+    """
+    log_buffer.install()
+    handler = next(
+        h for h in logging.getLogger().handlers
+        if isinstance(h, log_buffer.BufferHandler)
+    )
+    record = logging.LogRecord("t", logging.INFO, "", 0, "msg", (), None)
+
+    original = log_buffer._buffer
+    log_buffer._buffer = None  # type: ignore[assignment]
+    try:
+        handler.emit(record)  # AttributeError on None.append → outer except
+    finally:
+        log_buffer._buffer = original

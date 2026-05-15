@@ -124,3 +124,71 @@ def test_save_overwrites_previous():
     assert saved["symbol"] == "B"
     assert saved["triggered_by"] == ["RSI"]
     assert saved["tp_hits"] == 3
+
+
+# ============================================================
+# 에러 경로 (lines 81-87, 105, 137-138)
+# ============================================================
+
+
+def test_load_non_dict_json_returns_none() -> None:
+    """JSON 루트가 dict 아님 (list 등) — None 반환 (line 105)."""
+    p = active_position_store._path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text('[1, 2, 3]', encoding="utf-8")
+    assert active_position_store.load() is None
+
+
+def test_save_oserror_logs_and_cleans_tmp(caplog) -> None:
+    """tmp.replace 실패 시 warning 로그 + tmp 파일 정리 (lines 81-85)."""
+    import logging
+    from pathlib import Path
+    from unittest.mock import patch
+
+    with patch.object(Path, "replace", side_effect=OSError("disk full")):
+        with caplog.at_level(logging.WARNING):
+            active_position_store.save(
+                plan=_plan(), symbol="X", triggered_by=[],
+                opened_at_ts=0, remaining_qty=0.01, tp_hits=0,
+            )
+
+    assert any("save 실패" in r.message for r in caplog.records)
+    # tmp 파일이 남아있지 않아야 함
+    p = active_position_store._path()
+    assert not p.with_suffix(p.suffix + ".tmp").exists()
+
+
+def test_save_oserror_tmp_unlink_fails_silently(caplog) -> None:
+    """tmp.replace 실패 + tmp.unlink 도 실패 → silent pass (lines 86-87)."""
+    import logging
+    from pathlib import Path
+    from unittest.mock import patch
+
+    with patch.object(Path, "replace", side_effect=OSError("disk full")):
+        with patch.object(Path, "unlink", side_effect=OSError("cannot delete")):
+            with caplog.at_level(logging.WARNING):
+                active_position_store.save(
+                    plan=_plan(), symbol="X", triggered_by=[],
+                    opened_at_ts=0, remaining_qty=0.01, tp_hits=0,
+                )
+
+    # 예외가 밖으로 새지 않고, warning 은 남아야 함
+    assert any("save 실패" in r.message for r in caplog.records)
+
+
+def test_clear_unlink_oserror_logs_warning(caplog) -> None:
+    """p.unlink() 가 OSError → warning 로그 (lines 137-138)."""
+    import logging
+    from pathlib import Path
+    from unittest.mock import patch
+
+    active_position_store.save(
+        plan=_plan(), symbol="X", triggered_by=[],
+        opened_at_ts=0, remaining_qty=0.01, tp_hits=0,
+    )
+
+    with patch.object(Path, "unlink", side_effect=OSError("cannot delete")):
+        with caplog.at_level(logging.WARNING):
+            active_position_store.clear()
+
+    assert any("clear 실패" in r.message for r in caplog.records)

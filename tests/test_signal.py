@@ -6,6 +6,7 @@ import pytest
 
 from aurora.core.signal import (
     DEFAULT_ENTRY_THRESHOLD,
+    MULTI_SIGNAL_BOOST,
     TF_WEIGHTS,
     compose_entry,
     compose_exit,
@@ -134,6 +135,93 @@ def test_compose_aggregates_multi_tf_same_direction() -> None:
 def test_compose_default_threshold() -> None:
     """기본 임계값 = 1.0 (15m 단일 신호 가능)."""
     assert DEFAULT_ENTRY_THRESHOLD == pytest.approx(1.0)
+
+
+# ============================================================
+# MULTI_SIGNAL_BOOST (v0.1.78)
+# ============================================================
+
+
+def test_compose_multi_source_long_boost_applied() -> None:
+    """unique source ≥ 2, LONG → long_score × MULTI_SIGNAL_BOOST."""
+    signals = [
+        _sig(Direction.LONG, "1H", source="ema_touch_200"),    # 2점
+        _sig(Direction.LONG, "1H", source="ma_cross_golden"),  # 2점
+    ]
+    d = compose_entry(signals)
+    assert d.enter is True
+    assert d.direction == Direction.LONG
+    assert d.score == pytest.approx(4.0 * MULTI_SIGNAL_BOOST)
+
+
+def test_compose_multi_source_short_boost_applied() -> None:
+    """unique source ≥ 2, SHORT → short_score × MULTI_SIGNAL_BOOST."""
+    signals = [
+        _sig(Direction.SHORT, "1H", source="bollinger_short"),  # 2점
+        _sig(Direction.SHORT, "4H", source="ichimoku_short"),   # 5점
+    ]
+    d = compose_entry(signals)
+    assert d.enter is True
+    assert d.direction == Direction.SHORT
+    assert d.score == pytest.approx(7.0 * MULTI_SIGNAL_BOOST)
+
+
+def test_compose_same_source_multi_tf_no_boost() -> None:
+    """같은 source 여러 TF → unique=1 → 부스터 미적용."""
+    signals = [
+        _sig(Direction.LONG, "1H", source="ema_touch_200"),
+        _sig(Direction.LONG, "4H", source="ema_touch_200"),  # 같은 source
+    ]
+    d = compose_entry(signals)
+    # 2 + 5 = 7, 부스터 없음
+    assert d.score == pytest.approx(7.0)
+
+
+def test_compose_boost_enables_threshold_crossing() -> None:
+    """부스터 적용 시 threshold 통과 / 미적용 시 보류 — 경계값."""
+    # threshold=2.5, 15m 신호 2개 다른 source → 합 2.0
+    # 부스터: 2.0 × 1.3 = 2.6 ≥ 2.5 → 진입
+    sigs_diff = [
+        _sig(Direction.LONG, "15m", source="src_a"),
+        _sig(Direction.LONG, "15m", source="src_b"),
+    ]
+    d_boosted = compose_entry(sigs_diff, threshold=2.5)
+    assert d_boosted.enter is True
+    assert d_boosted.score == pytest.approx(2.0 * MULTI_SIGNAL_BOOST)
+
+    # 같은 source → 부스터 없음: 2.0 < 2.5 → 보류
+    sigs_same = [
+        _sig(Direction.LONG, "15m", source="src_a"),
+        _sig(Direction.LONG, "15m", source="src_a"),
+    ]
+    d_no_boost = compose_entry(sigs_same, threshold=2.5)
+    assert d_no_boost.enter is False
+    assert d_no_boost.score == pytest.approx(2.0)
+
+
+def test_compose_exactly_two_unique_sources_triggers_boost() -> None:
+    """unique source = 2 (최솟값) → 부스터 적용 경계."""
+    signals = [
+        _sig(Direction.SHORT, "1H", source="rsi_div"),
+        _sig(Direction.SHORT, "1H", source="bollinger"),
+    ]
+    d = compose_entry(signals)
+    assert d.score == pytest.approx(4.0 * MULTI_SIGNAL_BOOST)
+
+
+def test_compose_boost_only_applied_to_dominant_direction() -> None:
+    """부스터는 방향별 독립 적용 — 보유 방향만 부스트, 반대는 단일 source면 미적용."""
+    signals = [
+        _sig(Direction.LONG, "1H", source="ema_touch_200"),
+        _sig(Direction.LONG, "1H", source="ma_cross"),      # LONG 2 unique
+        _sig(Direction.SHORT, "4H", source="bollinger"),    # SHORT 1 unique
+    ]
+    d = compose_entry(signals)
+    # long_score = (2+2) × 1.3 = 5.2, short_score = 5 (부스터 없음)
+    assert d.enter is True
+    assert d.direction == Direction.LONG
+    assert d.long_score == pytest.approx(4.0 * MULTI_SIGNAL_BOOST)
+    assert d.short_score == pytest.approx(5.0)
 
 
 # ============================================================

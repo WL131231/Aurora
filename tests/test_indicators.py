@@ -1053,3 +1053,77 @@ def test_booster_bull_alignment_short_signal_penalizes() -> None:
 def test_booster_bear_alignment_long_signal_penalizes() -> None:
     """alignment=-1 (bear) + long 신호 → ×0.5 (반대)."""
     assert dual_supertrend_booster(-1, "long") == pytest.approx(0.5)
+
+
+# ============================================================
+# detect_pivots — 빈 결과 경로 (line 462)
+# ============================================================
+
+
+def test_detect_pivots_flat_series_returns_empty() -> None:
+    """high == low (flat) → 전 바 동시 rolling max/min → 피벗 없음 (line 462)."""
+    df = pd.DataFrame({
+        "high": [100.0] * 30,
+        "low":  [100.0] * 30,
+    })
+    result = detect_pivots(df, length=5)
+    assert result.empty
+
+
+# ============================================================
+# dual_supertrend_alignment — mixed 정렬 (line 988)
+# ============================================================
+
+
+def test_dual_alignment_mixed_returns_zero() -> None:
+    """fast ST=bull, slow ST=bear (mixed) → 0 (line 988).
+
+    급락(200→80) 후 소폭 반등(→84): tight fast ST 는 bear line(80.5) 돌파해 bull 전환,
+    wide slow ST 는 bear line(85) 미달로 bear 유지 → 혼합 정렬 → 0.
+    """
+    closes = list(np.linspace(200.0, 80.0, 50)) + list(np.linspace(80.0, 84.0, 5))
+    df = _make_ohlcv_trend(closes, offset=0.5)
+    result = dual_supertrend_alignment(
+        df, period_fast=7, mult_fast=0.5, period_slow=7, mult_slow=5.0
+    )
+    assert result == 0
+
+
+# ============================================================
+# harmonic_pattern — spec 루프 내 BC·AB=CD 실패 (lines 685, 688, 718)
+# ============================================================
+
+
+def test_harmonic_c_point_out_of_range_returns_none() -> None:
+    """abc (C-point 비율) 범위 밖 → None (line 671 커버).
+
+    X=100(low), A=120(high), B=110(low), C=111(high) → abc≈0.12 < 0.344(min×0.9).
+    """
+    pts = [105.0, 100.0, 120.0, 110.0, 111.0, 90.0, 95.0]
+    df = _zigzag_ohlc(pts, between=15, spread=0.1)
+    result = harmonic_pattern(df, pivot_length=8, tolerance=0.10)
+    assert result is None
+
+
+def test_harmonic_bc_fails_returns_none() -> None:
+    """B·D 비율 통과 후 BC projection 실패 → None (line 685·682·718 커버).
+
+    X=100(low), A=130(high), B=108(low), C=116(high), D=91.84(low).
+    butterfly: xab≈0.735 (통과), xad≈1.27 (통과), bcd≈2.97 (실패).
+    """
+    pts = [105.0, 100.0, 130.0, 108.0, 116.0, 91.84, 95.0]
+    df = _zigzag_ohlc(pts, between=15, spread=0.1)
+    result = harmonic_pattern(df, pivot_length=8, tolerance=0.10)
+    assert result is None
+
+
+def test_harmonic_abcd_fails_returns_none() -> None:
+    """B·D·BC 비율 통과 후 AB=CD 실패 → None (line 688·682·718 커버).
+
+    X=100(low), A=130(high), B=106.42(low), C=118(high), D=91.84(low).
+    butterfly: xab≈0.787 (통과), xad≈1.27 (통과), bcd≈2.24 (통과), abcd≈1.11 (실패).
+    """
+    pts = [105.0, 100.0, 130.0, 106.42, 118.0, 91.84, 95.0]
+    df = _zigzag_ohlc(pts, between=15, spread=0.1)
+    result = harmonic_pattern(df, pivot_length=8, tolerance=0.10)
+    assert result is None

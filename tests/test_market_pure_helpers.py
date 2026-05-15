@@ -1,6 +1,6 @@
-"""market 순수 헬퍼 단위 테스트 — ratios_aggregator + coinalyze.
+"""market 순수 헬퍼 단위 테스트 — ratios_aggregator + coinalyze + exchange symbol_for.
 
-_ratio_to_long_pct / _interval_to_seconds / _coin_from_symbol
+_ratio_to_long_pct / _interval_to_seconds / _coin_from_symbol / symbol_for (거래소별)
 외부 네트워크/API 호출 없음 — 합성 입력만 사용.
 
 담당: 정용우
@@ -129,3 +129,46 @@ def test_coin_from_symbol_eth_spot_pair_unsupported():
 def test_coin_from_symbol_mixed_case_eth():
     """대소문자 혼합 — eth → ETH 매칭."""
     assert _coin_from_symbol("Eth/USDT:USDT") == "ETH"
+
+
+# ── symbol_for (거래소별 override) ───────────────────────────────────────
+
+
+def test_binance_symbol_for_default_usdt_suffix():
+    """BinanceMarketData (base default) → '{coin}USDT' 형식."""
+    from aurora.market.exchanges.binance import BinanceMarketData
+    inst = BinanceMarketData()
+    assert inst.symbol_for("BTC") == "BTCUSDT"
+    assert inst.symbol_for("ETH") == "ETHUSDT"
+
+
+def test_hyperliquid_market_data_symbol_for_returns_coin():
+    """HyperliquidMarketData → coin 그대로 반환 (HL 측 표기 본질)."""
+    from aurora.market.exchanges.hyperliquid import HyperliquidMarketData
+    inst = HyperliquidMarketData()
+    assert inst.symbol_for("BTC") == "BTC"
+    assert inst.symbol_for("ETH") == "ETH"
+
+
+def test_okx_market_data_symbol_for_returns_swap_format():
+    """OkxMarketData → '{coin}-USDT-SWAP' 형식 (OKX perp 표기 본질)."""
+    from aurora.market.exchanges.okx import OkxMarketData
+    inst = OkxMarketData()
+    assert inst.symbol_for("BTC") == "BTC-USDT-SWAP"
+    assert inst.symbol_for("ETH") == "ETH-USDT-SWAP"
+
+
+def test_hyperliquid_series_provider_symbol_for_returns_coin():
+    """HyperliquidSeriesProvider → coin 그대로 반환."""
+    from aurora.market.exchanges.hyperliquid_series import HyperliquidSeriesProvider
+    inst = HyperliquidSeriesProvider()
+    assert inst.symbol_for("BTC") == "BTC"
+    assert inst.symbol_for("ETH") == "ETH"
+
+
+def test_okx_series_provider_symbol_for_returns_swap_format():
+    """OkxSeriesProvider → '{coin}-USDT-SWAP' 형식."""
+    from aurora.market.exchanges.okx_series import OkxSeriesProvider
+    inst = OkxSeriesProvider()
+    assert inst.symbol_for("BTC") == "BTC-USDT-SWAP"
+    assert inst.symbol_for("ETH") == "ETH-USDT-SWAP"

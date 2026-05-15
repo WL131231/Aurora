@@ -1152,3 +1152,62 @@ def test_compute_diagnostic_line_sufficient_data_contains_segments() -> None:
     assert "EMA480@1H" in result
     assert "BB@1H" in result
     assert "RSI@1H" in result
+
+
+# ============================================================
+# _categorize_source
+# ============================================================
+
+
+def test_categorize_source_ema_prefix() -> None:
+    """'ema_' prefix → 'EMA' 카테고리."""
+    from aurora.interfaces.bot_instance import _categorize_source
+    assert _categorize_source("ema_touch_200") == "EMA"
+
+
+def test_categorize_source_rsi_prefix() -> None:
+    """'rsi_' prefix → 'RSI' 카테고리."""
+    from aurora.interfaces.bot_instance import _categorize_source
+    assert _categorize_source("rsi_div_regular_bull") == "RSI"
+
+
+def test_categorize_source_bollinger_prefix() -> None:
+    """'bollinger_' prefix → 'BB' 카테고리."""
+    from aurora.interfaces.bot_instance import _categorize_source
+    assert _categorize_source("bollinger_reversal_upper") == "BB"
+
+
+def test_categorize_source_ma_cross_prefix() -> None:
+    """'ma_cross_' prefix → 'MA' 카테고리."""
+    from aurora.interfaces.bot_instance import _categorize_source
+    assert _categorize_source("ma_cross_golden") == "MA"
+
+
+def test_categorize_source_ichimoku_prefix() -> None:
+    """'ichimoku_' prefix → 'Ichimoku' 카테고리."""
+    from aurora.interfaces.bot_instance import _categorize_source
+    assert _categorize_source("ichimoku_cloud_upper") == "Ichimoku"
+
+
+def test_categorize_source_harmonic_prefix() -> None:
+    """'harmonic_' prefix → 'Harmonic' 카테고리."""
+    from aurora.interfaces.bot_instance import _categorize_source
+    assert _categorize_source("harmonic_bat_long") == "Harmonic"
+
+
+def test_categorize_source_zone_2468_prefix() -> None:
+    """'zone_2468_' prefix → '가격 매매' 카테고리."""
+    from aurora.interfaces.bot_instance import _categorize_source
+    assert _categorize_source("zone_2468_short") == "가격 매매"
+
+
+def test_categorize_source_unknown_returns_none() -> None:
+    """매핑 없는 source → None (UI 표시 X)."""
+    from aurora.interfaces.bot_instance import _categorize_source
+    assert _categorize_source("unknown_signal") is None
+
+
+def test_categorize_source_empty_string_returns_none() -> None:
+    """빈 문자열 → None (어떤 prefix 도 매칭 X)."""
+    from aurora.interfaces.bot_instance import _categorize_source
+    assert _categorize_source("") is None

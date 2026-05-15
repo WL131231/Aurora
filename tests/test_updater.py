@@ -292,3 +292,101 @@ def test_exe_path_returns_resolved_path():
     from pathlib import Path
     expected = Path(sys.executable).resolve()
     assert updater._exe_path() == expected
+
+
+# ============================================================
+# _check_and_download_sync — 분기별 early exit
+# ============================================================
+
+
+def test_check_sync_noop_when_not_frozen():
+    """_is_frozen() False (dev/pytest) → 즉시 return, fetch_latest_release 호출 X."""
+    with patch("aurora.updater._is_frozen", return_value=False), \
+         patch("aurora.updater.fetch_latest_release") as mock_fetch:
+        updater._check_and_download_sync()
+    mock_fetch.assert_not_called()
+
+
+def test_check_sync_noop_when_not_windows():
+    """_is_frozen() True 이지만 platform != Windows → return."""
+    with patch("aurora.updater._is_frozen", return_value=True), \
+         patch("aurora.updater.platform.system", return_value="Darwin"), \
+         patch("aurora.updater.fetch_latest_release") as mock_fetch:
+        updater._check_and_download_sync()
+    mock_fetch.assert_not_called()
+
+
+def test_check_sync_returns_on_fetch_none():
+    """fetch_latest_release() None → is_newer 호출 X."""
+    with patch("aurora.updater._is_frozen", return_value=True), \
+         patch("aurora.updater.platform.system", return_value="Windows"), \
+         patch("aurora.updater.fetch_latest_release", return_value=None), \
+         patch("aurora.updater.is_newer") as mock_newer:
+        updater._check_and_download_sync()
+    mock_newer.assert_not_called()
+
+
+def test_check_sync_returns_when_already_latest():
+    """is_newer() False (현재 최신) → download_update 호출 X."""
+    release = {"tag_name": "v0.1.0", "assets": []}
+    with patch("aurora.updater._is_frozen", return_value=True), \
+         patch("aurora.updater.platform.system", return_value="Windows"), \
+         patch("aurora.updater.fetch_latest_release", return_value=release), \
+         patch("aurora.updater.is_newer", return_value=False), \
+         patch("aurora.updater.download_update") as mock_dl:
+        updater._check_and_download_sync()
+    mock_dl.assert_not_called()
+
+
+def test_check_sync_returns_when_asset_not_found():
+    """asset 목록에 해당 파일 없음 → download_update 호출 X."""
+    release = {"tag_name": "v9.9.9", "assets": [{"name": "other.exe", "browser_download_url": "http://x"}]}
+    with patch("aurora.updater._is_frozen", return_value=True), \
+         patch("aurora.updater.platform.system", return_value="Windows"), \
+         patch("aurora.updater.fetch_latest_release", return_value=release), \
+         patch("aurora.updater.is_newer", return_value=True), \
+         patch("aurora.updater.download_update") as mock_dl:
+        updater._check_and_download_sync()
+    mock_dl.assert_not_called()
+
+
+def test_check_sync_returns_when_target_already_exists(tmp_path):
+    """target .new 파일이 이미 있음 → download_update 호출 X (이전 다운로드 완료)."""
+    asset_name = next(iter(updater.ASSET_NAME.values()))  # Windows 에셋 이름
+    release = {
+        "tag_name": "v9.9.9",
+        "assets": [{"name": asset_name, "browser_download_url": "http://x/a.exe"}],
+    }
+    exe = tmp_path / "aurora.exe"
+    exe.touch()
+    target = exe.with_suffix(".exe.new")
+    target.touch()  # 이미 존재
+
+    with patch("aurora.updater._is_frozen", return_value=True), \
+         patch("aurora.updater.platform.system", return_value="Windows"), \
+         patch("aurora.updater.fetch_latest_release", return_value=release), \
+         patch("aurora.updater.is_newer", return_value=True), \
+         patch("aurora.updater._exe_path", return_value=exe), \
+         patch("aurora.updater.download_update") as mock_dl:
+        updater._check_and_download_sync()
+    mock_dl.assert_not_called()
+
+
+def test_check_sync_calls_download_when_all_conditions_met(tmp_path):
+    """조건 모두 충족 → download_update 호출됨."""
+    asset_name = next(iter(updater.ASSET_NAME.values()))
+    release = {
+        "tag_name": "v9.9.9",
+        "assets": [{"name": asset_name, "browser_download_url": "http://x/a.exe"}],
+    }
+    exe = tmp_path / "aurora.exe"
+    exe.touch()
+
+    with patch("aurora.updater._is_frozen", return_value=True), \
+         patch("aurora.updater.platform.system", return_value="Windows"), \
+         patch("aurora.updater.fetch_latest_release", return_value=release), \
+         patch("aurora.updater.is_newer", return_value=True), \
+         patch("aurora.updater._exe_path", return_value=exe), \
+         patch("aurora.updater.download_update", return_value=True) as mock_dl:
+        updater._check_and_download_sync()
+    mock_dl.assert_called_once()
